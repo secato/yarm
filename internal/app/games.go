@@ -389,7 +389,6 @@ func (s *GamesScreen) renderDetail(e GameEntry, env Env) string {
 	b.WriteString(env.Styles.Faint.Render(truncate(e.Root, s.detailWidth-6)))
 	b.WriteString("\n\n")
 
-	exes := e.PlayableExes()
 	switch {
 	case e.ScanErr != nil:
 		b.WriteString(env.Styles.Bad.Render("Could not scan this folder"))
@@ -400,25 +399,31 @@ func (s *GamesScreen) renderDetail(e GameEntry, env Env) string {
 		b.WriteString("\n")
 		b.WriteString(env.Styles.Faint.Render(
 			"ReShade supports Windows executables only."))
-	case len(exes) == 0:
+	case len(e.Groups) == 0:
 		b.WriteString(env.Styles.Faint.Render("No executables found."))
 	default:
-		b.WriteString(env.Styles.Subtitle.Render("Executables"))
-		b.WriteString("\n")
-		for _, ex := range exes {
-			mark := "  "
-			switch {
-			case ex.Installed != nil:
-				mark = env.Styles.Good.Render("✓ ")
-			case ex.Unmanaged:
-				mark = env.Styles.Warn.Render("⚠ ")
+		multi := len(e.Groups) > 1
+		for i, grp := range e.Groups {
+			if i > 0 {
+				b.WriteString("\n")
 			}
-			b.WriteString(mark + truncate(ex.Path, s.detailWidth-10) + "\n")
-			b.WriteString(env.Styles.Faint.Render(
-				fmt.Sprintf("    %s · %s", ex.Arch, ex.API)) + "\n")
-			if ex.Unmanaged {
+			if multi && grp.Dir != "" {
+				b.WriteString(env.Styles.Faint.Render(grp.Dir + "/"))
+				b.WriteString("\n")
+			}
+			b.WriteString(env.Styles.Subtitle.Render("ReShade"))
+			b.WriteString("\n")
+			writeReShadeStatus(&b, grp, env, "press enter, then m to track it")
+			b.WriteString("\n")
+			b.WriteString(env.Styles.Subtitle.Render("Executables"))
+			b.WriteString("\n")
+			for _, ex := range grp.Exes {
+				if ex.Skipped {
+					continue
+				}
+				b.WriteString(truncate(ex.Path, s.detailWidth-6) + "\n")
 				b.WriteString(env.Styles.Faint.Render(
-					"    found, untracked — press enter, then m") + "\n")
+					fmt.Sprintf("  %s · %s", ex.Arch, apiLabel(ex.API))) + "\n")
 			}
 		}
 	}

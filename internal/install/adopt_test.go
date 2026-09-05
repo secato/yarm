@@ -10,36 +10,6 @@ import (
 	"github.com/secato/yarm/internal/state"
 )
 
-func TestDetectUnmanagedRequiresBothDLLAndINI(t *testing.T) {
-	f := newFixture(t)
-	f.GameFile("Game/eldenring.exe", "the game")
-
-	if DetectUnmanaged(f.GameDir, "Game/eldenring.exe") {
-		t.Error("nothing here yet; DetectUnmanaged() should be false")
-	}
-
-	f.GameFile("Game/dxgi.dll", "dll body")
-	if DetectUnmanaged(f.GameDir, "Game/eldenring.exe") {
-		t.Error("a DLL with no ReShade.ini should not count as ReShade")
-	}
-
-	f.GameFile("Game/"+ININame, "[GENERAL]\n")
-	if !DetectUnmanaged(f.GameDir, "Game/eldenring.exe") {
-		t.Error("a known DLL plus ReShade.ini should be detected")
-	}
-}
-
-func TestDetectUnmanagedAtGameRoot(t *testing.T) {
-	f := newFixture(t)
-	f.GameFile("Ravenswatch.exe", "the game")
-	f.GameFile("dxgi.dll", "dll body")
-	f.GameFile(ININame, "[GENERAL]\n")
-
-	if !DetectUnmanaged(f.GameDir, "Ravenswatch.exe") {
-		t.Error("an exe at the game root should still be detected")
-	}
-}
-
 func TestScanUnmanagedFull(t *testing.T) {
 	f := newFixture(t)
 	f.GameFile("Game/eldenring.exe", "the game")
@@ -111,6 +81,23 @@ func TestScanUnmanagedNotFound(t *testing.T) {
 
 	if _, ok := ScanUnmanaged(f.GameDir, exe); ok {
 		t.Error("ok = true for a directory with nothing ReShade-shaped in it")
+	}
+}
+
+// An exe at the game root (no subdirectory) must still be detected.
+func TestScanUnmanagedAtGameRoot(t *testing.T) {
+	f := newFixture(t)
+	f.GameFile("Ravenswatch.exe", "the game")
+	f.GameFile("dxgi.dll", "dll body")
+	f.GameFile(ININame, "[GENERAL]\n")
+
+	exe := game.Executable{Path: "Ravenswatch.exe"}
+	c, ok := ScanUnmanaged(f.GameDir, exe)
+	if !ok {
+		t.Fatal("ok = false, want true")
+	}
+	if c.DLLName != "dxgi.dll" {
+		t.Errorf("DLLName = %q, want dxgi.dll", c.DLLName)
 	}
 }
 

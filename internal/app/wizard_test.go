@@ -10,6 +10,7 @@ import (
 	"github.com/secato/yarm/internal/artifacts"
 	"github.com/secato/yarm/internal/game"
 	"github.com/secato/yarm/internal/install"
+	"github.com/secato/yarm/internal/state"
 )
 
 func wizardEnv() Env {
@@ -87,6 +88,51 @@ func TestWizardPreselectsConfiguredDefaults(t *testing.T) {
 
 	if !s.packages.selected["sweetfx-by-ceejay-dk"] {
 		t.Error("a configured default package (given as an alias) should be preselected")
+	}
+}
+
+// Re-opening the wizard on an already-installed executable must edit what
+// is there — flavor, version, DLL and packages preselected from the
+// recorded install — rather than silently resetting to the configured
+// defaults.
+func TestWizardEditingExistingInstallPreselectsWhatIsThere(t *testing.T) {
+	entry := sampleGameEntry()
+	entry.Exes[0].Installed = &state.Install{
+		Exe:      "Game/eldenring.exe",
+		ReShade:  state.ReShadeInfo{Version: "6.7.3", Flavor: "normal", DLL: "dxgi.dll"},
+		Packages: []string{"sweetfx-by-ceejay-dk"},
+	}
+
+	deps := fakeDeps()
+	deps.Defaults.Packages = nil // would preselect nothing if defaults were used instead
+	s := loadWizard(t, entry, 0, deps)
+
+	if s.flavor != install.FlavorNormal {
+		t.Errorf("flavor = %q, want normal (from the existing install, not the addon default)", s.flavor)
+	}
+	if got := s.data.Versions[s.versionCursor.Cursor()].Version; got != "6.7.3" {
+		t.Errorf("preselected version = %q, want 6.7.3 (the recorded one, not latest)", got)
+	}
+	if !s.packages.selected["sweetfx-by-ceejay-dk"] {
+		t.Error("the existing install's package should be preselected")
+	}
+	if got := s.Title(); !strings.Contains(got, "update ReShade") {
+		t.Errorf("Title() = %q, want it to say \"update\" while editing an existing install", got)
+	}
+}
+
+// An adopted install's version is recorded as "unknown (adopted)", which
+// never matches a catalog entry — the version step must fall back to
+// latest rather than leaving the cursor on nothing.
+func TestWizardEditingAdoptedInstallFallsBackToLatestVersion(t *testing.T) {
+	entry := sampleGameEntry()
+	entry.Exes[0].Installed = &state.Install{
+		ReShade: state.ReShadeInfo{Version: "unknown (adopted)", Flavor: "addon", DLL: "dxgi.dll"},
+	}
+	s := loadWizard(t, entry, 0, fakeDeps())
+
+	if got := s.data.Versions[s.versionCursor.Cursor()]; !got.Latest {
+		t.Errorf("preselected version = %+v, want the latest one", got)
 	}
 }
 

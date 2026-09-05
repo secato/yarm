@@ -50,9 +50,12 @@ func (c AdoptCandidate) FileCount() int {
 	return n + len(c.ShaderFiles) + len(c.TextureFiles) + len(c.AddonFiles)
 }
 
-// exeDirOf returns an executable's directory, game-relative and slash
-// separated, or "" when it sits at the game root.
-func exeDirOf(exePath string) string {
+// ExeDir returns an executable's directory, game-relative and slash
+// separated, or "" when it sits at the game root. ReShade intercepts by
+// directory (whichever executable loads the proxy DLL sitting beside it),
+// so this is also how callers group executables that share one ReShade
+// install.
+func ExeDir(exePath string) string {
 	dir := path.Dir(filepath.ToSlash(exePath))
 	if dir == "." {
 		return ""
@@ -60,31 +63,15 @@ func exeDirOf(exePath string) string {
 	return dir
 }
 
-// DetectUnmanaged reports, cheaply, whether root/exePath's directory holds
-// an apparent ReShade install: one of the known proxy DLLs together with
-// ReShade.ini. Requiring both is what tells a real (if unmanaged) install
-// apart from a coincidentally named DLL with nothing to do with ReShade.
-//
-// This is meant for a fast per-executable check while listing games —
-// call Scan for the full detail Adopt needs.
-func DetectUnmanaged(root, exePath string) bool {
-	dir := filepath.Join(root, filepath.FromSlash(exeDirOf(exePath)))
-	if _, err := os.Stat(filepath.Join(dir, ININame)); err != nil {
-		return false
-	}
-	for _, name := range knownDLLNames {
-		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
-			return true
-		}
-	}
-	return false
-}
-
 // ScanUnmanaged gathers everything Adopt needs to record. ok is false when
-// root/exe.Path does not actually look like a ReShade install (the same
-// requirement DetectUnmanaged checks).
+// root/exe.Path's directory does not actually look like a ReShade install:
+// both a known proxy DLL and ReShade.ini are required, which is what tells
+// a real (if unmanaged) install apart from a coincidentally named DLL with
+// nothing to do with ReShade. The ReShade.ini check is a single stat call,
+// so this is cheap to call even for a directory with nothing ReShade-shaped
+// in it at all.
 func ScanUnmanaged(root string, exe game.Executable) (candidate AdoptCandidate, ok bool) {
-	exeDir := exeDirOf(exe.Path)
+	exeDir := ExeDir(exe.Path)
 	dir := filepath.Join(root, filepath.FromSlash(exeDir))
 
 	if _, err := os.Stat(filepath.Join(dir, ININame)); err != nil {
@@ -142,7 +129,7 @@ func ScanUnmanaged(root string, exe game.Executable) (candidate AdoptCandidate, 
 // recorded as "unknown"; that is display-only and does not affect
 // uninstall, which works from the recorded file hashes, not the version.
 func Adopt(stateDir string, g game.Game, exe game.Executable, candidate AdoptCandidate) (state.Install, error) {
-	exeDir := exeDirOf(exe.Path)
+	exeDir := ExeDir(exe.Path)
 
 	var files []state.File
 	add := func(rel string, origin state.Origin) error {

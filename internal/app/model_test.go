@@ -419,12 +419,13 @@ func TestAdoptConfirmFlow(t *testing.T) {
 		}
 	}
 
+	exes := []Executable{{
+		Executable: game.Executable{Path: "eldenring.exe", Arch: game.ArchX64, API: game.APID3D12},
+	}}
 	entry := GameEntry{
-		Game: game.Game{ID: "manual:x", Name: "Manual Game", Provider: "manual", Root: dir},
-		Exes: []Executable{{
-			Executable: game.Executable{Path: "eldenring.exe", Arch: game.ArchX64, API: game.APID3D12},
-			Unmanaged:  true,
-		}},
+		Game:   game.Game{ID: "manual:x", Name: "Manual Game", Provider: "manual", Root: dir},
+		Exes:   exes,
+		Groups: groupByFolder(dir, exes),
 	}
 
 	m := New(NewGamesScreen(fakeLoader{entries: []GameEntry{entry}}, fakeDeps(), false))

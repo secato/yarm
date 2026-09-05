@@ -11,6 +11,7 @@ import (
 	"github.com/secato/yarm/internal/artifacts"
 	"github.com/secato/yarm/internal/catalog"
 	"github.com/secato/yarm/internal/install"
+	"github.com/secato/yarm/internal/state"
 )
 
 // wizardStep is one page of the install wizard, in the order §6.1 lists
@@ -87,6 +88,12 @@ type WizardScreen struct {
 	deps     Deps
 	targetOS artifacts.TargetOS
 
+	// existing is the install already recorded for the preselected
+	// executable, if any — the wizard starts every step's selection from
+	// it instead of the configured defaults, so re-running the wizard
+	// edits what's there rather than silently resetting it.
+	existing *state.Install
+
 	step    wizardStep
 	loading bool
 	loadErr string
@@ -115,12 +122,24 @@ type WizardScreen struct {
 
 // NewWizardScreen returns a wizard for entry, with preselected marking
 // which executable (by index into entry.PlayableExes()) was highlighted
-// when the wizard was opened.
+// when the wizard was opened. When that executable already has a recorded
+// install, the wizard edits it: every step starts from what is already
+// installed (flavor, version, packages, add-ons) instead of the configured
+// defaults, so running the wizard again to add an add-on or switch flavor
+// does not silently reset everything else.
 func NewWizardScreen(entry GameEntry, preselected int, deps Deps) *WizardScreen {
 	exes := entry.PlayableExes()
 
+	var existing *state.Install
+	if preselected >= 0 && preselected < len(exes) {
+		existing = exes[preselected].Installed
+	}
+
 	flavor := install.FlavorAddon
-	if deps.Defaults.ReshadeFlavor == string(install.FlavorNormal) {
+	switch {
+	case existing != nil:
+		flavor = install.Flavor(existing.ReShade.Flavor)
+	case deps.Defaults.ReshadeFlavor == string(install.FlavorNormal):
 		flavor = install.FlavorNormal
 	}
 
@@ -129,6 +148,7 @@ func NewWizardScreen(entry GameEntry, preselected int, deps Deps) *WizardScreen 
 		entry:     entry,
 		deps:      deps,
 		targetOS:  artifacts.CurrentTargetOS(),
+		existing:  existing,
 		loading:   true,
 		exes:      exes,
 		exeCursor: newCursorList(len(exes), preselected),
@@ -150,7 +170,11 @@ func (s *WizardScreen) Init() tea.Cmd {
 
 // Title implements Screen.
 func (s *WizardScreen) Title() string {
-	return fmt.Sprintf("install ReShade — %d %s", s.step+1, s.step.label())
+	verb := "install"
+	if s.existing != nil {
+		verb = "update"
+	}
+	return fmt.Sprintf("%s ReShade — %d %s", verb, s.step+1, s.step.label())
 }
 
 // KeyBindings implements Screen.
@@ -206,9 +230,18 @@ func (s *WizardScreen) Update(msg tea.Msg, env Env) (Screen, tea.Cmd) {
 		s.loading = false
 		s.data = msg.data
 		s.packages = newMultiSelect(s.data.PackagesWithCustom(s.deps.CacheStatus))
-		s.preselectDefaultPackages()
+		versionIndex := s.indexOfLatest()
+		if s.existing != nil {
+			s.preselectExistingIDs(s.packages, s.existing.Packages)
+			versionIndex = s.indexOfVersion(s.existing.ReShade.Version)
+		} else {
+			s.preselectDefaultPackages()
+		}
 		s.addons = newMultiSelect(s.data.AddonsWithCustom(s.deps.CacheStatus))
-		s.versionCursor = newCursorList(len(s.data.Versions), s.indexOfLatest())
+		if s.existing != nil {
+			s.preselectExistingIDs(s.addons, s.existing.Addons)
+		}
+		s.versionCursor = newCursorList(len(s.data.Versions), versionIndex)
 		s.dllCursor = newCursorList(len(dllOptions), s.recommendedDLLIndex())
 		switch {
 		case msg.err != nil:
@@ -237,6 +270,16 @@ func (s *WizardScreen) preselectDefaultPackages() {
 	}
 }
 
+// preselectExistingIDs marks every id from a recorded install as selected,
+// on top of whatever newMultiSelect already preselected via Required. ids
+// are already canonical catalog ids (recorded verbatim from a prior
+// buildRequest), unlike the aliases config.yaml allows for defaults.
+func (s *WizardScreen) preselectExistingIDs(m multiSelect, ids []string) {
+	for _, id := range ids {
+		m.selected[id] = true
+	}
+}
+
 // indexOfLatest returns the position of the version marked Latest, or 0.
 func (s *WizardScreen) indexOfLatest() int {
 	for i, v := range s.data.Versions {
@@ -247,14 +290,29 @@ func (s *WizardScreen) indexOfLatest() int {
 	return 0
 }
 
-// recommendedDLLIndex returns the dllOptions index matching the selected
-// exe's guessed API, or 0 (dxgi.dll) when there is no safe recommendation.
-func (s *WizardScreen) recommendedDLLIndex() int {
-	exe, ok := s.selectedExe()
-	if !ok {
-		return 0
+// indexOfVersion returns the position of version in the catalog list, or
+// the latest version's when it is no longer listed (an adopted install's
+// version is recorded as "unknown (adopted)", which never matches).
+func (s *WizardScreen) indexOfVersion(version string) int {
+	for i, v := range s.data.Versions {
+		if v.Version == version {
+			return i
+		}
 	}
-	rec := exe.API.RecommendedDLL()
+	return s.indexOfLatest()
+}
+
+// recommendedDLLIndex returns the dllOptions index to preselect: the
+// recorded DLL when editing an existing install, otherwise a guess from
+// the selected exe's API, or 0 (dxgi.dll) when there is no safe
+// recommendation.
+func (s *WizardScreen) recommendedDLLIndex() int {
+	rec := ""
+	if s.existing != nil {
+		rec = s.existing.ReShade.DLL
+	} else if exe, ok := s.selectedExe(); ok {
+		rec = exe.API.RecommendedDLL()
+	}
 	if rec == "" {
 		return 0
 	}
@@ -501,7 +559,7 @@ func (s *WizardScreen) viewExe(b *strings.Builder, env Env) {
 		}
 		status := ""
 		if e.Installed != nil {
-			status = "  ✓ installed"
+			status = fmt.Sprintf("  ✓ %s (%s)", e.Installed.ReShade.Version, e.Installed.ReShade.Flavor)
 		}
 		line := fmt.Sprintf("%s%s  %s · %s%s", marker, e.Path, e.Arch, e.API, status)
 		if i == s.exeCursor.Cursor() {
@@ -657,7 +715,11 @@ func (s *WizardScreen) viewReview(b *strings.Builder, env Env) {
 		b.WriteString("\n\n")
 	}
 
-	b.WriteString(env.Styles.Accent.Render("enter to install"))
+	verb := "install"
+	if s.existing != nil {
+		verb = "update"
+	}
+	b.WriteString(env.Styles.Accent.Render("enter to " + verb))
 }
 
 // addonsForDownload returns the selected add-on ids, or none when the

@@ -14,25 +14,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   executable yarm did not put there itself — installed by hand, or by
   another tool — the games list and detail screen now say so ("found,
   untracked") instead of showing it as plain uninstalled.
-  - `internal/install/adopt.go`: `DetectUnmanaged` is the cheap per-executable
-    check run while loading games; `ScanUnmanaged` gathers the full detail
-    (DLL name, shader/texture/add-on files, `d3dcompiler_47.dll` presence);
-    `Adopt` hashes every file found and writes an `installs.json` entry for
-    it — nothing on disk changes, only the manifest gains an entry, so a
-    later update or uninstall through yarm works exactly as if yarm had
-    installed it in the first place. Adopted shader/texture/add-on files are
-    recorded under a new `state.OriginAdopted` origin, since their catalog
-    provenance (which package or add-on they came from) genuinely is not
-    known; the ReShade version is recorded as `"unknown (adopted)"` for the
-    same reason — both display-only, and neither affects uninstall, which
-    works from the recorded file hashes, not the version.
-  - `GameDetailScreen`: pressing `m` on an unmanaged executable opens a
-    confirm dialog describing what was found (DLL name, file count), then
-    records it and shows a result screen; the games list reloads afterward
-    so the newly tracked install shows up immediately.
+  - `internal/install/adopt.go`: `ScanUnmanaged` probes a directory for a
+    proxy DLL plus `ReShade.ini` and gathers the full detail (DLL name,
+    shader/texture/add-on files, `d3dcompiler_47.dll` presence); `Adopt`
+    hashes every file found and writes an `installs.json` entry for it —
+    nothing on disk changes, only the manifest gains an entry, so a later
+    update or uninstall through yarm works exactly as if yarm had
+    installed it in the first place. Adopted shader/texture/add-on files
+    are recorded under a new `state.OriginAdopted` origin, since their
+    catalog provenance (which package or add-on they came from) genuinely
+    is not known; the ReShade version is recorded as `"unknown (adopted)"`
+    for the same reason — both display-only, and neither affects
+    uninstall, which works from the recorded file hashes, not the version.
+  - `GameDetailScreen`: pressing `m` opens a confirm dialog describing what
+    was found (DLL name, file count), then records it and shows a result
+    screen; the games list reloads afterward so the newly tracked install
+    shows up immediately.
   - Proven with a byte-identical round-trip test: adopting an install, then
     uninstalling it through yarm, leaves the game directory exactly as it
     was before the manual install ever happened.
+
+- Folder-grouped ReShade status, replacing a redundant per-executable one:
+  ReShade intercepts by directory (the proxy DLL sits beside whichever
+  executable loads it), so a folder with several executables — e.g.
+  ELDEN RING's `Game/` holding both `eldenring.exe` and the EAC launcher
+  stub `start_protected_game.exe` — was showing the same "found,
+  untracked" line once per executable, and a tracked install's version,
+  flavor, packages and add-ons were nowhere visible at all.
+  - `internal/app/games_data.go`: new `FolderGroup` groups a game's
+    executables by directory and carries the one ReShade status (recorded
+    install, unmanaged finding, or neither) that applies to all of them;
+    `GameEntry.Groups` replaces the per-executable `Unmanaged` flag.
+  - Both the games list's side panel and `GameDetailScreen` now show a
+    "ReShade" section — version, flavor, DLL, package and add-on ids, or
+    the unmanaged DLL name and a hint to press `m` — *before* the
+    "Executables" list, per request, with each executable showing just its
+    path, architecture and API (now rendered as "DirectX 12" rather than
+    the raw `d3d12` tag).
+  - `m` (adopt) now ties the install to the folder's primary executable —
+    the first one not flagged as an installer/launcher/crash handler —
+    rather than whichever executable happened to be highlighted, so
+    pressing it on the EAC stub still records the install against the
+    actual game executable.
+
+- Edit an existing ReShade install: re-running the wizard (`i`, now
+  labeled "update ReShade" once something is tracked) on an already-
+  installed executable used to always start from the configured defaults —
+  normal/addon flavor, default packages — silently discarding whatever was
+  actually installed. It now starts every step (flavor, version, DLL,
+  packages, add-ons) from the recorded install instead, so installing
+  normal, then later switching to the add-on build and picking a few
+  add-ons, is just running the wizard again rather than an unsupported
+  path. The install engine already diffed and cleaned up a changed
+  package/add-on selection correctly (`docs/plan/05-install-engine.md`'s
+  upgrade handling); the missing piece was purely the wizard's own
+  starting selections. An adopted install's unrecorded version falls back
+  to the catalog's latest.
 
 - Reliability and friendliness polish (part of step 8; README/demo GIF are
   tracked separately):

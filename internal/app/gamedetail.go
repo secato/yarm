@@ -63,10 +63,16 @@ func (s *GameDetailScreen) Title() string { return "game — " + s.entry.Name }
 func (s *GameDetailScreen) KeyBindings() []key.Binding {
 	bindings := []key.Binding{showAllBinding, s.keys.Back}
 	if len(s.visibleExes()) > 0 {
-		bindings = append([]key.Binding{s.keys.Install, s.keys.Uninstall}, bindings...)
+		install := s.keys.Install
+		if exe, ok := s.selected(); ok && exe.Installed != nil {
+			install = key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "update ReShade"))
+		}
+		bindings = append([]key.Binding{install, s.keys.Uninstall}, bindings...)
 	}
-	if exe, ok := s.selected(); ok && exe.Unmanaged {
-		bindings = append([]key.Binding{s.keys.Manage}, bindings...)
+	if exe, ok := s.selected(); ok {
+		if grp, ok := s.entry.GroupFor(exe.Path); ok && grp.Unmanaged != nil {
+			bindings = append([]key.Binding{s.keys.Manage}, bindings...)
+		}
 	}
 	return bindings
 }
@@ -161,24 +167,29 @@ func (s *GameDetailScreen) startUninstall() (Screen, tea.Cmd) {
 	)
 }
 
-// startAdopt confirms, then records, the unmanaged install found next to
-// the highlighted executable.
+// startAdopt confirms, then records, the unmanaged install found in the
+// highlighted executable's folder. The install is tied to the folder's
+// primary executable, not necessarily the one highlighted — ReShade
+// intercepts by directory, so pressing m on a launcher stub sitting next
+// to the real game exe should still record the install against the game
+// exe, not the stub.
 func (s *GameDetailScreen) startAdopt() (Screen, tea.Cmd) {
 	exe, ok := s.selected()
-	if !ok || !exe.Unmanaged || s.deps.Adopter == nil {
+	if !ok || s.deps.Adopter == nil {
 		return s, nil
 	}
-
-	candidate, ok := install.ScanUnmanaged(s.entry.Root, exe.Executable)
-	if !ok {
+	grp, ok := s.entry.GroupFor(exe.Path)
+	if !ok || grp.Unmanaged == nil {
 		return s, nil
 	}
+	candidate := *grp.Unmanaged
+	target := grp.primaryExe()
 
-	exePath := exe.Path
-	game, executable := s.entry.Game, exe.Executable
+	exePath := target.Path
+	g, executable := s.entry.Game, target.Executable
 	action := Async(context.Background(),
 		func(ctx context.Context) (state.Install, error) {
-			return s.deps.Adopter.Adopt(game, executable, candidate)
+			return s.deps.Adopter.Adopt(g, executable, candidate)
 		},
 		func(in state.Install) tea.Msg {
 			return adoptDoneMsg{exePath: exePath, install: in}
@@ -203,11 +214,10 @@ func (s *GameDetailScreen) visibleExes() []Executable {
 
 func (s *GameDetailScreen) resize(env Env) {
 	const (
-		archW   = 8
-		apiW    = 9
-		statusW = 18
+		archW = 8
+		apiW  = 14 // room for "DirectX 12"-style labels
 	)
-	pathW := env.Width - archW - apiW - statusW - 8
+	pathW := env.Width - archW - apiW - 6
 	if pathW < 20 {
 		pathW = 20
 	}
@@ -216,11 +226,14 @@ func (s *GameDetailScreen) resize(env Env) {
 		{Title: "Executable", Width: pathW},
 		{Title: "Arch", Width: archW},
 		{Title: "API", Width: apiW},
-		{Title: "ReShade", Width: statusW},
 	})
 	s.table.SetWidth(env.Width)
 
-	h := env.Height - 4
+	// Everything printed above the table in View(): the root path, a blank
+	// line, the "ReShade" header, the section itself, a blank line, and
+	// the "Executables" header.
+	fixed := 5 + strings.Count(s.reshadeSection(env), "\n")
+	h := env.Height - fixed
 	if h < 3 {
 		h = 3
 	}
@@ -228,19 +241,33 @@ func (s *GameDetailScreen) resize(env Env) {
 
 	rows := make([]table.Row, 0, len(s.entry.Exes))
 	for _, e := range s.visibleExes() {
-		status := ""
-		if e.Installed != nil {
-			status = "✓ " + e.Installed.ReShade.Version + " " + e.Installed.ReShade.Flavor
-		} else if !e.API.Supported() {
-			status = "unsupported api"
-		}
 		name := e.Path
 		if e.Skipped {
 			name = "· " + name
 		}
-		rows = append(rows, table.Row{name, string(e.Arch), string(e.API), status})
+		rows = append(rows, table.Row{name, string(e.Arch), apiLabel(e.API)})
 	}
 	s.table.SetRows(rows)
+}
+
+// reshadeSection renders what is installed (or found) for every folder
+// this game's executables live in — shown before the executables table so
+// "what's actually installed" is the first thing the user sees, not
+// something they have to infer from a blank column.
+func (s *GameDetailScreen) reshadeSection(env Env) string {
+	var b strings.Builder
+	multi := len(s.entry.Groups) > 1
+	for i, grp := range s.entry.Groups {
+		if multi && grp.Dir != "" {
+			b.WriteString(env.Styles.Faint.Render(grp.Dir + "/"))
+			b.WriteString("\n")
+		}
+		writeReShadeStatus(&b, grp, env, "press m to track it")
+		if i < len(s.entry.Groups)-1 {
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
 }
 
 // View implements Screen.
@@ -249,24 +276,31 @@ func (s *GameDetailScreen) View(env Env) string {
 	b.WriteString(env.Styles.Faint.Render(s.entry.Root))
 	b.WriteString("\n\n")
 
-	if len(s.entry.Exes) == 0 {
-		switch {
-		case s.entry.ScanErr != nil:
-			b.WriteString(env.Styles.Bad.Render("Could not scan this folder"))
-			b.WriteString("\n")
-			b.WriteString(env.Styles.Faint.Render(friendlyError(s.entry.ScanErr)))
-		case s.entry.NativeBuild:
-			b.WriteString(env.Styles.Warn.Render("Native build"))
-			b.WriteString("\n")
-			b.WriteString(env.Styles.Faint.Render(
-				"This game ships a native Linux or macOS binary. ReShade proxies a DLL\n" +
-					"through the Windows loader, so it does not apply here."))
-		default:
-			b.WriteString(env.Styles.Faint.Render("No executables were found in this folder."))
-		}
+	switch {
+	case s.entry.ScanErr != nil:
+		b.WriteString(env.Styles.Bad.Render("Could not scan this folder"))
+		b.WriteString("\n")
+		b.WriteString(env.Styles.Faint.Render(friendlyError(s.entry.ScanErr)))
+		return b.String()
+	case s.entry.NativeBuild:
+		b.WriteString(env.Styles.Warn.Render("Native build"))
+		b.WriteString("\n")
+		b.WriteString(env.Styles.Faint.Render(
+			"This game ships a native Linux or macOS binary. ReShade proxies a DLL\n" +
+				"through the Windows loader, so it does not apply here."))
+		return b.String()
+	case len(s.entry.Exes) == 0:
+		b.WriteString(env.Styles.Faint.Render("No executables were found in this folder."))
 		return b.String()
 	}
 
+	b.WriteString(env.Styles.Subtitle.Render("ReShade"))
+	b.WriteString("\n")
+	b.WriteString(s.reshadeSection(env))
+	b.WriteString("\n")
+
+	b.WriteString(env.Styles.Subtitle.Render("Executables"))
+	b.WriteString("\n")
 	b.WriteString(s.table.View())
 
 	hidden := len(s.entry.Exes) - len(s.visibleExes())

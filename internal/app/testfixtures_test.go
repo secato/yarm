@@ -38,7 +38,7 @@ func sampleEntries() []GameEntry {
 		},
 	}
 
-	return []GameEntry{
+	return withGroups([]GameEntry{
 		{
 			Game: game.Game{
 				ID: "steam:870780", Name: "Control Ultimate Edition",
@@ -87,7 +87,19 @@ func sampleEntries() []GameEntry {
 				}},
 			},
 		},
+	})
+}
+
+// withGroups computes each entry's FolderGroups from its Exes, the way
+// LoadGames would — sampleEntries builds Exes directly rather than through
+// a real scan, so it has to do this itself. Safe against the fixture's
+// fake, nonexistent Root paths: the unmanaged-install probe's stat calls
+// simply fail and leave nothing to adopt.
+func withGroups(entries []GameEntry) []GameEntry {
+	for i := range entries {
+		entries[i].Groups = groupByFolder(entries[i].Root, entries[i].Exes)
 	}
+	return entries
 }
 
 // fakeWizardData supplies fixed catalog/custom-content data, so wizard
