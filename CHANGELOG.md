@@ -90,6 +90,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `ReShadePreset.ini` and `ReShade.log` unless explicitly asked.
   - Hidden `yarm install` / `yarm uninstall` commands and `yarm installs`.
 
+- TUI foundation (step 5):
+  - `internal/app`: root model with a screen stack, modal overlays (help,
+    confirm, error), a central keymap, a palette resolved from the terminal's
+    reported background via `lipgloss.LightDark`, an async helper, and
+    `WindowSizeMsg`-driven layout. Built on Bubble Tea v2.
+  - Games screen: table of discovered games with source and install status, a
+    detail panel for the selected game, `/` filter, `r` rescan and `a` add
+    folder with live path validation.
+  - Game detail screen: executables with architecture, guessed API and install
+    status, and a toggle for the ones the scanner flagged as installers or
+    crash handlers.
+  - `yarm` with no arguments now launches the TUI; `--no-color` (and
+    `NO_COLOR`) disable color.
+  - `teatest/v2` tests at a fixed 100x30 with the color profile disabled,
+    plus direct model tests for navigation and key routing.
+
 ### Changed
 
 - Executable scan depth raised from 3 to 4. Source 2 and some Unreal layouts

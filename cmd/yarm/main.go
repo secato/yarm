@@ -16,6 +16,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/secato/yarm/internal/app"
 	"github.com/secato/yarm/internal/artifacts"
 	"github.com/secato/yarm/internal/buildinfo"
 	"github.com/secato/yarm/internal/cache"
@@ -41,7 +42,7 @@ func main() {
 }
 
 func newRootCmd() *cobra.Command {
-	var verbose, debug bool
+	var verbose, debug, noColor bool
 
 	root := &cobra.Command{
 		Use:          "yarm",
@@ -49,20 +50,27 @@ func newRootCmd() *cobra.Command {
 		SilenceUsage: true,
 		Version:      buildinfo.Version,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_, _, closeLog, err := bootstrap(verbose, debug)
+			dirs, cfg, closeLog, err := bootstrap(verbose, debug)
 			if err != nil {
 				return err
 			}
 			defer func() { _ = closeLog() }()
 
 			slog.Info("running command", "name", "root")
-			_, _ = fmt.Fprintln(cmd.OutOrStdout(), "TUI not ready")
-			return nil
+
+			return app.Run(cmd.Context(), app.Options{
+				Loader: app.ProviderLoader{
+					Providers: buildProviders(cfg),
+					StateDir:  dirs.Data,
+				},
+				NoColor: noColor || envFlag("NO_COLOR"),
+			})
 		},
 	}
 
 	root.PersistentFlags().BoolVarP(&verbose, "verbose", "V", false, "also stream logs to stderr")
 	root.PersistentFlags().BoolVar(&debug, "debug", false, "log at debug level with source locations (also settable via YARM_DEBUG=1)")
+	root.PersistentFlags().BoolVar(&noColor, "no-color", false, "disable color output (also settable via NO_COLOR)")
 
 	root.AddCommand(newVersionCmd())
 	root.AddCommand(newPathsCmd(&verbose, &debug))
@@ -170,7 +178,9 @@ func newGamesLsCmd(verbose, debug *bool) *cobra.Command {
 	return cmd
 }
 
-func discoverGames(ctx context.Context, cfg config.Config) ([]gameOutput, error) {
+// buildProviders assembles the discovery providers from config. Shared by
+// the CLI and the TUI so both see the same games.
+func buildProviders(cfg config.Config) []platform.Provider {
 	var providers []platform.Provider
 	if cfg.Steam.Enabled {
 		providers = append(providers, steam.New(cfg.Steam.ExtraLibraryPaths))
@@ -179,7 +189,11 @@ func discoverGames(ctx context.Context, cfg config.Config) ([]gameOutput, error)
 	for i, g := range cfg.ManualGames {
 		manualEntries[i] = manual.Entry{Name: g.Name, Path: g.Path}
 	}
-	providers = append(providers, manual.New(manualEntries))
+	return append(providers, manual.New(manualEntries))
+}
+
+func discoverGames(ctx context.Context, cfg config.Config) ([]gameOutput, error) {
+	providers := buildProviders(cfg)
 
 	found, err := platform.DiscoverAll(ctx, providers)
 	if err != nil {
