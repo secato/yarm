@@ -16,16 +16,19 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/secato/yarm/internal/artifacts"
 	"github.com/secato/yarm/internal/buildinfo"
 	"github.com/secato/yarm/internal/cache"
 	"github.com/secato/yarm/internal/catalog"
 	"github.com/secato/yarm/internal/config"
 	"github.com/secato/yarm/internal/fetch"
 	"github.com/secato/yarm/internal/game"
+	"github.com/secato/yarm/internal/install"
 	"github.com/secato/yarm/internal/paths"
 	"github.com/secato/yarm/internal/platform"
 	"github.com/secato/yarm/internal/platform/manual"
 	"github.com/secato/yarm/internal/platform/steam"
+	"github.com/secato/yarm/internal/state"
 )
 
 func main() {
@@ -67,6 +70,9 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newCatalogCmd(&verbose, &debug))
 	root.AddCommand(newCacheCmd(&verbose, &debug))
 	root.AddCommand(newFetchCmd(&verbose, &debug))
+	root.AddCommand(newInstallCmd(&verbose, &debug))
+	root.AddCommand(newUninstallCmd(&verbose, &debug))
+	root.AddCommand(newInstallsCmd(&verbose, &debug))
 
 	return root
 }
@@ -714,6 +720,395 @@ func humanBytes(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+// newInstallCmd builds the hidden `install` command, which drives the
+// engine end to end before the TUI exists.
+func newInstallCmd(verbose, debug *bool) *cobra.Command {
+	var (
+		gameID    string
+		exeRel    string
+		version   string
+		addon     bool
+		dllName   string
+		packages  []string
+		addons    []string
+		custom    []string
+		overwrite bool
+		dryRun    bool
+	)
+
+	cmd := &cobra.Command{
+		Use:    "install",
+		Short:  "Install ReShade into a game executable",
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dirs, cfg, closeLog, err := bootstrap(*verbose, *debug)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = closeLog() }()
+
+			slog.Info("running command", "name", "install", "game", gameID, "exe", exeRel)
+
+			ctx := cmd.Context()
+			out := cmd.OutOrStdout()
+
+			g, exe, err := findGameExe(ctx, cfg, gameID, exeRel)
+			if err != nil {
+				return err
+			}
+
+			flavor := install.FlavorNormal
+			if addon {
+				flavor = install.FlavorAddon
+			}
+			if dllName == "" {
+				dllName = exe.API.RecommendedDLL()
+				if dllName == "" {
+					return fmt.Errorf("could not guess a DLL for api %q; pass --dll", exe.API)
+				}
+				_, _ = fmt.Fprintf(out, "using --dll %s (guessed from api=%s)\n", dllName, exe.API)
+			}
+
+			req := install.Request{
+				Game:      g,
+				Exe:       exe,
+				Version:   version,
+				Flavor:    flavor,
+				DLLName:   dllName,
+				Packages:  packages,
+				Addons:    addons,
+				Custom:    custom,
+				Overwrite: overwrite,
+				TargetOS:  artifacts.CurrentTargetOS(),
+			}
+
+			art, err := resolveArtifacts(ctx, dirs, cfg, req, cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
+
+			reg, err := state.Load(dirs.Data)
+			if err != nil {
+				return err
+			}
+
+			plan, err := install.Planner{Registry: reg}.Plan(req, art)
+			if err != nil {
+				return err
+			}
+			printPlan(out, plan)
+
+			if dryRun {
+				_, _ = fmt.Fprintln(out, "\ndry run: nothing was changed")
+				return nil
+			}
+
+			res, err := install.NewExecutor(dirs.Data).Run(ctx, plan, func(ev install.Event) {
+				if ev.Kind == install.StepCopy && ev.Total > 0 {
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "\r  [%d/%d] %-50s", ev.Done, ev.Total, ev.Description)
+				}
+			})
+			if err != nil {
+				return err
+			}
+			_, _ = fmt.Fprintln(cmd.ErrOrStderr())
+
+			_, _ = fmt.Fprintf(out, "\ninstalled %d file(s) into %s\n", len(res.Written), g.Root)
+			for _, w := range res.Written {
+				_, _ = fmt.Fprintf(out, "  + %s\n", w)
+			}
+			for _, s := range res.Skipped {
+				_, _ = fmt.Fprintf(out, "  = %s (unchanged)\n", s)
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&gameID, "game", "", "game id, e.g. steam:1245620 (required)")
+	cmd.Flags().StringVar(&exeRel, "exe", "", "executable path relative to the game root (required)")
+	cmd.Flags().StringVar(&version, "version", "", "ReShade version, e.g. 6.8.0 (required)")
+	cmd.Flags().BoolVar(&addon, "addon", false, "use the add-on-enabled ReShade build")
+	cmd.Flags().StringVar(&dllName, "dll", "", "proxy DLL name; guessed from the executable's API when omitted")
+	cmd.Flags().StringSliceVar(&packages, "packages", nil, "effect package ids or aliases")
+	cmd.Flags().StringSliceVar(&addons, "addons", nil, "add-on ids")
+	cmd.Flags().StringSliceVar(&custom, "custom", nil, "custom content ids")
+	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "replace files yarm does not own, backing them up first")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show the plan without changing anything")
+	_ = cmd.MarkFlagRequired("game")
+	_ = cmd.MarkFlagRequired("exe")
+	_ = cmd.MarkFlagRequired("version")
+	return cmd
+}
+
+// newUninstallCmd builds the hidden `uninstall` command.
+func newUninstallCmd(verbose, debug *bool) *cobra.Command {
+	var (
+		gameID     string
+		exeRel     string
+		removeUser bool
+	)
+
+	cmd := &cobra.Command{
+		Use:    "uninstall",
+		Short:  "Remove a ReShade install recorded in the manifest",
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dirs, _, closeLog, err := bootstrap(*verbose, *debug)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = closeLog() }()
+
+			slog.Info("running command", "name", "uninstall", "game", gameID, "exe", exeRel)
+
+			res, err := install.NewUninstaller(dirs.Data).Run(install.UninstallRequest{
+				GameID:         gameID,
+				Exe:            filepath.ToSlash(exeRel),
+				RemoveUserData: removeUser,
+			})
+			if err != nil {
+				return err
+			}
+
+			out := cmd.OutOrStdout()
+			_, _ = fmt.Fprintf(out, "removed %d file(s)\n", len(res.Removed))
+			for _, r := range res.Removed {
+				_, _ = fmt.Fprintf(out, "  - %s\n", r)
+			}
+			for _, k := range res.Kept {
+				_, _ = fmt.Fprintf(out, "  ! %s (modified since install, kept)\n", k)
+			}
+			for _, r := range res.Restored {
+				_, _ = fmt.Fprintf(out, "  ~ %s (restored from backup)\n", r)
+			}
+			for _, m := range res.Missing {
+				_, _ = fmt.Fprintf(out, "  ? %s (already gone)\n", m)
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&gameID, "game", "", "game id (required)")
+	cmd.Flags().StringVar(&exeRel, "exe", "", "executable path relative to the game root (required)")
+	cmd.Flags().BoolVar(&removeUser, "remove-user-data", false, "also delete ReShadePreset.ini and ReShade.log")
+	_ = cmd.MarkFlagRequired("game")
+	_ = cmd.MarkFlagRequired("exe")
+	return cmd
+}
+
+// newInstallsCmd lists what the manifest records.
+func newInstallsCmd(verbose, debug *bool) *cobra.Command {
+	var asJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "installs",
+		Short: "List ReShade installations yarm has made",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dirs, _, closeLog, err := bootstrap(*verbose, *debug)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = closeLog() }()
+
+			reg, err := state.Load(dirs.Data)
+			if err != nil {
+				return err
+			}
+
+			out := cmd.OutOrStdout()
+			if asJSON {
+				enc := json.NewEncoder(out)
+				enc.SetIndent("", "  ")
+				return enc.Encode(reg)
+			}
+
+			all := reg.Installs()
+			if len(all) == 0 {
+				_, _ = fmt.Fprintln(out, "no installs recorded")
+				return nil
+			}
+			for _, gi := range all {
+				_, _ = fmt.Fprintf(out, "%s  [%s]\n", gi.Game.Name, gi.GameID)
+				_, _ = fmt.Fprintf(out, "  exe:     %s\n", gi.Install.Exe)
+				_, _ = fmt.Fprintf(out, "  reshade: %s (%s) as %s\n",
+					gi.Install.ReShade.Version, gi.Install.ReShade.Flavor, gi.Install.ReShade.DLL)
+				_, _ = fmt.Fprintf(out, "  files:   %d\n", len(gi.Install.Files))
+				if len(gi.Install.Packages) > 0 {
+					_, _ = fmt.Fprintf(out, "  packages: %s\n", strings.Join(gi.Install.Packages, ", "))
+				}
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&asJSON, "json", false, "output as JSON")
+	return cmd
+}
+
+// printPlan renders a plan for review.
+func printPlan(w io.Writer, plan install.Plan) {
+	_, _ = fmt.Fprintf(w, "\nplan for %s (%s)\n", plan.Request.Exe.Path, plan.Request.Game.Name)
+	if plan.Upgrade {
+		_, _ = fmt.Fprintln(w, "  (upgrading an existing install)")
+	}
+	for _, s := range plan.Steps {
+		_, _ = fmt.Fprintf(w, "  step: %s\n", s.Description)
+	}
+	_, _ = fmt.Fprintf(w, "  %d file(s), %s\n", plan.WriteCount(), humanBytes(plan.TotalBytes()))
+	for _, rel := range plan.Removed {
+		_, _ = fmt.Fprintf(w, "  - %s\n", rel)
+	}
+	for _, warn := range plan.Warnings {
+		_, _ = fmt.Fprintf(w, "  ! %s\n", warn)
+	}
+}
+
+// findGameExe locates a discovered game and one of its executables.
+func findGameExe(ctx context.Context, cfg config.Config, gameID, exeRel string) (game.Game, game.Executable, error) {
+	games, err := discoverGames(ctx, cfg)
+	if err != nil {
+		return game.Game{}, game.Executable{}, err
+	}
+
+	for _, g := range games {
+		if g.ID != gameID {
+			continue
+		}
+		want := filepath.ToSlash(exeRel)
+		for _, e := range g.Executables {
+			if e.Path == want {
+				return game.Game{ID: g.ID, Name: g.Name, Provider: g.Provider, Root: g.Root},
+					game.Executable{
+						Path: filepath.FromSlash(e.Path),
+						Arch: game.Arch(e.Arch),
+						API:  game.API(e.API),
+					}, nil
+			}
+		}
+		return game.Game{}, game.Executable{}, fmt.Errorf(
+			"game %s has no executable %q (see `yarm games ls`)", gameID, exeRel)
+	}
+	return game.Game{}, game.Executable{}, fmt.Errorf("no game with id %q (see `yarm games ls`)", gameID)
+}
+
+// resolveArtifacts downloads and locates everything the request needs.
+func resolveArtifacts(ctx context.Context, dirs paths.Dirs, cfg config.Config, req install.Request, progressOut io.Writer) (install.Artifacts, error) {
+	c := newCache(dirs, cfg)
+	art := install.Artifacts{
+		Packages: map[string]string{},
+		Addons:   map[string]string{},
+		Custom:   map[string]string{},
+	}
+
+	progress := progressPrinter(progressOut)
+
+	reshadeDir, err := c.EnsureReShade(ctx, req.Version, req.Flavor.Addon(), progress)
+	if err != nil {
+		return install.Artifacts{}, fmt.Errorf("reshade %s: %w", req.Version, err)
+	}
+	art.ReShadeDir = reshadeDir
+
+	if artifacts.NeedsD3DCompiler(req.TargetOS) {
+		dll, err := c.EnsureD3DCompiler(ctx, req.Exe.Arch, progress)
+		if err != nil {
+			return install.Artifacts{}, fmt.Errorf("d3dcompiler: %w", err)
+		}
+		art.D3DCompiler = dll
+	}
+
+	if len(req.Packages) > 0 || len(req.Addons) > 0 {
+		cl := newCatalogClient(dirs, cfg)
+
+		if len(req.Packages) > 0 {
+			pkgs, err := cl.Packages(ctx)
+			if err != nil {
+				return install.Artifacts{}, err
+			}
+			byID := make(map[string]catalog.Package, len(pkgs))
+			for _, p := range pkgs {
+				byID[p.ID] = p
+			}
+			for i, id := range req.Packages {
+				resolved := catalog.ResolveAlias(id)
+				p, ok := byID[resolved]
+				if !ok {
+					return install.Artifacts{}, fmt.Errorf("unknown package %q", id)
+				}
+				dir, err := c.EnsurePackage(ctx, p, progress)
+				if err != nil {
+					return install.Artifacts{}, fmt.Errorf("package %s: %w", resolved, err)
+				}
+				art.Packages[resolved] = dir
+				req.Packages[i] = resolved
+			}
+		}
+
+		if len(req.Addons) > 0 {
+			list, err := cl.Addons(ctx)
+			if err != nil {
+				return install.Artifacts{}, err
+			}
+			byID := make(map[string]catalog.Addon, len(list))
+			for _, a := range list {
+				byID[a.ID] = a
+			}
+			for _, id := range req.Addons {
+				a, ok := byID[id]
+				if !ok {
+					return install.Artifacts{}, fmt.Errorf("unknown add-on %q", id)
+				}
+				if !a.Installable() {
+					return install.Artifacts{}, fmt.Errorf(
+						"add-on %q is manual only; see %s", id, a.RepositoryURL)
+				}
+				dir, err := c.EnsureAddon(ctx, a, req.Exe.Arch, progress)
+				if err != nil {
+					return install.Artifacts{}, fmt.Errorf("addon %s: %w", id, err)
+				}
+				art.Addons[id] = dir
+			}
+		}
+	}
+
+	for _, id := range req.Custom {
+		found, err := catalog.ScanCustom(filepath.Join(cacheRoot(dirs, cfg), "custom"))
+		if err != nil {
+			return install.Artifacts{}, err
+		}
+		var matched bool
+		for _, cu := range found {
+			if cu.ID == id || cu.Name == id {
+				art.Custom[id] = cu.Path
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return install.Artifacts{}, fmt.Errorf("unknown custom content %q", id)
+		}
+	}
+
+	return art, nil
+}
+
+// newCatalogClient builds a catalog client from the resolved dirs.
+func newCatalogClient(dirs paths.Dirs, cfg config.Config) *catalog.Client {
+	return catalog.New(
+		&http.Client{Timeout: 30 * time.Second},
+		filepath.Join(cacheRoot(dirs, cfg), "catalog"),
+		time.Duration(cfg.CatalogTTLHours)*time.Hour,
+		userAgent(),
+	)
+}
+
+// cacheRoot resolves the cache directory, honoring the config override.
+func cacheRoot(dirs paths.Dirs, cfg config.Config) string {
+	if cfg.CacheDir != "" {
+		return cfg.CacheDir
+	}
+	return dirs.Cache
 }
 
 // bootstrap resolves the application directories, creates them, sets up

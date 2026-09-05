@@ -72,6 +72,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   d3dcompiler_47.dll rule as a target-OS predicate, with
   `artifacts.CurrentTargetOS()` the single place `runtime.GOOS` is read.
 
+- Install engine (step 4):
+  - `internal/state`: the `installs.json` registry — every file yarm writes into
+    a game directory, with its hash, plus the originals it displaced. Saved
+    atomically with a schema version. A corrupt registry is an error rather than
+    something to start fresh from: it is the only record able to remove those
+    files.
+  - `internal/install`: `Planner` resolves the full file set and classifies each
+    destination (create / replace / skip / backup / keep) against the game
+    directory and the registry, without writing anything; `Executor` applies a
+    plan and rolls back completely on any failure; `Uninstaller` removes only
+    files whose content still matches what was installed.
+  - `ReShade.ini` is generated when absent and never overwritten. Files an
+    upgrade no longer needs are moved aside rather than deleted, so a failed
+    upgrade restores the install it was replacing.
+  - Uninstall keeps files the user has edited since installation, and preserves
+    `ReShadePreset.ini` and `ReShade.log` unless explicitly asked.
+  - Hidden `yarm install` / `yarm uninstall` commands and `yarm installs`.
+
 ### Changed
 
 - Executable scan depth raised from 3 to 4. Source 2 and some Unreal layouts

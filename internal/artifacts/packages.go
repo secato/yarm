@@ -141,3 +141,19 @@ func isShaderFile(name string) bool {
 		return false
 	}
 }
+
+// ReadPackageMeta loads the package.json written beside a normalized
+// package's files, so the install engine can apply the catalog's
+// EffectFiles / DenyEffectFiles rules without consulting the catalog
+// again (which may be unreachable at install time).
+func ReadPackageMeta(dir string) (PackageMeta, error) {
+	raw, err := os.ReadFile(filepath.Join(dir, MetaFile))
+	if err != nil {
+		return PackageMeta{}, err
+	}
+	var m PackageMeta
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return PackageMeta{}, fmt.Errorf("parse %s: %w", filepath.Join(dir, MetaFile), err)
+	}
+	return m, nil
+}
