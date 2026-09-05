@@ -22,7 +22,8 @@ func TestScan(t *testing.T) {
 
 	kept := []string{
 		"Game.exe",                   // depth 1
-		"Game/GameBin/eldenring.exe", // depth 3 (containing dir GameBin is depth 2, allowed)
+		"Game/GameBin/eldenring.exe", // depth 3
+		"game/bin/win64/dota2.exe",   // depth 4 (Source layout; the boundary case)
 	}
 	skippedButPresent := []string{
 		"unins000.exe",                   // skip filename
@@ -30,7 +31,7 @@ func TestScan(t *testing.T) {
 		"Game/GameBin/CrashReporter.exe", // skip filename, inside an otherwise-normal dir
 	}
 	excludedEntirely := []string{
-		"Game/GameBin/x64/eldenring64.exe",          // depth 4, beyond max scan depth
+		"a/b/c/d/TooDeep.exe",                       // depth 5, beyond max scan depth
 		"Redist/CrashRep.exe",                       // "Redist" is a skip dir
 		"_CommonRedist/vcredist_x64.exe",            // "_CommonRedist" is a skip dir
 		"Support/EasyAntiCheat/EasyAntiCheat.exe",   // "Support" is a skip dir

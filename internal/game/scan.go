@@ -9,7 +9,12 @@ import (
 
 // maxScanDepth limits how many directory levels below the game root are
 // searched for executables (docs/plan/04-external-sources.md §4.6).
-const maxScanDepth = 3
+//
+// Depth 4 rather than 3: Source 2 and some Unreal layouts put the real
+// binary at game/bin/<platform>/<name>.exe, which a depth-3 walk misses
+// entirely. The dir skip-rules below keep the extra level from pulling in
+// redistributable trees.
+const maxScanDepth = 4
 
 // skipExeName matches filenames that are almost never the game itself:
 // uninstallers, redistributable/anti-cheat/setup installers, etc.
@@ -40,7 +45,29 @@ var skipDirSequences = [][]string{
 func Scan(root string) ([]Executable, error) {
 	var out []Executable
 
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	err := walkGameDir(root, func(rel string, d fs.DirEntry) error {
+		if !strings.EqualFold(filepath.Ext(d.Name()), ".exe") {
+			return nil
+		}
+		out = append(out, Executable{
+			Path:    rel,
+			Skipped: skipExeName.MatchString(d.Name()),
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return out, nil
+}
+
+// walkGameDir walks root up to maxScanDepth levels deep, calling fn with
+// each file's root-relative path. Directories matching skipDirNames or
+// skipDirSequences are never descended into. fn may return fs.SkipAll to
+// end the walk early without an error.
+func walkGameDir(root string, fn func(rel string, d fs.DirEntry) error) error {
+	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -61,21 +88,8 @@ func Scan(root string) ([]Executable, error) {
 			return nil
 		}
 
-		if !strings.EqualFold(filepath.Ext(d.Name()), ".exe") {
-			return nil
-		}
-
-		out = append(out, Executable{
-			Path:    rel,
-			Skipped: skipExeName.MatchString(d.Name()),
-		})
-		return nil
+		return fn(rel, d)
 	})
-	if err != nil {
-		return nil, err
-	}
-
-	return out, nil
 }
 
 // isSkippedDir reports whether rel (a slash- or OS-separated relative path)

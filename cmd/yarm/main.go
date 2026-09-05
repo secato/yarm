@@ -106,10 +106,14 @@ func newGamesCmd(verbose, debug *bool) *cobra.Command {
 
 // gameOutput and executableOutput are the games ls --json shape.
 type gameOutput struct {
-	ID          string             `json:"id"`
-	Name        string             `json:"name"`
-	Provider    string             `json:"provider"`
-	Root        string             `json:"root"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Provider string `json:"provider"`
+	Root     string `json:"root"`
+	// NativeBuild marks a game that ships a native ELF/Mach-O binary and no
+	// Windows executable. ReShade cannot be installed into one, so the
+	// empty Executables list is expected rather than a failed scan.
+	NativeBuild bool               `json:"native_build"`
 	Executables []executableOutput `json:"executables"`
 }
 
@@ -191,6 +195,7 @@ func discoverGames(ctx context.Context, cfg config.Config) ([]gameOutput, error)
 			Name:        g.Name,
 			Provider:    g.Provider,
 			Root:        g.Root,
+			NativeBuild: len(execs) == 0 && game.HasNativeBuild(g.Root),
 			Executables: execs,
 		})
 	}
@@ -212,6 +217,9 @@ func printGamesText(w io.Writer, games []gameOutput) {
 	}
 	for _, g := range games {
 		_, _ = fmt.Fprintf(w, "%s  [%s]  %s\n", g.Name, g.ID, g.Root)
+		if g.NativeBuild {
+			_, _ = fmt.Fprintln(w, "    native build \u2014 ReShade supports Windows executables only")
+		}
 		for _, e := range g.Executables {
 			mark := " "
 			if e.Skipped {
