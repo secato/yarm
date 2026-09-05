@@ -17,8 +17,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/secato/yarm/internal/buildinfo"
+	"github.com/secato/yarm/internal/cache"
 	"github.com/secato/yarm/internal/catalog"
 	"github.com/secato/yarm/internal/config"
+	"github.com/secato/yarm/internal/fetch"
 	"github.com/secato/yarm/internal/game"
 	"github.com/secato/yarm/internal/paths"
 	"github.com/secato/yarm/internal/platform"
@@ -63,6 +65,8 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newPathsCmd(&verbose, &debug))
 	root.AddCommand(newGamesCmd(&verbose, &debug))
 	root.AddCommand(newCatalogCmd(&verbose, &debug))
+	root.AddCommand(newCacheCmd(&verbose, &debug))
+	root.AddCommand(newFetchCmd(&verbose, &debug))
 
 	return root
 }
@@ -379,6 +383,337 @@ func printCatalogText(w io.Writer, c catalogOutput) {
 // userAgent identifies YARM to reshade.me and GitHub, as §4.1 requires.
 func userAgent() string {
 	return fmt.Sprintf("yarm/%s (+https://github.com/secato/yarm)", buildinfo.Version)
+}
+
+// newCacheCmd builds the `cache` command group.
+func newCacheCmd(verbose, debug *bool) *cobra.Command {
+	c := &cobra.Command{
+		Use:   "cache",
+		Short: "Inspect and clean the download cache",
+	}
+	c.AddCommand(newCacheLsCmd(verbose, debug), newCacheCleanCmd(verbose, debug))
+	return c
+}
+
+func newCacheLsCmd(verbose, debug *bool) *cobra.Command {
+	var (
+		asJSON bool
+		sortBy string
+		desc   bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "ls",
+		Short: "List cached artifacts",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dirs, cfg, closeLog, err := bootstrap(*verbose, *debug)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = closeLog() }()
+
+			slog.Info("running command", "name", "cache ls")
+
+			c := newCache(dirs, cfg)
+			entries, err := c.List(cache.SortBy(sortBy), desc)
+			if err != nil {
+				return err
+			}
+
+			if asJSON {
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(entries)
+			}
+
+			out := cmd.OutOrStdout()
+			if len(entries) == 0 {
+				_, _ = fmt.Fprintln(out, "cache is empty")
+			}
+			// Size the id column to the widest id present, so long
+			// catalog-derived ids do not shear the columns apart.
+			idWidth := 0
+			for _, e := range entries {
+				if n := len(e.ID); n > idWidth {
+					idWidth = n
+				}
+			}
+
+			var total int64
+			for _, e := range entries {
+				total += e.Size
+				_, _ = fmt.Fprintf(out, "%-12s %-*s %10s  %s\n",
+					e.Kind, idWidth, e.ID, humanBytes(e.Size), e.Name)
+			}
+			if len(entries) > 0 {
+				_, _ = fmt.Fprintf(out, "\n%d entries, %s total\n", len(entries), humanBytes(total))
+			}
+
+			onDisk, err := c.Total()
+			if err == nil {
+				_, _ = fmt.Fprintf(out, "cache directory: %s (%s on disk)\n", c.Root, humanBytes(onDisk))
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&asJSON, "json", false, "output as JSON")
+	cmd.Flags().StringVar(&sortBy, "sort", string(cache.SortByName), "sort by: name, size, date, used")
+	cmd.Flags().BoolVar(&desc, "desc", false, "reverse the sort order")
+	return cmd
+}
+
+func newCacheCleanCmd(verbose, debug *bool) *cobra.Command {
+	var yes bool
+
+	cmd := &cobra.Command{
+		Use:   "clean",
+		Short: "Remove every cached download",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dirs, cfg, closeLog, err := bootstrap(*verbose, *debug)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = closeLog() }()
+
+			slog.Info("running command", "name", "cache clean")
+
+			c := newCache(dirs, cfg)
+			entries, err := c.List(cache.SortByName, false)
+			if err != nil {
+				return err
+			}
+			if len(entries) == 0 {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), "cache is already empty")
+				return nil
+			}
+
+			if !yes {
+				var total int64
+				for _, e := range entries {
+					total += e.Size
+				}
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(),
+					"%d entries (%s) would be removed. Re-run with --yes to confirm.\n",
+					len(entries), humanBytes(total))
+				return nil
+			}
+
+			removed, err := c.Clean()
+			if err != nil {
+				return err
+			}
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "removed %d cache entries\n", removed)
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&yes, "yes", false, "actually delete, rather than reporting what would be deleted")
+	return cmd
+}
+
+// newFetchCmd builds the hidden `fetch` command group used to smoke-test
+// the download and extraction paths before the TUI exists.
+func newFetchCmd(verbose, debug *bool) *cobra.Command {
+	f := &cobra.Command{
+		Use:    "fetch",
+		Short:  "Download artifacts into the cache",
+		Hidden: true,
+	}
+	f.AddCommand(
+		newFetchReShadeCmd(verbose, debug),
+		newFetchD3DCompilerCmd(verbose, debug),
+		newFetchPackageCmd(verbose, debug),
+	)
+	return f
+}
+
+func newFetchReShadeCmd(verbose, debug *bool) *cobra.Command {
+	var addon bool
+
+	cmd := &cobra.Command{
+		Use:   "reshade <version>",
+		Short: "Download and extract a ReShade release into the cache",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dirs, cfg, closeLog, err := bootstrap(*verbose, *debug)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = closeLog() }()
+
+			slog.Info("running command", "name", "fetch reshade", "version", args[0], "addon", addon)
+
+			c := newCache(dirs, cfg)
+			dir, err := c.EnsureReShade(cmd.Context(), args[0], addon, progressPrinter(cmd.ErrOrStderr()))
+			if err != nil {
+				return err
+			}
+
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\n%s\n", dir)
+			return listDir(cmd.OutOrStdout(), dir)
+		},
+	}
+
+	cmd.Flags().BoolVar(&addon, "addon", false, "fetch the add-on-enabled build")
+	return cmd
+}
+
+func newFetchD3DCompilerCmd(verbose, debug *bool) *cobra.Command {
+	var arch string
+
+	cmd := &cobra.Command{
+		Use:   "d3dcompiler",
+		Short: "Download and extract d3dcompiler_47.dll into the cache",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dirs, cfg, closeLog, err := bootstrap(*verbose, *debug)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = closeLog() }()
+
+			slog.Info("running command", "name", "fetch d3dcompiler", "arch", arch)
+
+			c := newCache(dirs, cfg)
+			dll, err := c.EnsureD3DCompiler(cmd.Context(), game.Arch(arch), progressPrinter(cmd.ErrOrStderr()))
+			if err != nil {
+				return err
+			}
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\n%s\n", dll)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&arch, "arch", string(game.ArchX64), "architecture: x64 or x86")
+	return cmd
+}
+
+func newFetchPackageCmd(verbose, debug *bool) *cobra.Command {
+	return &cobra.Command{
+		Use:   "package <id-or-alias>",
+		Short: "Download and normalize an effect package into the cache",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dirs, cfg, closeLog, err := bootstrap(*verbose, *debug)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = closeLog() }()
+
+			want := catalog.ResolveAlias(args[0])
+			slog.Info("running command", "name", "fetch package", "id", want)
+
+			cacheDir := cfg.CacheDir
+			if cacheDir == "" {
+				cacheDir = dirs.Cache
+			}
+			cl := catalog.New(
+				&http.Client{Timeout: 30 * time.Second},
+				filepath.Join(cacheDir, "catalog"),
+				time.Duration(cfg.CatalogTTLHours)*time.Hour,
+				userAgent(),
+			)
+
+			packages, err := cl.Packages(cmd.Context())
+			if err != nil {
+				return err
+			}
+
+			for _, p := range packages {
+				if p.ID != want {
+					continue
+				}
+				dir, err := newCache(dirs, cfg).EnsurePackage(
+					cmd.Context(), p, progressPrinter(cmd.ErrOrStderr()))
+				if err != nil {
+					return err
+				}
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\n%s\n", dir)
+				return summarizePackage(cmd.OutOrStdout(), dir)
+			}
+			return fmt.Errorf("no package with id %q (try `yarm catalog ls`)", want)
+		},
+	}
+}
+
+// summarizePackage counts what a normalized package entry holds.
+func summarizePackage(w io.Writer, dir string) error {
+	counts := map[string]int{}
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		top, _, ok := strings.Cut(filepath.ToSlash(rel), "/")
+		if !ok {
+			top = rel
+		}
+		counts[top]++
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	for _, k := range []string{"Shaders", "Textures", "package.json"} {
+		if n, ok := counts[k]; ok {
+			_, _ = fmt.Fprintf(w, "  %-14s %d file(s)\n", k, n)
+		}
+	}
+	return nil
+}
+
+// newCache builds a Cache from the resolved directories and config.
+func newCache(dirs paths.Dirs, cfg config.Config) *cache.Cache {
+	root := cfg.CacheDir
+	if root == "" {
+		root = dirs.Cache
+	}
+	return cache.New(root, fetch.New(userAgent()))
+}
+
+// progressPrinter renders download progress as a single rewritten line.
+func progressPrinter(w io.Writer) fetch.ProgressFunc {
+	return func(p fetch.Progress) {
+		if pct := p.Percent(); pct >= 0 {
+			_, _ = fmt.Fprintf(w, "\r  %s / %s (%.0f%%)   ",
+				humanBytes(p.Downloaded), humanBytes(p.Total), pct)
+			return
+		}
+		_, _ = fmt.Fprintf(w, "\r  %s   ", humanBytes(p.Downloaded))
+	}
+}
+
+// listDir prints the files in a cache entry directory.
+func listDir(w io.Writer, dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		_, _ = fmt.Fprintf(w, "  %-24s %10s\n", e.Name(), humanBytes(info.Size()))
+	}
+	return nil
+}
+
+// humanBytes formats a byte count for display.
+func humanBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
 // bootstrap resolves the application directories, creates them, sets up

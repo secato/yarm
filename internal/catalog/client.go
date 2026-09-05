@@ -224,9 +224,14 @@ func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
 		return nil, fmt.Errorf("unexpected status %s", resp.Status)
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxCatalogBytes))
+	// Read one byte past the cap: silently truncating a catalog would
+	// parse as a valid but incomplete list, quietly hiding packages.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxCatalogBytes+1))
 	if err != nil {
 		return nil, err
+	}
+	if len(body) > maxCatalogBytes {
+		return nil, fmt.Errorf("catalog is larger than the %d byte limit", maxCatalogBytes)
 	}
 	if len(body) == 0 {
 		return nil, errors.New("empty response body")

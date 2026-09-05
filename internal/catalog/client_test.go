@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -235,5 +236,24 @@ func TestClientSurvivesUnwritableCache(t *testing.T) {
 
 	if _, err := c.load(context.Background(), ts.URL+"/EffectPackages.ini", packagesFile); err != nil {
 		t.Errorf("load should succeed despite an unwritable cache, got %v", err)
+	}
+}
+
+// Silently truncating an oversized catalog would parse as a valid but
+// incomplete list, quietly hiding packages from the user.
+func TestClientRejectsOversizedCatalog(t *testing.T) {
+	huge := bytes.Repeat([]byte("[00]\nPackageName=x\nDownloadUrl=https://e.invalid/a.zip\n"), 200000)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(huge)
+	}))
+	defer srv.Close()
+
+	if len(huge) <= maxCatalogBytes {
+		t.Fatalf("fixture is only %d bytes; it must exceed the %d limit", len(huge), maxCatalogBytes)
+	}
+
+	c := New(srv.Client(), t.TempDir(), time.Hour, "yarm/test")
+	if _, err := c.load(context.Background(), srv.URL, packagesFile); err == nil {
+		t.Error("want an error for an oversized catalog, got nil")
 	}
 }

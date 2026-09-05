@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   DLL through the Windows loader (real or Wine's), so native builds are not
   installable targets.
 
+- An oversized catalog response is now rejected rather than silently truncated,
+  which would have parsed as a valid but incomplete package list.
+
 - Catalog (`internal/catalog`): INI section parser, effect package and add-on
   catalogs, ReShade version discovery (reshade.me latest marker + GitHub tags,
   numeric semver sort, floor at 5.0.0), custom content scanning under
@@ -34,6 +37,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cached under `cache/catalog` with a TTL from `catalog_ttl_hours` and fall back
   to the cached copy at any age when the network is unavailable. Hidden
   `yarm catalog ls [--json]` debug command. (step 2)
+
+- Fetch, cache and artifacts (step 3):
+  - `internal/fetch`: downloads with retries and exponential backoff (5xx,
+    429 and transport errors only), progress reporting, and optional SHA-256
+    verification. Downloads land in a `.part` file and are renamed into place
+    only once complete and verified.
+  - `internal/archive`: zip reading that rejects any entry which would escape
+    the destination directory, plus top-directory stripping and Shaders/
+    Textures discovery.
+  - `internal/artifacts`: ReShade DLLs out of the zip-appended setup
+    executable, effect packages normalized to `Shaders/` + `Textures/` +
+    `package.json`, add-on binaries from direct files or zips, and
+    `d3dcompiler_47.dll` from the pinned Firefox installer via sevenzip.
+  - `internal/cache`: `index.json` with schema versioning, `Ensure*` helpers
+    that download on demand and reuse what is present, and listing, sorting,
+    sizing and deletion.
+  - `yarm cache ls [--json] [--sort] [--desc]` and `yarm cache clean [--yes]`;
+    hidden `yarm fetch reshade|package|d3dcompiler`.
+  - Opt-in integration tests behind `YARM_NETWORK_TESTS=1` that verify the
+    pinned Firefox installers and the ReShade setup archive against the live
+    hosts.
+
+- Archive extraction limits: per-entry size, a 2 GiB total expansion budget
+  and a 20,000 entry cap per archive, enforced against bytes actually written
+  rather than the sizes an archive declares. An entry delivering more than it
+  declared is an error and its partial file is removed, and archive entries are
+  always written as regular files so a symlink entry cannot be used to escape
+  the destination.
+- `fetch.Client` caps a single download at 2 GiB without trusting
+  `Content-Length`, so a host that streams without end cannot fill the disk.
+  An oversized response is not retried.
+- `artifacts.NeedsD3DCompiler(TargetOS)` expresses the Linux-only
+  d3dcompiler_47.dll rule as a target-OS predicate, with
+  `artifacts.CurrentTargetOS()` the single place `runtime.GOOS` is read.
 
 ### Changed
 
