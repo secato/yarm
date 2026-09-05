@@ -37,6 +37,25 @@ const (
 // endpoint from filling the cache directory.
 const maxCatalogBytes = 8 << 20
 
+// StatusError is a non-200 response from a catalog source, exposed as a
+// typed error (rather than only a formatted string) so a caller — the TUI,
+// showing a friendlier message for a GitHub rate limit — can inspect the
+// status code without parsing error text.
+type StatusError struct {
+	Code   int
+	Status string
+}
+
+func (e StatusError) Error() string { return "unexpected status " + e.Status }
+
+// RateLimited reports whether this response is the shape GitHub's API
+// uses for both an authenticated-quota rate limit (403) and the
+// unauthenticated one (429): both mean "wait and the cached copy is fine
+// meanwhile", not "something is broken".
+func (e StatusError) RateLimited() bool {
+	return e.Code == http.StatusForbidden || e.Code == http.StatusTooManyRequests
+}
+
 // Doer is the HTTP surface Client needs. *http.Client satisfies it, and
 // step 3's fetch client will too.
 type Doer interface {
@@ -221,7 +240,7 @@ func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status %s", resp.Status)
+		return nil, StatusError{Code: resp.StatusCode, Status: resp.Status}
 	}
 
 	// Read one byte past the cap: silently truncating a catalog would

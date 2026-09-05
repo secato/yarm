@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Reliability and friendliness polish (part of step 8; README/demo GIF are
+  tracked separately):
+  - A one-time welcome banner on first launch (detected as "config.yaml did
+    not exist yet", checked before bootstrap creates anything): what Steam
+    found, and a hint to press `a` to add a folder yourself. Dismissed by
+    the first keypress, which still does whatever it would normally do.
+  - `catalog.StatusError`, a typed error for a non-200 catalog response
+    (previously just a formatted string), with a `RateLimited()` check for
+    GitHub's two rate-limit statuses (403, 429).
+  - `internal/app/friendlyerror.go`: rewrites a DNS failure, a network-level
+    error, a GitHub rate limit, or a permission error into a plain-language
+    explanation for the error overlay, and now also for a game whose
+    executables could not even be scanned — shown distinctly from an empty
+    or native-build game, in both the games list's status column and the
+    detail views, rather than just looking empty. Anything unrecognized
+    passes through as the original error text unchanged.
+  - Coverage on every non-TUI package now clears the plan's 75% target
+    (`internal/fsutil` 68.7% → 76.1%, `internal/paths` 72.7% → 100%,
+    `internal/buildinfo` 0% → 100%). `paths`'s per-OS directory resolution
+    was split into `osdirs_unix.go` / `osdirs_windows.go`, matching the
+    `roots_{linux,windows,darwin}.go` / `freespace_{unix,windows}.go`
+    convention already used elsewhere — its Windows branch had been stuck
+    at a permanent 50% on any single-OS run since only one platform's
+    branch can ever execute in one process, not a gap either CI leg alone
+    could close.
+
+  Verified live: a real DNS failure and a real 0-permission directory both
+  produce the friendly message (not just the constructed-error unit tests);
+  a fresh `YARM_HOME` shows the welcome banner with the real Steam count
+  from this machine's library; a manually chmod'd game folder shows
+  "Permission denied" (with the exact path) in the games list, the side
+  panel and the detail screen alike.
+
 - Cache manager, custom content and settings screens (step 7):
   - `CacheScreen`: table of cached artifacts (name, kind, version, size,
     downloaded, last used); `s` cycles size/date/name sort; `d` deletes with

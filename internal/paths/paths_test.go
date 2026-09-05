@@ -81,3 +81,23 @@ func TestEnsureAll(t *testing.T) {
 		}
 	}
 }
+
+// A path component that is a regular file rather than a directory must
+// make EnsureAll fail, rather than silently creating only some of the
+// three directories.
+func TestEnsureAllMkdirAllFails(t *testing.T) {
+	tmp := t.TempDir()
+	blocker := filepath.Join(tmp, "not-a-dir")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	d := Dirs{
+		Config: filepath.Join(tmp, "config"),
+		Data:   filepath.Join(tmp, "data"),
+		Cache:  filepath.Join(blocker, "child"),
+	}
+	if err := d.EnsureAll(); err == nil {
+		t.Fatal("want an error when a directory's parent is a file, got nil")
+	}
+}

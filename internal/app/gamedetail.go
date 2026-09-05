@@ -202,13 +202,18 @@ func (s *GameDetailScreen) View(env Env) string {
 	b.WriteString("\n\n")
 
 	if len(s.entry.Exes) == 0 {
-		if s.entry.NativeBuild {
+		switch {
+		case s.entry.ScanErr != nil:
+			b.WriteString(env.Styles.Bad.Render("Could not scan this folder"))
+			b.WriteString("\n")
+			b.WriteString(env.Styles.Faint.Render(friendlyError(s.entry.ScanErr)))
+		case s.entry.NativeBuild:
 			b.WriteString(env.Styles.Warn.Render("Native build"))
 			b.WriteString("\n")
 			b.WriteString(env.Styles.Faint.Render(
 				"This game ships a native Linux or macOS binary. ReShade proxies a DLL\n" +
 					"through the Windows loader, so it does not apply here."))
-		} else {
+		default:
 			b.WriteString(env.Styles.Faint.Render("No executables were found in this folder."))
 		}
 		return b.String()

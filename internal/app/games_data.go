@@ -24,6 +24,11 @@ type GameEntry struct {
 	// NativeBuild marks a game that ships no Windows executable, so
 	// ReShade cannot apply to it at all.
 	NativeBuild bool
+	// ScanErr is set when the game's folder could not be scanned at all
+	// (most commonly a permissions problem). Kept distinct from
+	// NativeBuild/an empty Exes so the UI can say what actually happened
+	// instead of the folder just looking empty.
+	ScanErr error
 }
 
 // InstalledSummary describes the first install found for this game, for
@@ -86,9 +91,12 @@ func (l ProviderLoader) LoadGames(ctx context.Context) ([]GameEntry, error) {
 
 		exes, err := game.Scan(g.Root)
 		if err != nil {
-			// A game folder we cannot read is still worth listing; the
-			// detail view will show it has no executables.
+			// A game folder we cannot read is still worth listing — the
+			// detail view says why, rather than it just looking empty
+			// (the plan's "friendly errors: permission denied on game
+			// dir" case).
 			exes = nil
+			entry.ScanErr = err
 		}
 
 		for _, e := range exes {
@@ -103,7 +111,10 @@ func (l ProviderLoader) LoadGames(ctx context.Context) ([]GameEntry, error) {
 			entry.Exes = append(entry.Exes, ex)
 		}
 
-		if len(entry.Exes) == 0 {
+		// A folder we could not even scan is not worth also probing for a
+		// native build — that call would likely fail the same way, and
+		// the scan error is the more useful thing to show anyway.
+		if len(entry.Exes) == 0 && entry.ScanErr == nil {
 			entry.NativeBuild = game.HasNativeBuild(g.Root)
 		}
 		entries = append(entries, entry)

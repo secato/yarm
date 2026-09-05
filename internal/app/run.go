@@ -17,11 +17,15 @@ type Options struct {
 	// NoColor forces monochrome output, for terminals or pipelines that
 	// cannot render color.
 	NoColor bool
+	// FirstRun shows a one-time welcome banner on the games screen: the
+	// signal, decided by the caller before bootstrap creates anything, is
+	// that config.yaml did not exist yet for this user.
+	FirstRun bool
 }
 
 // Run starts the TUI and blocks until the user quits.
 func Run(ctx context.Context, opts Options) error {
-	m := New(NewGamesScreen(opts.Loader, opts.Deps))
+	m := New(NewGamesScreen(opts.Loader, opts.Deps, opts.FirstRun))
 
 	programOpts := []tea.ProgramOption{tea.WithContext(ctx)}
 	if opts.NoColor {

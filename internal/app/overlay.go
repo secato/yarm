@@ -106,7 +106,7 @@ func (e errorOverlay) update(tea.KeyPressMsg) (overlay, tea.Cmd) { return nil, n
 
 func (e errorOverlay) view(env Env) string {
 	return env.Styles.Bad.Render("Something went wrong") + "\n\n" +
-		wrap(e.err.Error(), maxOverlayWidth(env)) + "\n\n" +
+		wrap(friendlyError(e.err), maxOverlayWidth(env)) + "\n\n" +
 		env.Styles.Faint.Render("press any key to continue")
 }
 

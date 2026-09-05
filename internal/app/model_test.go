@@ -52,7 +52,7 @@ func drive(t *testing.T, m Model, msgs ...tea.Msg) Model {
 
 func loaded(t *testing.T) Model {
 	t.Helper()
-	m := New(NewGamesScreen(fakeLoader{entries: sampleEntries()}, fakeDeps()))
+	m := New(NewGamesScreen(fakeLoader{entries: sampleEntries()}, fakeDeps(), false))
 	return drive(t, m,
 		tea.WindowSizeMsg{Width: termWidth, Height: termHeight},
 		gamesLoadedMsg{entries: sampleEntries()},
@@ -254,7 +254,7 @@ func (lightBG) RGBA() (r, g, b, a uint32) { return 0xffff, 0xffff, 0xffff, 0xfff
 
 // Rendering must not panic before the first window size arrives.
 func TestRenderBeforeReady(t *testing.T) {
-	m := New(NewGamesScreen(fakeLoader{entries: sampleEntries()}, fakeDeps()))
+	m := New(NewGamesScreen(fakeLoader{entries: sampleEntries()}, fakeDeps(), false))
 	if got := m.View().Content; got == "" {
 		t.Error("the pre-ready view should say something")
 	}
@@ -394,5 +394,73 @@ func TestPopToRootClearsStackAndReloads(t *testing.T) {
 	}
 	if got := len(m.stack); got != 0 {
 		t.Errorf("stack has %d entries after PopToRoot, want 0", got)
+	}
+}
+
+// The welcome banner shows once, only on a genuine first run, counts
+// Steam-provided games specifically (not manual ones), and disappears on
+// the very next keypress without swallowing it.
+func TestFirstRunWelcomeBanner(t *testing.T) {
+	m := New(NewGamesScreen(fakeLoader{entries: sampleEntries()}, fakeDeps(), true))
+	m = drive(t, m,
+		tea.WindowSizeMsg{Width: termWidth, Height: termHeight},
+		gamesLoadedMsg{entries: sampleEntries()},
+	)
+
+	gs := m.Screen().(*GamesScreen)
+	if !gs.firstRun {
+		t.Fatal("firstRun should still be true before any keypress")
+	}
+	body := gs.View(m.env())
+	if !strings.Contains(body, "Welcome to yarm") {
+		t.Errorf("the welcome banner should be shown:\n%s", body)
+	}
+	// sampleEntries has 3 steam-provider games (Control, Dota 2, ELDEN
+	// RING) and 1 manual one; the banner counts only the Steam ones.
+	if !strings.Contains(body, "Steam found 3 games") {
+		t.Errorf("banner should count only Steam-provided games:\n%s", body)
+	}
+
+	// Any keypress dismisses it — and still does what it would normally
+	// do (down moves the table cursor).
+	before := gs.table.Cursor()
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	gs = m.Screen().(*GamesScreen)
+	if gs.firstRun {
+		t.Error("firstRun should be false after the first keypress")
+	}
+	if gs.table.Cursor() == before {
+		t.Error("the dismissing keypress should still move the cursor")
+	}
+	if strings.Contains(gs.View(m.env()), "Welcome to yarm") {
+		t.Error("the banner should no longer render after being dismissed")
+	}
+}
+
+// A fresh install with no Steam library and nothing added yet must still
+// show the banner in the empty-state view.
+func TestFirstRunWelcomeBannerWithNoGames(t *testing.T) {
+	m := New(NewGamesScreen(fakeLoader{}, fakeDeps(), true))
+	m = drive(t, m,
+		tea.WindowSizeMsg{Width: termWidth, Height: termHeight},
+		gamesLoadedMsg{entries: nil},
+	)
+
+	gs := m.Screen().(*GamesScreen)
+	body := gs.View(m.env())
+	if !strings.Contains(body, "Welcome to yarm") {
+		t.Errorf("the banner should show even with zero games found:\n%s", body)
+	}
+	if !strings.Contains(body, "No Steam library was found") {
+		t.Errorf("banner should say no Steam library was found:\n%s", body)
+	}
+}
+
+// A normal (non-first) run must never show the banner.
+func TestNoWelcomeBannerOnNormalRun(t *testing.T) {
+	m := loaded(t) // fakeDeps()/firstRun defaults to false via `loaded`
+	gs := m.Screen().(*GamesScreen)
+	if strings.Contains(gs.View(m.env()), "Welcome to yarm") {
+		t.Error("a normal run should never show the welcome banner")
 	}
 }

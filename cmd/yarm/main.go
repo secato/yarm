@@ -50,13 +50,17 @@ func newRootCmd() *cobra.Command {
 		SilenceUsage: true,
 		Version:      buildinfo.Version,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Checked before bootstrap creates anything: config.yaml not
+			// existing yet is what "first run" means here.
+			firstRun := isFirstRun(paths.Resolve())
+
 			dirs, cfg, closeLog, err := bootstrap(verbose, debug)
 			if err != nil {
 				return err
 			}
 			defer func() { _ = closeLog() }()
 
-			slog.Info("running command", "name", "root")
+			slog.Info("running command", "name", "root", "first_run", firstRun)
 
 			c := newCache(dirs, cfg)
 			cl := newCatalogClient(dirs, cfg)
@@ -83,7 +87,8 @@ func newRootCmd() *cobra.Command {
 					Config:      cfg,
 					ConfigDir:   dirs.Config,
 				},
-				NoColor: noColor || envFlag("NO_COLOR"),
+				NoColor:  noColor || envFlag("NO_COLOR"),
+				FirstRun: firstRun,
 			})
 		},
 	}
@@ -1148,6 +1153,16 @@ func cacheRoot(dirs paths.Dirs, cfg config.Config) string {
 // bootstrap resolves the application directories, creates them, sets up
 // logging and loads (or creates) config.yaml. The returned close function
 // must be called to flush and close the log file.
+// isFirstRun reports whether config.yaml does not exist yet under dirs —
+// the signal that this is the first time yarm has run for this user, used
+// only to decide whether to show the welcome banner. Must be checked
+// before bootstrap runs: both dirs.EnsureAll and config.Load create things
+// on disk as a side effect.
+func isFirstRun(dirs paths.Dirs) bool {
+	_, err := os.Stat(config.Path(dirs.Config))
+	return os.IsNotExist(err)
+}
+
 func bootstrap(verbose, debug bool) (paths.Dirs, config.Config, func() error, error) {
 	dirs := paths.Resolve()
 	if err := dirs.EnsureAll(); err != nil {

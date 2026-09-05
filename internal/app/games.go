@@ -38,12 +38,20 @@ type GamesScreen struct {
 	filtering bool
 	loading   bool
 
+	// firstRun shows a welcome banner once the initial scan completes,
+	// dismissed by the user's first keypress (which still does whatever
+	// it would normally do — pressing "a" both dismisses the banner and
+	// opens add-folder).
+	firstRun bool
+
 	// detailWidth is how much of the window the right-hand panel takes.
 	detailWidth int
 }
 
 // NewGamesScreen returns the home screen, which loads its games on Init.
-func NewGamesScreen(loader GamesLoader, deps Deps) *GamesScreen {
+// firstRun shows a one-time welcome banner once the scan completes — the
+// caller's signal that config.yaml did not exist before this launch.
+func NewGamesScreen(loader GamesLoader, deps Deps, firstRun bool) *GamesScreen {
 	fi := textinput.New()
 	fi.Placeholder = "filter games"
 	fi.Prompt = "/"
@@ -55,11 +63,12 @@ func NewGamesScreen(loader GamesLoader, deps Deps) *GamesScreen {
 	fi.SetWidth(30)
 
 	return &GamesScreen{
-		loader:  loader,
-		deps:    deps,
-		keys:    DefaultKeyMap(),
-		filter:  fi,
-		loading: true,
+		loader:   loader,
+		deps:     deps,
+		keys:     DefaultKeyMap(),
+		filter:   fi,
+		loading:  true,
+		firstRun: firstRun,
 		table: table.New(
 			table.WithColumns(gamesColumns(80)),
 			table.WithFocused(true),
@@ -150,6 +159,10 @@ func (s *GamesScreen) Update(msg tea.Msg, env Env) (Screen, tea.Cmd) {
 }
 
 func (s *GamesScreen) handleKey(msg tea.KeyPressMsg, env Env) (Screen, tea.Cmd) {
+	// The first keypress dismisses the welcome banner and still does
+	// whatever it would normally do.
+	s.firstRun = false
+
 	if s.filtering {
 		switch msg.String() {
 		case "enter":
@@ -265,6 +278,8 @@ func (s *GamesScreen) resize(env Env) {
 		switch {
 		case status != "":
 			status = "✓ " + status
+		case e.ScanErr != nil:
+			status = "⚠ can't read folder"
 		case e.NativeBuild:
 			status = "native build"
 		case len(e.PlayableExes()) == 0:
@@ -293,8 +308,14 @@ func (s *GamesScreen) View(env Env) string {
 	if s.loading && len(s.entries) == 0 {
 		return env.Styles.Faint.Render("scanning for games…")
 	}
+
+	banner := ""
+	if s.firstRun {
+		banner = s.welcomeBanner(env) + "\n\n"
+	}
+
 	if len(s.entries) == 0 {
-		return env.Styles.Faint.Render(
+		return banner + env.Styles.Faint.Render(
 			"No games found.\n\nPress a to add a game folder, or r to rescan.")
 	}
 
@@ -305,7 +326,7 @@ func (s *GamesScreen) View(env Env) string {
 
 	left := lipgloss.JoinVertical(lipgloss.Left, s.table.View(), filterLine)
 	if s.detailWidth == 0 {
-		return left
+		return banner + left
 	}
 
 	detail := ""
@@ -323,10 +344,40 @@ func (s *GamesScreen) View(env Env) string {
 		Height(panelHeight).
 		Render(detail)
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", panel)
+	return banner + lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", panel)
 }
 
 // renderDetail draws the side panel for one game.
+// welcomeBanner summarizes the first run: that yarm's directories were
+// just created, what Steam found (if anything), and how to add a folder
+// it did not find on its own.
+func (s *GamesScreen) welcomeBanner(env Env) string {
+	steamGames := 0
+	for _, e := range s.entries {
+		if e.Provider == "steam" {
+			steamGames++
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString(env.Styles.Title.Render("Welcome to yarm!"))
+	b.WriteString("\n")
+	b.WriteString(env.Styles.Faint.Render("Your config, data and cache directories were just created."))
+	b.WriteString("\n")
+
+	switch steamGames {
+	case 0:
+		b.WriteString(env.Styles.Faint.Render("No Steam library was found."))
+	case 1:
+		b.WriteString(env.Styles.Faint.Render("Steam found 1 game."))
+	default:
+		b.WriteString(env.Styles.Faint.Render(fmt.Sprintf("Steam found %d games.", steamGames)))
+	}
+	b.WriteString(" ")
+	b.WriteString(env.Styles.Accent.Render("Press a to add a folder yourself."))
+	return b.String()
+}
+
 func (s *GamesScreen) renderDetail(e GameEntry, env Env) string {
 	var b strings.Builder
 	b.WriteString(env.Styles.Subtitle.Render(e.Name))
@@ -338,6 +389,10 @@ func (s *GamesScreen) renderDetail(e GameEntry, env Env) string {
 
 	exes := e.PlayableExes()
 	switch {
+	case e.ScanErr != nil:
+		b.WriteString(env.Styles.Bad.Render("Could not scan this folder"))
+		b.WriteString("\n")
+		b.WriteString(env.Styles.Faint.Render(friendlyError(e.ScanErr)))
 	case e.NativeBuild:
 		b.WriteString(env.Styles.Warn.Render("Native build"))
 		b.WriteString("\n")

@@ -5,9 +5,6 @@ package paths
 import (
 	"os"
 	"path/filepath"
-	"runtime"
-
-	"github.com/adrg/xdg"
 )
 
 const appName = "yarm"
@@ -34,20 +31,6 @@ func Resolve() Dirs {
 		}
 	}
 	return osDirs()
-}
-
-func osDirs() Dirs {
-	if runtime.GOOS == "windows" {
-		// xdg.ConfigHome and xdg.DataHome both resolve to %LOCALAPPDATA%
-		// on Windows; keep everything under one app folder there.
-		base := filepath.Join(xdg.ConfigHome, appName)
-		return Dirs{Config: base, Data: base, Cache: filepath.Join(base, "cache")}
-	}
-	return Dirs{
-		Config: filepath.Join(xdg.ConfigHome, appName),
-		Data:   filepath.Join(xdg.DataHome, appName),
-		Cache:  filepath.Join(xdg.CacheHome, appName),
-	}
 }
 
 // EnsureAll creates the three directories, including any missing parents.

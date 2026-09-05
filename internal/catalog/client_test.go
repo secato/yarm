@@ -3,6 +3,7 @@ package catalog
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -255,5 +256,44 @@ func TestClientRejectsOversizedCatalog(t *testing.T) {
 	c := New(srv.Client(), t.TempDir(), time.Hour, "yarm/test")
 	if _, err := c.load(context.Background(), srv.URL, packagesFile); err == nil {
 		t.Error("want an error for an oversized catalog, got nil")
+	}
+}
+
+// A non-200 response must surface as a StatusError a caller can inspect
+// (for a friendlier "rate limited, using cache" message), not just a
+// formatted string.
+func TestClientStatusError(t *testing.T) {
+	tests := []struct {
+		name          string
+		status        int
+		wantRateLimit bool
+	}{
+		{"github secondary rate limit", http.StatusForbidden, true},
+		{"github primary rate limit", http.StatusTooManyRequests, true},
+		{"not found", http.StatusNotFound, false},
+		{"server error", http.StatusInternalServerError, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.status)
+			}))
+			defer srv.Close()
+
+			c := New(srv.Client(), t.TempDir(), time.Hour, "yarm/test")
+			_, err := c.load(context.Background(), srv.URL, packagesFile)
+
+			var se StatusError
+			if !errors.As(err, &se) {
+				t.Fatalf("error = %v (%T), want a StatusError", err, err)
+			}
+			if se.Code != tt.status {
+				t.Errorf("Code = %d, want %d", se.Code, tt.status)
+			}
+			if got := se.RateLimited(); got != tt.wantRateLimit {
+				t.Errorf("RateLimited() = %v, want %v", got, tt.wantRateLimit)
+			}
+		})
 	}
 }
