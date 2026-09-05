@@ -9,6 +9,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Install wizard, progress screen, result screen and uninstall confirm
+  (step 6):
+  - `WizardScreen` walks Exe → Version → API/DLL → Packages → Add-ons →
+    Review (Add-ons skipped for the normal flavor), building an
+    `install.Request` as it goes. Required packages are locked selected,
+    manual-only add-ons are shown greyed with their repository URL and
+    cannot be selected, and "cached" badges come from small existence
+    checks (`cache.Cache.HasReShade/HasPackage/HasAddon/HasD3DCompiler`)
+    rather than a network round trip.
+  - `ProgressScreen` runs the resolve-then-install pipeline in a
+    background goroutine and narrates it back over a channel — the
+    "waitForActivity" pattern docs/plan/02-architecture.md §2.3 names —
+    since a `tea.Cmd` can only ever deliver one message. `esc` cancels a
+    running install via its own `context.CancelFunc`; the final result
+    always arrives, canceled or not.
+  - `ResultScreen` summarizes what an install or uninstall did and returns
+    to (and reloads) the games list via a new `PopToRoot` navigation
+    command — the wizard and progress screens underneath it are stale
+    once something has changed, so there is nowhere useful to pop back to
+    one level at a time.
+  - `i` on the game detail screen opens the wizard on the highlighted
+    executable; `u` confirms and runs an uninstall.
+  - `RealInstaller`/`RealUninstaller` (in `internal/app`, not
+    `internal/install`) wire the cache, catalog and install engine
+    together for the TUI — combining those packages is the app layer's
+    job per the documented dependency rule, so this intentionally
+    duplicates a little of what `cmd/yarm`'s `install` command already
+    does for the CLI rather than reaching across that boundary.
+  - `cache.Cache` gained `HasReShade`, `HasPackage`, `HasAddon` and
+    `HasD3DCompiler` — existence checks a UI can call for a "cached"
+    badge without downloading anything to find out.
+
+  A real bug found by testing: `WizardScreen.buildRequest` kept whatever
+  add-ons had been selected even after the user stepped back and switched
+  to the normal flavor, which `install.Request.Validate` then rejected
+  outright — the request that would have reached the install engine could
+  never have installed at all. Add-on selections are now dropped from the
+  built request whenever the flavor does not support them.
+
+  A second bug, in the new streaming helper itself: `StreamJob`'s per-message
+  send raced a `ctx.Done()` escape hatch against the channel send, so a
+  message — including the final result — could be silently dropped if it
+  was sent at the exact moment the context was canceled. That escape hatch
+  is gone; `send` now always blocks until read, which is safe because
+  Bubble Tea always starts listening the moment `Init` hands back the
+  listening command.
+
+  Verified against a scratch copy of a real game, driven through the built
+  binary via a pty end to end: install (with real catalog data — 41
+  ReShade versions, 43 packages, 24 add-ons, correct "cached" badges) →
+  games list correctly shows `✓ 6.8.0 addon` after `PopToRoot` reloads it →
+  uninstall via the confirm dialog → `diff -r` against the pristine copy is
+  byte-identical, and `installs.json` is empty again.
+
 - Games discovery: Steam provider (`libraryfolders.vdf` + `appmanifest_*.acf`
   parsing, per-OS install roots, non-game skip list) and manual provider over
   `manual_games` in the config; executable scanning with directory and filename

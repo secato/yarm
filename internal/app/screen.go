@@ -38,6 +38,20 @@ type pushScreenMsg struct{ screen Screen }
 // popScreenMsg asks the shell to return to the previous screen.
 type popScreenMsg struct{}
 
+// popToRootMsg asks the shell to discard the whole stack and return to the
+// bottom-most screen, re-initializing it so it refreshes its own data (a
+// game's install status, for instance) rather than showing whatever it last
+// held.
+type popToRootMsg struct{}
+
+// backHandler lets a screen intercept the Back binding itself — a wizard
+// stepping back one page rather than closing outright, or a running
+// progress screen treating esc as "cancel" rather than "leave". Returning
+// handled=false defers to the shell's normal pop.
+type backHandler interface {
+	HandleBack() (next Screen, cmd tea.Cmd, handled bool)
+}
+
 // errorMsg reports a failure that should be shown to the user rather than
 // crashing the program.
 type errorMsg struct{ err error }
@@ -53,6 +67,14 @@ func PushScreen(s Screen) tea.Cmd {
 // PopScreen returns a command that goes back one screen.
 func PopScreen() tea.Cmd {
 	return func() tea.Msg { return popScreenMsg{} }
+}
+
+// PopToRoot returns a command that discards the whole navigation stack and
+// returns to (and reloads) the home screen. Used once a wizard or an
+// uninstall has finished: the flow that led here no longer means anything,
+// and the game list needs to reflect what just changed.
+func PopToRoot() tea.Cmd {
+	return func() tea.Msg { return popToRootMsg{} }
 }
 
 // ReportError returns a command that surfaces an error in the UI.

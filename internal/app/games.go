@@ -19,6 +19,7 @@ type gamesLoadedMsg struct{ entries []GameEntry }
 // detail panel for the selected one.
 type GamesScreen struct {
 	loader GamesLoader
+	deps   Deps
 	keys   KeyMap
 
 	entries   []GameEntry
@@ -33,13 +34,14 @@ type GamesScreen struct {
 }
 
 // NewGamesScreen returns the home screen, which loads its games on Init.
-func NewGamesScreen(loader GamesLoader) *GamesScreen {
+func NewGamesScreen(loader GamesLoader, deps Deps) *GamesScreen {
 	fi := textinput.New()
 	fi.Placeholder = "filter games"
 	fi.Prompt = "/"
 
 	return &GamesScreen{
 		loader:  loader,
+		deps:    deps,
 		keys:    DefaultKeyMap(),
 		filter:  fi,
 		loading: true,
@@ -161,7 +163,7 @@ func (s *GamesScreen) handleKey(msg tea.KeyPressMsg, env Env) (Screen, tea.Cmd) 
 
 	case key.Matches(msg, s.keys.Enter):
 		if entry, ok := s.selected(); ok {
-			return s, PushScreen(NewGameDetailScreen(entry))
+			return s, PushScreen(NewGameDetailScreen(entry, s.deps))
 		}
 		return s, nil
 	}

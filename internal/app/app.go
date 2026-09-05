@@ -118,6 +118,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case popToRootMsg:
+		if n := len(m.stack); n > 0 {
+			m.screen = m.stack[0]
+			m.stack = nil
+		}
+		m.screen = m.sized(m.screen)
+		// Re-initializing is what makes this different from a plain pop:
+		// the screen we are returning to (typically the games list) reloads
+		// its own data instead of showing what it held before the flow that
+		// led away from it.
+		return m, m.screen.Init()
+
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	}
@@ -161,8 +173,19 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.quitting = true
 		return m, tea.Quit
 
-	case key.Matches(msg, m.keys.Back) && len(m.stack) > 0:
-		return m, PopScreen()
+	case key.Matches(msg, m.keys.Back):
+		// A screen with its own idea of "back" — a wizard stepping back a
+		// page, a running progress screen canceling — gets first refusal.
+		if bh, ok := m.screen.(backHandler); ok {
+			if next, cmd, handled := bh.HandleBack(); handled {
+				m.screen = next
+				return m, cmd
+			}
+		}
+		if len(m.stack) > 0 {
+			return m, PopScreen()
+		}
+		return m, nil
 	}
 
 	m.status = ""

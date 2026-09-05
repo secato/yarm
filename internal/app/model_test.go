@@ -32,7 +32,7 @@ func drive(t *testing.T, m Model, msgs ...tea.Msg) Model {
 			for _, c := range msg {
 				apply(c, depth+1)
 			}
-		case pushScreenMsg, popScreenMsg, statusMsg, errorMsg, showOverlayMsg:
+		case pushScreenMsg, popScreenMsg, popToRootMsg, statusMsg, errorMsg, showOverlayMsg, uninstallDoneMsg:
 			next, follow := cur.Update(msg)
 			cur = next
 			apply(follow, depth+1)
@@ -52,7 +52,7 @@ func drive(t *testing.T, m Model, msgs ...tea.Msg) Model {
 
 func loaded(t *testing.T) Model {
 	t.Helper()
-	m := New(NewGamesScreen(fakeLoader{entries: sampleEntries()}))
+	m := New(NewGamesScreen(fakeLoader{entries: sampleEntries()}, fakeDeps()))
 	return drive(t, m,
 		tea.WindowSizeMsg{Width: termWidth, Height: termHeight},
 		gamesLoadedMsg{entries: sampleEntries()},
@@ -254,7 +254,7 @@ func (lightBG) RGBA() (r, g, b, a uint32) { return 0xffff, 0xffff, 0xffff, 0xfff
 
 // Rendering must not panic before the first window size arrives.
 func TestRenderBeforeReady(t *testing.T) {
-	m := New(NewGamesScreen(fakeLoader{entries: sampleEntries()}))
+	m := New(NewGamesScreen(fakeLoader{entries: sampleEntries()}, fakeDeps()))
 	if got := m.View().Content; got == "" {
 		t.Error("the pre-ready view should say something")
 	}
@@ -311,5 +311,88 @@ func TestPoppedScreenIsResized(t *testing.T) {
 	}
 	if got := gs.table.Width(); got > 60 {
 		t.Errorf("table width = %d after the window shrank to 60", got)
+	}
+}
+
+// The uninstall confirm flow, end to end through the root model: press u
+// on an installed executable, confirm, and land on a Result screen.
+func TestUninstallConfirmFlow(t *testing.T) {
+	m := loaded(t)
+	// Navigate to ELDEN RING (index 2 of sampleEntries), which has an
+	// install recorded on its first executable.
+	m = drive(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"})
+	m = drive(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"})
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	gd, ok := m.Screen().(*GameDetailScreen)
+	if !ok || gd.entry.Name != "ELDEN RING" {
+		t.Fatalf("screen = %T (%q), want *GameDetailScreen for ELDEN RING", m.Screen(), gd.entry.Name)
+	}
+
+	m = drive(t, m, tea.KeyPressMsg{Code: 'u', Text: "u"})
+	if m.overlay == nil {
+		t.Fatal("'u' on an installed executable should open a confirm overlay")
+	}
+
+	m = drive(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if m.overlay != nil {
+		t.Error("confirming should close the overlay")
+	}
+
+	rs, ok := m.Screen().(*ResultScreen)
+	if !ok {
+		t.Fatalf("screen after confirming = %T, want *ResultScreen", m.Screen())
+	}
+	if !rs.ok {
+		t.Errorf("result should report success, lines = %v", rs.lines)
+	}
+}
+
+// 'u' must do nothing on an executable with no recorded install — there
+// is nothing to confirm.
+func TestUninstallKeyNoOpWithoutInstall(t *testing.T) {
+	m := loaded(t) // cursor starts on Control Ultimate Edition, uninstalled
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if _, ok := m.Screen().(*GameDetailScreen); !ok {
+		t.Fatalf("screen = %T, want *GameDetailScreen", m.Screen())
+	}
+
+	m = drive(t, m, tea.KeyPressMsg{Code: 'u', Text: "u"})
+	if m.overlay != nil {
+		t.Error("'u' on a not-installed executable should not open a confirm overlay")
+	}
+}
+
+// Pressing i opens the wizard on the highlighted executable.
+func TestInstallKeyOpensWizard(t *testing.T) {
+	m := loaded(t)
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // -> Control's detail
+
+	m = drive(t, m, tea.KeyPressMsg{Code: 'i', Text: "i"})
+	if _, ok := m.Screen().(*WizardScreen); !ok {
+		t.Fatalf("screen after 'i' = %T, want *WizardScreen", m.Screen())
+	}
+}
+
+// PopToRoot must discard the whole navigation stack — however deep it
+// is — and reload the screen at the bottom, not merely pop one level.
+// This is what a finished install or uninstall uses to get back to a
+// games list that reflects what just changed.
+func TestPopToRootClearsStackAndReloads(t *testing.T) {
+	m := loaded(t)
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})   // -> GameDetail
+	m = drive(t, m, tea.KeyPressMsg{Code: 'i', Text: "i"}) // -> Wizard
+	if _, ok := m.Screen().(*WizardScreen); !ok {
+		t.Fatalf("setup: screen = %T, want *WizardScreen", m.Screen())
+	}
+
+	m = drive(t, m, popToRootMsg{})
+
+	if _, ok := m.Screen().(*GamesScreen); !ok {
+		t.Fatalf("after PopToRoot, screen = %T, want *GamesScreen", m.Screen())
+	}
+	if got := len(m.stack); got != 0 {
+		t.Errorf("stack has %d entries after PopToRoot, want 0", got)
 	}
 }

@@ -159,6 +159,13 @@ func TestEnsurePackage(t *testing.T) {
 		t.Errorf("version key = %q, want a 20260905- prefix", base)
 	}
 
+	if !c.HasPackage(pkg.ID) {
+		t.Error("HasPackage() = false right after EnsurePackage cached it")
+	}
+	if c.HasPackage("some-other-package") {
+		t.Error("HasPackage() = true for a package never cached")
+	}
+
 	before := *hits
 	dir2, err := c.EnsurePackage(context.Background(), pkg, nil)
 	if err != nil {
@@ -219,6 +226,9 @@ func TestEnsureAddon(t *testing.T) {
 			}
 			if _, err := os.Stat(filepath.Join(dir, tt.wantFile)); err != nil {
 				t.Errorf("%s missing: %v", tt.wantFile, err)
+			}
+			if !c.HasAddon(addon.ID) {
+				t.Error("HasAddon() = false right after EnsureAddon cached it")
 			}
 		})
 	}
@@ -463,5 +473,76 @@ func TestWithinRoot(t *testing.T) {
 		if got := withinRoot(root, tt.target); got != tt.want {
 			t.Errorf("withinRoot(%q, %q) = %v, want %v", root, tt.target, got, tt.want)
 		}
+	}
+}
+
+// HasReShade/HasPackage/HasAddon let a UI show a "cached" badge without
+// triggering a download to find out.
+func TestHasReShadeHasPackageHasAddon(t *testing.T) {
+	payload := fakeSetup(t)
+	c, srv, _ := newCache(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(payload)
+	})
+
+	if c.HasReShade("6.8.0", true) {
+		t.Error("HasReShade() = true before anything was cached")
+	}
+	c.SetupURL = func(version string, addon bool) string {
+		return srv.URL + "/ReShade_Setup_" + version + ".exe"
+	}
+	if _, err := c.EnsureReShade(context.Background(), "6.8.0", true, nil); err != nil {
+		t.Fatalf("EnsureReShade(): %v", err)
+	}
+	if !c.HasReShade("6.8.0", true) {
+		t.Error("HasReShade() = false after caching the addon build")
+	}
+	if c.HasReShade("6.8.0", false) {
+		t.Error("HasReShade() = true for the normal flavor, which was never fetched")
+	}
+	if c.HasReShade("6.9.0", true) {
+		t.Error("HasReShade() = true for a version never fetched")
+	}
+
+	if c.HasPackage("standard-effects") {
+		t.Error("HasPackage() = true before anything was cached")
+	}
+	if c.HasAddon("swapchain") {
+		t.Error("HasAddon() = true before anything was cached")
+	}
+}
+
+func TestHasD3DCompiler(t *testing.T) {
+	c, _, _ := newCache(t, func(w http.ResponseWriter, r *http.Request) {})
+
+	if c.HasD3DCompiler(game.ArchX64) {
+		t.Error("HasD3DCompiler() = true before anything was cached")
+	}
+
+	src, err := artifacts.D3DSourceFor(game.ArchX64)
+	if err != nil {
+		t.Fatalf("D3DSourceFor: %v", err)
+	}
+	dll := c.abs(filepath.Join(DirD3DCompiler, string(game.ArchX64), artifacts.D3DCompiler))
+	if err := os.MkdirAll(filepath.Dir(dll), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(dll, make([]byte, src.DLLSize), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if !c.HasD3DCompiler(game.ArchX64) {
+		t.Error("HasD3DCompiler() = false for a file matching the pinned size")
+	}
+
+	// A file that exists but is the wrong size (a partial or corrupt
+	// download) must not read as cached.
+	if err := os.WriteFile(dll, []byte("wrong size"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if c.HasD3DCompiler(game.ArchX64) {
+		t.Error("HasD3DCompiler() = true for a file with the wrong size")
+	}
+
+	if c.HasD3DCompiler(game.ArchX86) {
+		t.Error("HasD3DCompiler() = true for an architecture never cached")
 	}
 }

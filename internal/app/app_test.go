@@ -101,7 +101,7 @@ func finish(t *testing.T, s *session) Model {
 }
 
 func TestGamesScreenListsGames(t *testing.T) {
-	s := newTest(t, New(NewGamesScreen(fakeLoader{entries: sampleEntries()})))
+	s := newTest(t, New(NewGamesScreen(fakeLoader{entries: sampleEntries()}, fakeDeps())))
 
 	for _, want := range []string{
 		"Control Ultimate Edition",
@@ -119,7 +119,7 @@ func TestGamesScreenListsGames(t *testing.T) {
 // The status column is how a user sees at a glance what is installed, and
 // why a game that looks empty is not a failed scan.
 func TestGamesScreenShowsStatusColumn(t *testing.T) {
-	s := newTest(t, New(NewGamesScreen(fakeLoader{entries: sampleEntries()})))
+	s := newTest(t, New(NewGamesScreen(fakeLoader{entries: sampleEntries()}, fakeDeps())))
 
 	waitForText(t, s, "6.8.0 addon")
 	waitForText(t, s, "native build")
@@ -128,7 +128,7 @@ func TestGamesScreenShowsStatusColumn(t *testing.T) {
 }
 
 func TestGamesScreenEmptyState(t *testing.T) {
-	s := newTest(t, New(NewGamesScreen(fakeLoader{})))
+	s := newTest(t, New(NewGamesScreen(fakeLoader{}, fakeDeps())))
 
 	waitForText(t, s, "No games found")
 	waitForText(t, s, "add a game folder")
@@ -137,7 +137,7 @@ func TestGamesScreenEmptyState(t *testing.T) {
 
 // A discovery failure must surface in the UI, not take the program down.
 func TestGamesScreenReportsLoadError(t *testing.T) {
-	s := newTest(t, New(NewGamesScreen(errLoader)))
+	s := newTest(t, New(NewGamesScreen(errLoader, fakeDeps())))
 
 	waitForText(t, s, "Something went wrong")
 	waitForText(t, s, "steam library is unreadable")
@@ -149,7 +149,7 @@ func TestGamesScreenReportsLoadError(t *testing.T) {
 }
 
 func TestHelpOverlayListsScreenBindings(t *testing.T) {
-	s := newTest(t, New(NewGamesScreen(fakeLoader{entries: sampleEntries()})))
+	s := newTest(t, New(NewGamesScreen(fakeLoader{entries: sampleEntries()}, fakeDeps())))
 	waitForText(t, s, "ELDEN RING")
 
 	s.send(tea.KeyPressMsg{Code: '?', Text: "?"})
@@ -160,7 +160,7 @@ func TestHelpOverlayListsScreenBindings(t *testing.T) {
 }
 
 func TestGameDetailRenders(t *testing.T) {
-	s := newTest(t, New(NewGamesScreen(fakeLoader{entries: sampleEntries()})))
+	s := newTest(t, New(NewGamesScreen(fakeLoader{entries: sampleEntries()}, fakeDeps())))
 	waitForText(t, s, "ELDEN RING")
 
 	s.send(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -175,7 +175,7 @@ func TestGameDetailRenders(t *testing.T) {
 }
 
 func TestAddFolderScreenRejectsMissingPath(t *testing.T) {
-	s := newTest(t, New(NewGamesScreen(fakeLoader{entries: sampleEntries()})))
+	s := newTest(t, New(NewGamesScreen(fakeLoader{entries: sampleEntries()}, fakeDeps())))
 	waitForText(t, s, "ELDEN RING")
 
 	s.send(tea.KeyPressMsg{Code: 'a', Text: "a"})
@@ -190,7 +190,7 @@ func TestAddFolderScreenRejectsMissingPath(t *testing.T) {
 // A real folder with no executables is valid but worth flagging.
 func TestAddFolderScreenWarnsOnEmptyFolder(t *testing.T) {
 	dir := t.TempDir()
-	s := newTest(t, New(NewGamesScreen(fakeLoader{entries: sampleEntries()})))
+	s := newTest(t, New(NewGamesScreen(fakeLoader{entries: sampleEntries()}, fakeDeps())))
 	waitForText(t, s, "ELDEN RING")
 
 	s.send(tea.KeyPressMsg{Code: 'a', Text: "a"})
@@ -204,7 +204,7 @@ func TestAddFolderScreenWarnsOnEmptyFolder(t *testing.T) {
 // Ctrl+C must quit from anywhere, including from inside a text input that
 // is otherwise swallowing keys.
 func TestCtrlCQuitsFromTextInput(t *testing.T) {
-	s := newTest(t, New(NewGamesScreen(fakeLoader{entries: sampleEntries()})))
+	s := newTest(t, New(NewGamesScreen(fakeLoader{entries: sampleEntries()}, fakeDeps())))
 	waitForText(t, s, "ELDEN RING")
 
 	s.send(tea.KeyPressMsg{Code: '/', Text: "/"})

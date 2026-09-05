@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 
+	"github.com/secato/yarm/internal/catalog"
+	"github.com/secato/yarm/internal/config"
 	"github.com/secato/yarm/internal/game"
+	"github.com/secato/yarm/internal/install"
 	"github.com/secato/yarm/internal/state"
 )
 
@@ -84,5 +87,86 @@ func sampleEntries() []GameEntry {
 				}},
 			},
 		},
+	}
+}
+
+// fakeWizardData supplies fixed catalog/custom-content data, so wizard
+// tests never reach the network or disk.
+type fakeWizardData struct {
+	data WizardData
+	err  error
+}
+
+func (f fakeWizardData) LoadWizardData(context.Context) (WizardData, error) {
+	if f.err != nil {
+		return WizardData{}, f.err
+	}
+	return f.data, nil
+}
+
+// sampleWizardData is a small but representative catalog: one required
+// package, one optional one, a manual-only add-on and an installable one,
+// and a version marked latest.
+func sampleWizardData() WizardData {
+	return WizardData{
+		Versions: []catalog.Version{
+			{Version: "6.8.0", Latest: true},
+			{Version: "6.7.3"},
+		},
+		Packages: []catalog.Package{
+			{ID: "standard-effects", Name: "Standard effects", Required: true},
+			{ID: "sweetfx-by-ceejay-dk", Name: "SweetFX by CeeJay.dk"},
+		},
+		Addons: []catalog.Addon{
+			{
+				ID: "swapchain-override-by-crosire", Name: "Swap chain override by crosire",
+				URL64: "https://example.invalid/swapchain.addon64",
+				URL32: "https://example.invalid/swapchain.addon32",
+			},
+			{ID: "renodx-by-shortfuse", Name: "RenoDX by ShortFuse"}, // manual-only: no URLs at all
+		},
+	}
+}
+
+// fakeCacheStatus lets tests assert exact "cached" badge behavior without
+// touching a real cache directory.
+type fakeCacheStatus struct {
+	reshade     map[string]bool
+	packages    map[string]bool
+	addons      map[string]bool
+	d3dcompiler bool
+}
+
+func (f fakeCacheStatus) HasReShade(version string, addon bool) bool {
+	flavor := "normal"
+	if addon {
+		flavor = "addon"
+	}
+	return f.reshade[version+":"+flavor]
+}
+func (f fakeCacheStatus) HasPackage(id string) bool     { return f.packages[id] }
+func (f fakeCacheStatus) HasAddon(id string) bool       { return f.addons[id] }
+func (f fakeCacheStatus) HasD3DCompiler(game.Arch) bool { return f.d3dcompiler }
+
+// fakeUninstaller lets tests control an uninstall's outcome without
+// touching a real install or the filesystem.
+type fakeUninstaller struct {
+	result install.UninstallResult
+	err    error
+}
+
+func (f fakeUninstaller) Uninstall(install.UninstallRequest) (install.UninstallResult, error) {
+	return f.result, f.err
+}
+
+// fakeDeps returns a Deps wired entirely to in-memory fakes, for tests
+// that drive the wizard, progress or uninstall-confirm flows.
+func fakeDeps() Deps {
+	return Deps{
+		WizardData:  fakeWizardData{data: sampleWizardData()},
+		Installer:   &fakeInstaller{result: install.Result{Written: []string{"Game/dxgi.dll"}}},
+		Uninstaller: fakeUninstaller{result: install.UninstallResult{Removed: []string{"Game/dxgi.dll"}}},
+		CacheStatus: fakeCacheStatus{},
+		Defaults:    config.DefaultsConfig{ReshadeFlavor: "addon", Packages: []string{"standard"}},
 	}
 }

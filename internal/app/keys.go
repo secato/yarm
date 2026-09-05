@@ -19,6 +19,14 @@ type KeyMap struct {
 	Quit    key.Binding
 	Confirm key.Binding
 	Cancel  key.Binding
+
+	// Install-wizard-adjacent bindings, used from the game detail screen
+	// and within the wizard itself.
+	Install   key.Binding
+	Uninstall key.Binding
+	Toggle    key.Binding // space: multi-select toggle
+	Flavor    key.Binding // tab: normal/addon flavor toggle
+	Overwrite key.Binding // o: allow replacing foreign files
 }
 
 // DefaultKeyMap returns the standard bindings.
@@ -38,6 +46,12 @@ func DefaultKeyMap() KeyMap {
 		Quit:    key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 		Confirm: key.NewBinding(key.WithKeys("y", "enter"), key.WithHelp("y", "confirm")),
 		Cancel:  key.NewBinding(key.WithKeys("n", "esc"), key.WithHelp("n", "cancel")),
+
+		Install:   key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "install ReShade")),
+		Uninstall: key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "uninstall")),
+		Toggle:    key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "toggle")),
+		Flavor:    key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "toggle flavor")),
+		Overwrite: key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "toggle overwrite")),
 	}
 }
 

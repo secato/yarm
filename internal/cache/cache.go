@@ -76,6 +76,43 @@ func (c *Cache) now() time.Time {
 // abs turns a cache-relative path into an absolute one.
 func (c *Cache) abs(rel string) string { return filepath.Join(c.Root, rel) }
 
+// HasReShade reports whether a ReShade build is already cached, for
+// UIs that want to flag a version as "cached" without triggering a
+// download to find out.
+func (c *Cache) HasReShade(version string, addon bool) bool {
+	flavor := FlavorNormal
+	if addon {
+		flavor = FlavorAddon
+	}
+	dir := c.abs(filepath.Join(DirReShade, version, flavor))
+	complete, err := hasFiles(dir, artifacts.ReShade32, artifacts.ReShade64)
+	return err == nil && complete
+}
+
+// HasPackage reports whether any cached version of a package exists.
+// Package cache keys carry a download date and content hash (§4.2), so
+// this checks for the id's directory rather than one exact version.
+func (c *Cache) HasPackage(id string) bool {
+	return nonEmpty(c.abs(filepath.Join(DirPackages, id)))
+}
+
+// HasAddon reports whether any cached version of an add-on exists.
+func (c *Cache) HasAddon(id string) bool {
+	return nonEmpty(c.abs(filepath.Join(DirAddons, id)))
+}
+
+// HasD3DCompiler reports whether a verified d3dcompiler_47.dll for arch is
+// already cached, using the same size check EnsureD3DCompiler does.
+func (c *Cache) HasD3DCompiler(arch game.Arch) bool {
+	src, err := artifacts.D3DSourceFor(arch)
+	if err != nil {
+		return false
+	}
+	dll := c.abs(filepath.Join(DirD3DCompiler, string(arch), artifacts.D3DCompiler))
+	st, err := os.Stat(dll)
+	return err == nil && st.Size() == src.DLLSize
+}
+
 // EnsureReShade returns the directory holding ReShade32.dll and
 // ReShade64.dll for a version and flavor, downloading and extracting the
 // setup executable if it is not cached yet.

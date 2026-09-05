@@ -58,10 +58,26 @@ func newRootCmd() *cobra.Command {
 
 			slog.Info("running command", "name", "root")
 
+			c := newCache(dirs, cfg)
+			cl := newCatalogClient(dirs, cfg)
+			customDir := filepath.Join(cacheRoot(dirs, cfg), "custom")
+
 			return app.Run(cmd.Context(), app.Options{
 				Loader: app.ProviderLoader{
 					Providers: buildProviders(cfg),
 					StateDir:  dirs.Data,
+				},
+				Deps: app.Deps{
+					WizardData: app.CatalogWizardData{Client: cl, CustomDir: customDir},
+					Installer: &app.RealInstaller{
+						Cache:     c,
+						Catalog:   cl,
+						CustomDir: customDir,
+						StateDir:  dirs.Data,
+					},
+					Uninstaller: app.RealUninstaller{StateDir: dirs.Data},
+					CacheStatus: c,
+					Defaults:    cfg.Defaults,
 				},
 				NoColor: noColor || envFlag("NO_COLOR"),
 			})
