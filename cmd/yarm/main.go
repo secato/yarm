@@ -7,14 +7,17 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/secato/yarm/internal/buildinfo"
+	"github.com/secato/yarm/internal/catalog"
 	"github.com/secato/yarm/internal/config"
 	"github.com/secato/yarm/internal/game"
 	"github.com/secato/yarm/internal/paths"
@@ -59,6 +62,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newVersionCmd())
 	root.AddCommand(newPathsCmd(&verbose, &debug))
 	root.AddCommand(newGamesCmd(&verbose, &debug))
+	root.AddCommand(newCatalogCmd(&verbose, &debug))
 
 	return root
 }
@@ -228,6 +232,153 @@ func printGamesText(w io.Writer, games []gameOutput) {
 			_, _ = fmt.Fprintf(w, "  %s %-45s arch=%-8s api=%s\n", mark, e.Path, e.Arch, e.API)
 		}
 	}
+}
+
+// newCatalogCmd builds the hidden `catalog` debug command. It is not part
+// of the documented CLI (§1 lists the public subcommands); it exists so
+// each implementation step stays demoable before the TUI arrives.
+func newCatalogCmd(verbose, debug *bool) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:    "catalog",
+		Short:  "Inspect the effect package, add-on and ReShade version catalogs",
+		Hidden: true,
+	}
+	cmd.AddCommand(newCatalogLsCmd(verbose, debug))
+	return cmd
+}
+
+func newCatalogLsCmd(verbose, debug *bool) *cobra.Command {
+	var asJSON bool
+
+	cmd := &cobra.Command{
+		Use:   "ls",
+		Short: "List ReShade versions, effect packages, add-ons and custom content",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dirs, cfg, closeLog, err := bootstrap(*verbose, *debug)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = closeLog() }()
+
+			slog.Info("running command", "name", "catalog ls")
+
+			cacheDir := cfg.CacheDir
+			if cacheDir == "" {
+				cacheDir = dirs.Cache
+			}
+
+			cl := catalog.New(
+				&http.Client{Timeout: 30 * time.Second},
+				filepath.Join(cacheDir, "catalog"),
+				time.Duration(cfg.CatalogTTLHours)*time.Hour,
+				userAgent(),
+			)
+
+			out, err := collectCatalog(cmd.Context(), cl, filepath.Join(cacheDir, "custom"))
+			if err != nil {
+				return err
+			}
+
+			if asJSON {
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(out)
+			}
+			printCatalogText(cmd.OutOrStdout(), out)
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&asJSON, "json", false, "output as JSON")
+	return cmd
+}
+
+// catalogOutput is the catalog ls --json shape.
+type catalogOutput struct {
+	Versions []catalog.Version `json:"reshade_versions"`
+	Packages []catalog.Package `json:"packages"`
+	Addons   []catalog.Addon   `json:"addons"`
+	Custom   []catalog.Custom  `json:"custom"`
+}
+
+// collectCatalog gathers every catalog source. A failure in one source is
+// reported but does not suppress the others: an expired GitHub rate limit
+// should not hide the package list.
+func collectCatalog(ctx context.Context, cl *catalog.Client, customDir string) (catalogOutput, error) {
+	var out catalogOutput
+
+	versions, err := cl.Versions(ctx)
+	if err != nil {
+		slog.Error("could not load ReShade versions", "error", err)
+	}
+	out.Versions = versions
+
+	packages, err := cl.Packages(ctx)
+	if err != nil {
+		slog.Error("could not load effect packages", "error", err)
+	}
+	out.Packages = packages
+
+	addons, err := cl.Addons(ctx)
+	if err != nil {
+		slog.Error("could not load add-ons", "error", err)
+	}
+	out.Addons = addons
+
+	custom, err := catalog.ScanCustom(customDir)
+	if err != nil {
+		slog.Error("could not scan custom content", "dir", customDir, "error", err)
+	}
+	out.Custom = custom
+
+	if len(out.Versions) == 0 && len(out.Packages) == 0 && len(out.Addons) == 0 {
+		return out, fmt.Errorf("no catalog source could be loaded (offline with an empty cache?)")
+	}
+	return out, nil
+}
+
+func printCatalogText(w io.Writer, c catalogOutput) {
+	_, _ = fmt.Fprintf(w, "ReShade versions (%d)\n", len(c.Versions))
+	for _, v := range c.Versions {
+		marker := ""
+		if v.Latest {
+			marker = "  (latest)"
+		}
+		_, _ = fmt.Fprintf(w, "  %s%s\n", v.Version, marker)
+	}
+
+	_, _ = fmt.Fprintf(w, "\nEffect packages (%d)\n", len(c.Packages))
+	for _, p := range c.Packages {
+		flags := ""
+		switch {
+		case p.Required:
+			flags = "  [required]"
+		case p.Enabled:
+			flags = "  [default]"
+		}
+		_, _ = fmt.Fprintf(w, "  %-46s %s%s\n", p.ID, p.Name, flags)
+	}
+
+	_, _ = fmt.Fprintf(w, "\nAdd-ons (%d)\n", len(c.Addons))
+	for _, a := range c.Addons {
+		note := string(a.Kind())
+		if !a.Installable() {
+			note = "manual — see " + a.RepositoryURL
+		} else if _, ok := a.SourceFor(game.ArchX86); !ok {
+			note += ", x64 only"
+		}
+		_, _ = fmt.Fprintf(w, "  %-46s %-12s %s\n", a.ID, note, a.Name)
+	}
+
+	_, _ = fmt.Fprintf(w, "\nCustom content (%d)\n", len(c.Custom))
+	for _, cu := range c.Custom {
+		_, _ = fmt.Fprintf(w, "  %-46s %-12s %s\n", cu.ID, cu.Kind, cu.Path)
+	}
+}
+
+// userAgent identifies YARM to reshade.me and GitHub, as §4.1 requires.
+func userAgent() string {
+	return fmt.Sprintf("yarm/%s (+https://github.com/secato/yarm)", buildinfo.Version)
 }
 
 // bootstrap resolves the application directories, creates them, sets up

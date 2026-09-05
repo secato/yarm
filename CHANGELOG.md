@@ -27,6 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   DLL through the Windows loader (real or Wine's), so native builds are not
   installable targets.
 
+- Catalog (`internal/catalog`): INI section parser, effect package and add-on
+  catalogs, ReShade version discovery (reshade.me latest marker + GitHub tags,
+  numeric semver sort, floor at 5.0.0), custom content scanning under
+  `cache/custom`, and package id slugs with a hand-kept alias map. Catalogs are
+  cached under `cache/catalog` with a TTL from `catalog_ttl_hours` and fall back
+  to the cached copy at any age when the network is unavailable. Hidden
+  `yarm catalog ls [--json]` debug command. (step 2)
+
 ### Changed
 
 - Executable scan depth raised from 3 to 4. Source 2 and some Unreal layouts
