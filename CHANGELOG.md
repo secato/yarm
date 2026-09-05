@@ -9,6 +9,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Cache manager, custom content and settings screens (step 7):
+  - `CacheScreen`: table of cached artifacts (name, kind, version, size,
+    downloaded, last used); `s` cycles size/date/name sort; `d` deletes with
+    the shared confirm overlay; `R` re-fetches a package's `DownloadURL`
+    straight from its own `package.json` (no live catalog needed) so it
+    picks up an upstream change even within the same day's cache key; the
+    header shows the cache's total size and free disk space.
+  - `internal/fsutil.FreeSpace`: `statfs(2)` on Linux/macOS,
+    `GetDiskFreeSpaceEx` on Windows, behind one cross-platform signature.
+  - `cache.Cache` gained `HasReShade`, `HasPackage`, `HasAddon` and
+    `HasD3DCompiler` — cheap existence checks a UI can call for a "cached"
+    badge without downloading anything to find out.
+  - `CustomScreen`: read-only view of `cache/custom`'s two folders and what
+    `catalog.ScanCustom` found in them; `o` prints the highlighted folder's
+    absolute path to the status bar.
+  - `SettingsScreen`: edits a working copy of `config.Config` — default
+    flavor (toggle), cache directory and catalog TTL (inline text edit),
+    manual game folders (add, reusing `AddFolderScreen`'s own path
+    validation; remove) — and writes it back with `s`. Every field takes
+    effect on the next launch, not the running session: the cache
+    directory and the game providers are both resolved once at startup, so
+    live-reloading either was judged not worth the added complexity for a
+    local, restart-anytime tool.
+  - `c`/`x`/`s` on the games screen open the three screens.
+
+  A real, reproducible rendering bug found while building this and fixed
+  for all three affected screens (two from step 5, `GamesScreen`'s filter
+  and `AddFolderScreen`'s path input; none from step 7's own new fields):
+  `bubbles/textinput`'s placeholder renderer sizes its internal buffer
+  from the field's configured `Width()`, not from the placeholder string —
+  left at the zero value, it renders only the placeholder's first
+  character and stops, no matter how long the hint text is. Every
+  placeholder-bearing text field now calls `SetWidth`.
+
+  The same "a failure bypasses this screen's own state" bug class from
+  step 6 (`StreamJob`'s send/cancel race) turned up twice more while
+  building the cache screen, and was fixed the same way in the screens
+  that had it: `GamesScreen.load` and `WizardScreen.Init` both used the
+  generic `Async` helper, whose error path routes straight to the shell's
+  overlay without ever reaching the screen — leaving `loading` stuck
+  `true` and the title permanently claiming "scanning…" (or every wizard
+  step permanently showing "loading catalog data…") once the error dialog
+  closed. All five loaders that can fail now resolve to a message the
+  owning screen's own `Update` always sees, success or not.
+
+  Verified live against the real cache (built up over earlier steps: a
+  ReShade build, two packages, `d3dcompiler_47.dll`) and the real
+  `~/.cache/yarm`: the cache screen listed all four real entries with
+  correct sizes and cycled through all three real sort orders; canceling a
+  delete left the cache untouched; the custom screen showed the real
+  `cache/custom` paths; settings correctly toggled the flavor, edited the
+  TTL, added a real folder through the reused add-folder flow, and wrote a
+  `config.yaml` that round-trips through `config.Load` with the new value.
+
 - Install wizard, progress screen, result screen and uninstall confirm
   (step 6):
   - `WizardScreen` walks Exe → Version → API/DLL → Packages → Add-ons →

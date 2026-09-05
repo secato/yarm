@@ -32,6 +32,11 @@ func NewAddFolderScreen() *AddFolderScreen {
 	ti := textinput.New()
 	ti.Placeholder = "/path/to/game"
 	ti.Prompt = "› "
+	// bubbles/textinput's placeholder rendering sizes its internal buffer
+	// from Width(), not from the placeholder string itself: left at the
+	// zero value, placeholderView renders only the placeholder's first
+	// character and stops. Any width big enough to hold the hint fixes it.
+	ti.SetWidth(60)
 	ti.Focus()
 
 	return &AddFolderScreen{input: ti, keys: DefaultKeyMap()}

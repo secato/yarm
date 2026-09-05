@@ -12,8 +12,17 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// gamesLoadedMsg carries the result of a discovery run.
-type gamesLoadedMsg struct{ entries []GameEntry }
+// gamesLoadedMsg carries the result of a discovery run, success or not.
+//
+// Built as a plain tea.Cmd in load() rather than through Async: Async
+// would route a discovery failure to the shell's generic error overlay
+// without ever reaching this screen's Update, leaving "scanning…" as the
+// title forever once the dialog closed even though "r" would still
+// silently work to retry.
+type gamesLoadedMsg struct {
+	entries []GameEntry
+	err     error
+}
 
 // GamesScreen is the home screen: a table of discovered games with a
 // detail panel for the selected one.
@@ -38,6 +47,12 @@ func NewGamesScreen(loader GamesLoader, deps Deps) *GamesScreen {
 	fi := textinput.New()
 	fi.Placeholder = "filter games"
 	fi.Prompt = "/"
+	// bubbles/textinput's placeholder rendering sizes its internal buffer
+	// from Width(), not from the placeholder string itself: left at the
+	// zero value, placeholderView renders only the placeholder's first
+	// character and stops. resize() keeps this current with env.Width;
+	// this is just a sane value before the first WindowSizeMsg arrives.
+	fi.SetWidth(30)
 
 	return &GamesScreen{
 		loader:  loader,
@@ -78,10 +93,11 @@ func (s *GamesScreen) Init() tea.Cmd {
 
 // load discovers games off the UI goroutine.
 func (s *GamesScreen) load() tea.Cmd {
-	return Async(context.Background(),
-		func(ctx context.Context) ([]GameEntry, error) { return s.loader.LoadGames(ctx) },
-		func(entries []GameEntry) tea.Msg { return gamesLoadedMsg{entries: entries} },
-	)
+	loader := s.loader
+	return func() tea.Msg {
+		entries, err := loader.LoadGames(context.Background())
+		return gamesLoadedMsg{entries: entries, err: err}
+	}
 }
 
 // CapturesInput tells the shell to route plain keys here while the filter
@@ -101,7 +117,10 @@ func (s *GamesScreen) Title() string {
 
 // KeyBindings implements Screen.
 func (s *GamesScreen) KeyBindings() []key.Binding {
-	return []key.Binding{s.keys.Enter, s.keys.Filter, s.keys.Rescan, s.keys.AddGame}
+	return []key.Binding{
+		s.keys.Enter, s.keys.Filter, s.keys.Rescan, s.keys.AddGame,
+		s.keys.Cache, s.keys.Custom, s.keys.Setting,
+	}
 }
 
 // Update implements Screen.
@@ -113,6 +132,9 @@ func (s *GamesScreen) Update(msg tea.Msg, env Env) (Screen, tea.Cmd) {
 
 	case gamesLoadedMsg:
 		s.loading = false
+		if msg.err != nil {
+			return s, ReportError(msg.err)
+		}
 		s.entries = msg.entries
 		s.applyFilter()
 		s.resize(env)
@@ -161,6 +183,15 @@ func (s *GamesScreen) handleKey(msg tea.KeyPressMsg, env Env) (Screen, tea.Cmd) 
 	case key.Matches(msg, s.keys.AddGame):
 		return s, PushScreen(NewAddFolderScreen())
 
+	case key.Matches(msg, s.keys.Cache):
+		return s, PushScreen(NewCacheScreen(s.deps.Cache))
+
+	case key.Matches(msg, s.keys.Custom):
+		return s, PushScreen(NewCustomScreen(s.deps.CustomDir))
+
+	case key.Matches(msg, s.keys.Setting):
+		return s, PushScreen(NewSettingsScreen(s.deps.ConfigDir, s.deps.Config))
+
 	case key.Matches(msg, s.keys.Enter):
 		if entry, ok := s.selected(); ok {
 			return s, PushScreen(NewGameDetailScreen(entry, s.deps))
@@ -201,6 +232,12 @@ func (s *GamesScreen) applyFilter() {
 
 // resize lays the table out for the current window and refreshes rows.
 func (s *GamesScreen) resize(env Env) {
+	filterWidth := env.Width - 6
+	if filterWidth < 10 {
+		filterWidth = 10
+	}
+	s.filter.SetWidth(filterWidth)
+
 	s.detailWidth = env.Width / 3
 	if s.detailWidth < 24 {
 		s.detailWidth = 0 // too narrow to be useful; drop the panel

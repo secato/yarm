@@ -353,8 +353,25 @@ func TestWizardCatalogLoadErrorDoesNotBreakWizard(t *testing.T) {
 
 	cmd := s.Init()
 	msg := cmd()
-	if _, ok := msg.(errorMsg); !ok {
-		t.Fatalf("message = %T, want errorMsg", msg)
+	wd, ok := msg.(wizardDataLoadedMsg)
+	if !ok || wd.err == nil {
+		t.Fatalf("message = %#v, want a wizardDataLoadedMsg carrying an error", msg)
+	}
+
+	next, followUp := s.Update(msg, wizardEnv())
+	s = next.(*WizardScreen)
+
+	// The error must still reach the shell's overlay...
+	if followUp == nil {
+		t.Fatal("a load error should still produce a command reporting it")
+	}
+	if _, ok := followUp().(errorMsg); !ok {
+		t.Error("the follow-up command should report the error to the shell")
+	}
+	// ...but the wizard itself must not get stuck loading forever, and
+	// must remain usable (still on the exe step, not stranded).
+	if s.loading {
+		t.Error("loading should be false once the (failed) load has been handled")
 	}
 	if s.step != stepExe {
 		t.Errorf("step = %v, want stepExe (still usable) after a load error", s.step)

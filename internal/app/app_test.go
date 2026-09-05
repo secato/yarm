@@ -146,6 +146,20 @@ func TestGamesScreenReportsLoadError(t *testing.T) {
 	if m.overlay == nil {
 		t.Error("the error overlay should still be open")
 	}
+
+	// A discovery failure must not leave the screen stuck claiming it is
+	// still scanning: "r" would still silently retry, but the title
+	// would go on saying "scanning…" forever, which is what this checks.
+	gs, ok := m.Screen().(*GamesScreen)
+	if !ok {
+		t.Fatalf("screen = %T, want *GamesScreen", m.Screen())
+	}
+	if gs.loading {
+		t.Error("loading should be false once the (failed) load has been handled")
+	}
+	if got := gs.Title(); strings.Contains(got, "scanning") {
+		t.Errorf("Title() = %q, should not still claim to be scanning", got)
+	}
 }
 
 func TestHelpOverlayListsScreenBindings(t *testing.T) {

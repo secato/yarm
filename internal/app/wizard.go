@@ -62,9 +62,17 @@ var dllOptions = []dllOption{
 	{"opengl32.dll", "OpenGL"},
 }
 
-// wizardDataLoadedMsg carries the catalog/custom data the wizard needs
-// once it has loaded.
-type wizardDataLoadedMsg struct{ data WizardData }
+// wizardDataLoadedMsg carries the catalog/custom data the wizard needs,
+// once it has loaded — successfully or not.
+//
+// Built as a plain tea.Cmd in Init rather than through Async: Async would
+// route a load failure to the shell's generic error overlay without ever
+// reaching this screen's Update, leaving s.loading stuck true and every
+// step forever showing "loading catalog data…" once the dialog closed.
+type wizardDataLoadedMsg struct {
+	data WizardData
+	err  error
+}
 
 // WizardScreen walks the user through installing ReShade into one
 // executable: which exe, which ReShade version and flavor, which proxy
@@ -133,10 +141,11 @@ func (s *WizardScreen) Init() tea.Cmd {
 	if s.deps.WizardData == nil {
 		return nil
 	}
-	return Async(context.Background(),
-		func(ctx context.Context) (WizardData, error) { return s.deps.WizardData.LoadWizardData(ctx) },
-		func(d WizardData) tea.Msg { return wizardDataLoadedMsg{data: d} },
-	)
+	loader := s.deps.WizardData
+	return func() tea.Msg {
+		data, err := loader.LoadWizardData(context.Background())
+		return wizardDataLoadedMsg{data: data, err: err}
+	}
 }
 
 // Title implements Screen.
@@ -201,7 +210,11 @@ func (s *WizardScreen) Update(msg tea.Msg, env Env) (Screen, tea.Cmd) {
 		s.addons = newMultiSelect(s.data.AddonsWithCustom(s.deps.CacheStatus))
 		s.versionCursor = newCursorList(len(s.data.Versions), s.indexOfLatest())
 		s.dllCursor = newCursorList(len(dllOptions), s.recommendedDLLIndex())
-		if len(s.data.Versions) == 0 && len(s.data.Packages) == 0 && len(s.data.Addons) == 0 {
+		switch {
+		case msg.err != nil:
+			s.loadErr = msg.err.Error()
+			return s, ReportError(msg.err)
+		case len(s.data.Versions) == 0 && len(s.data.Packages) == 0 && len(s.data.Addons) == 0:
 			s.loadErr = "no catalog data available (offline, with nothing cached yet?)"
 		}
 		return s, nil

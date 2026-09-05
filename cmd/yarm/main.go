@@ -78,6 +78,10 @@ func newRootCmd() *cobra.Command {
 					Uninstaller: app.RealUninstaller{StateDir: dirs.Data},
 					CacheStatus: c,
 					Defaults:    cfg.Defaults,
+					Cache:       c,
+					CustomDir:   customDir,
+					Config:      cfg,
+					ConfigDir:   dirs.Config,
 				},
 				NoColor: noColor || envFlag("NO_COLOR"),
 			})
