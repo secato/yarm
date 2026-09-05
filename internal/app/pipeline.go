@@ -8,6 +8,7 @@ import (
 	"github.com/secato/yarm/internal/cache"
 	"github.com/secato/yarm/internal/catalog"
 	"github.com/secato/yarm/internal/fetch"
+	"github.com/secato/yarm/internal/game"
 	"github.com/secato/yarm/internal/install"
 	"github.com/secato/yarm/internal/state"
 )
@@ -209,4 +210,21 @@ type RealUninstaller struct {
 // Uninstall implements UninstallRunner.
 func (r RealUninstaller) Uninstall(req install.UninstallRequest) (install.UninstallResult, error) {
 	return install.NewUninstaller(r.StateDir).Run(req)
+}
+
+// AdoptRunner records an unmanaged install as yarm-tracked. An interface so
+// the confirm flow can be tested against a fake instead of touching real
+// files.
+type AdoptRunner interface {
+	Adopt(g game.Game, exe game.Executable, candidate install.AdoptCandidate) (state.Install, error)
+}
+
+// RealAdopter wraps install.Adopt.
+type RealAdopter struct {
+	StateDir string
+}
+
+// Adopt implements AdoptRunner.
+func (r RealAdopter) Adopt(g game.Game, exe game.Executable, candidate install.AdoptCandidate) (state.Install, error) {
+	return install.Adopt(r.StateDir, g, exe, candidate)
 }

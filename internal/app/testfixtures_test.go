@@ -159,6 +159,17 @@ func (f fakeUninstaller) Uninstall(install.UninstallRequest) (install.UninstallR
 	return f.result, f.err
 }
 
+// fakeAdopter lets tests control an adopt call's outcome without touching
+// installs.json.
+type fakeAdopter struct {
+	result state.Install
+	err    error
+}
+
+func (f fakeAdopter) Adopt(game.Game, game.Executable, install.AdoptCandidate) (state.Install, error) {
+	return f.result, f.err
+}
+
 // fakeDeps returns a Deps wired entirely to in-memory fakes, for tests
 // that drive the wizard, progress or uninstall-confirm flows.
 func fakeDeps() Deps {
@@ -166,6 +177,7 @@ func fakeDeps() Deps {
 		WizardData:  fakeWizardData{data: sampleWizardData()},
 		Installer:   &fakeInstaller{result: install.Result{Written: []string{"Game/dxgi.dll"}}},
 		Uninstaller: fakeUninstaller{result: install.UninstallResult{Removed: []string{"Game/dxgi.dll"}}},
+		Adopter:     fakeAdopter{result: state.Install{Files: []state.File{{Path: "dxgi.dll"}, {Path: "ReShade.ini"}}}},
 		CacheStatus: fakeCacheStatus{},
 		Defaults:    config.DefaultsConfig{ReshadeFlavor: "addon", Packages: []string{"standard"}},
 	}

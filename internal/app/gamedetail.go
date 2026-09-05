@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/secato/yarm/internal/install"
+	"github.com/secato/yarm/internal/state"
 )
 
 // GameDetailScreen lists one game's executables and what is installed into
@@ -45,6 +46,13 @@ type uninstallDoneMsg struct {
 	result  install.UninstallResult
 }
 
+// adoptDoneMsg carries an adopt run's result back to the screen that
+// started it, so it can hand off to a result screen.
+type adoptDoneMsg struct {
+	exePath string
+	install state.Install
+}
+
 // Init implements Screen.
 func (s *GameDetailScreen) Init() tea.Cmd { return nil }
 
@@ -56,6 +64,9 @@ func (s *GameDetailScreen) KeyBindings() []key.Binding {
 	bindings := []key.Binding{showAllBinding, s.keys.Back}
 	if len(s.visibleExes()) > 0 {
 		bindings = append([]key.Binding{s.keys.Install, s.keys.Uninstall}, bindings...)
+	}
+	if exe, ok := s.selected(); ok && exe.Unmanaged {
+		bindings = append([]key.Binding{s.keys.Manage}, bindings...)
 	}
 	return bindings
 }
@@ -70,6 +81,9 @@ func (s *GameDetailScreen) Update(msg tea.Msg, env Env) (Screen, tea.Cmd) {
 	case uninstallDoneMsg:
 		return s, PushScreen(NewUninstallResultScreen(msg.exePath, msg.result, nil))
 
+	case adoptDoneMsg:
+		return s, PushScreen(NewAdoptResultScreen(msg.exePath, msg.install, nil))
+
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, showAllBinding):
@@ -80,6 +94,8 @@ func (s *GameDetailScreen) Update(msg tea.Msg, env Env) (Screen, tea.Cmd) {
 			return s.startInstall()
 		case key.Matches(msg, s.keys.Uninstall):
 			return s.startUninstall()
+		case key.Matches(msg, s.keys.Manage):
+			return s.startAdopt()
 		}
 	}
 
@@ -143,6 +159,38 @@ func (s *GameDetailScreen) startUninstall() (Screen, tea.Cmd) {
 		"This removes only the files yarm created; anything you edited afterward is kept.",
 		action,
 	)
+}
+
+// startAdopt confirms, then records, the unmanaged install found next to
+// the highlighted executable.
+func (s *GameDetailScreen) startAdopt() (Screen, tea.Cmd) {
+	exe, ok := s.selected()
+	if !ok || !exe.Unmanaged || s.deps.Adopter == nil {
+		return s, nil
+	}
+
+	candidate, ok := install.ScanUnmanaged(s.entry.Root, exe.Executable)
+	if !ok {
+		return s, nil
+	}
+
+	exePath := exe.Path
+	game, executable := s.entry.Game, exe.Executable
+	action := Async(context.Background(),
+		func(ctx context.Context) (state.Install, error) {
+			return s.deps.Adopter.Adopt(game, executable, candidate)
+		},
+		func(in state.Install) tea.Msg {
+			return adoptDoneMsg{exePath: exePath, install: in}
+		},
+	)
+
+	detail := fmt.Sprintf(
+		"Found ReShade (%s) already installed here, with %d file(s). "+
+			"Tracking it lets yarm update or uninstall it later; nothing on disk changes now.",
+		candidate.DLLName, candidate.FileCount())
+
+	return s, Confirm("Track the existing ReShade install on "+exePath+"?", detail, action)
 }
 
 // visibleExes returns the executables the table should show.

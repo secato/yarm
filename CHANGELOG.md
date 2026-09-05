@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Adopt an unmanaged ReShade install: when a game folder already has a
+  known proxy DLL (`dxgi.dll` and friends) plus `ReShade.ini` next to an
+  executable yarm did not put there itself — installed by hand, or by
+  another tool — the games list and detail screen now say so ("found,
+  untracked") instead of showing it as plain uninstalled.
+  - `internal/install/adopt.go`: `DetectUnmanaged` is the cheap per-executable
+    check run while loading games; `ScanUnmanaged` gathers the full detail
+    (DLL name, shader/texture/add-on files, `d3dcompiler_47.dll` presence);
+    `Adopt` hashes every file found and writes an `installs.json` entry for
+    it — nothing on disk changes, only the manifest gains an entry, so a
+    later update or uninstall through yarm works exactly as if yarm had
+    installed it in the first place. Adopted shader/texture/add-on files are
+    recorded under a new `state.OriginAdopted` origin, since their catalog
+    provenance (which package or add-on they came from) genuinely is not
+    known; the ReShade version is recorded as `"unknown (adopted)"` for the
+    same reason — both display-only, and neither affects uninstall, which
+    works from the recorded file hashes, not the version.
+  - `GameDetailScreen`: pressing `m` on an unmanaged executable opens a
+    confirm dialog describing what was found (DLL name, file count), then
+    records it and shows a result screen; the games list reloads afterward
+    so the newly tracked install shows up immediately.
+  - Proven with a byte-identical round-trip test: adopting an install, then
+    uninstalling it through yarm, leaves the game directory exactly as it
+    was before the manual install ever happened.
+
 - Reliability and friendliness polish (part of step 8; README/demo GIF are
   tracked separately):
   - A one-time welcome banner on first launch (detected as "config.yaml did

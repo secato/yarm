@@ -30,6 +30,11 @@ const (
 	OriginReShade     Origin = "reshade"
 	OriginD3DCompiler Origin = "d3dcompiler"
 	OriginINI         Origin = "ini"
+	// OriginAdopted marks a file yarm did not write itself but has taken
+	// over tracking for — an install found already on disk, from a
+	// manual install or another tool, whose exact catalog provenance
+	// (which package or add-on it came from) is not known.
+	OriginAdopted Origin = "adopted"
 )
 
 // PackageOrigin returns the Origin for a package id.

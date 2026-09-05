@@ -1,10 +1,15 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/secato/yarm/internal/game"
+	"github.com/secato/yarm/internal/install"
 )
 
 // drive feeds messages through the root model, resolving the control
@@ -32,7 +37,7 @@ func drive(t *testing.T, m Model, msgs ...tea.Msg) Model {
 			for _, c := range msg {
 				apply(c, depth+1)
 			}
-		case pushScreenMsg, popScreenMsg, popToRootMsg, statusMsg, errorMsg, showOverlayMsg, uninstallDoneMsg:
+		case pushScreenMsg, popScreenMsg, popToRootMsg, statusMsg, errorMsg, showOverlayMsg, uninstallDoneMsg, adoptDoneMsg:
 			next, follow := cur.Update(msg)
 			cur = next
 			apply(follow, depth+1)
@@ -394,6 +399,73 @@ func TestPopToRootClearsStackAndReloads(t *testing.T) {
 	}
 	if got := len(m.stack); got != 0 {
 		t.Errorf("stack has %d entries after PopToRoot, want 0", got)
+	}
+}
+
+// The adopt confirm flow, end to end through the root model: press m on an
+// unmanaged executable, confirm, and land on a Result screen. ScanUnmanaged
+// probes the real filesystem, so this entry points at a real temp
+// directory holding a minimal ReShade install; the actual recording is
+// faked so the test does not depend on installs.json.
+func TestAdoptConfirmFlow(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{
+		"dxgi.dll":      "dll body",
+		install.ININame: "[GENERAL]\n",
+		"eldenring.exe": "the game",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatalf("WriteFile(%s): %v", name, err)
+		}
+	}
+
+	entry := GameEntry{
+		Game: game.Game{ID: "manual:x", Name: "Manual Game", Provider: "manual", Root: dir},
+		Exes: []Executable{{
+			Executable: game.Executable{Path: "eldenring.exe", Arch: game.ArchX64, API: game.APID3D12},
+			Unmanaged:  true,
+		}},
+	}
+
+	m := New(NewGamesScreen(fakeLoader{entries: []GameEntry{entry}}, fakeDeps(), false))
+	m = drive(t, m,
+		tea.WindowSizeMsg{Width: termWidth, Height: termHeight},
+		gamesLoadedMsg{entries: []GameEntry{entry}},
+	)
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if _, ok := m.Screen().(*GameDetailScreen); !ok {
+		t.Fatalf("screen = %T, want *GameDetailScreen", m.Screen())
+	}
+
+	m = drive(t, m, tea.KeyPressMsg{Code: 'm', Text: "m"})
+	if m.overlay == nil {
+		t.Fatal("'m' on an unmanaged executable should open a confirm overlay")
+	}
+
+	m = drive(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if m.overlay != nil {
+		t.Error("confirming should close the overlay")
+	}
+
+	rs, ok := m.Screen().(*ResultScreen)
+	if !ok {
+		t.Fatalf("screen after confirming = %T, want *ResultScreen", m.Screen())
+	}
+	if !rs.ok {
+		t.Errorf("result should report success, lines = %v", rs.lines)
+	}
+}
+
+// 'm' must do nothing on an executable that is not flagged unmanaged —
+// there is nothing to confirm.
+func TestManageKeyNoOpWithoutUnmanaged(t *testing.T) {
+	m := loaded(t) // cursor starts on Control Ultimate Edition, not unmanaged
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	m = drive(t, m, tea.KeyPressMsg{Code: 'm', Text: "m"})
+	if m.overlay != nil {
+		t.Error("'m' on a not-unmanaged executable should not open a confirm overlay")
 	}
 }
 

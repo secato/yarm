@@ -280,6 +280,8 @@ func (s *GamesScreen) resize(env Env) {
 			status = "✓ " + status
 		case e.ScanErr != nil:
 			status = "⚠ can't read folder"
+		case e.HasUnmanaged():
+			status = "found, untracked"
 		case e.NativeBuild:
 			status = "native build"
 		case len(e.PlayableExes()) == 0:
@@ -405,12 +407,19 @@ func (s *GamesScreen) renderDetail(e GameEntry, env Env) string {
 		b.WriteString("\n")
 		for _, ex := range exes {
 			mark := "  "
-			if ex.Installed != nil {
+			switch {
+			case ex.Installed != nil:
 				mark = env.Styles.Good.Render("✓ ")
+			case ex.Unmanaged:
+				mark = env.Styles.Warn.Render("⚠ ")
 			}
 			b.WriteString(mark + truncate(ex.Path, s.detailWidth-10) + "\n")
 			b.WriteString(env.Styles.Faint.Render(
 				fmt.Sprintf("    %s · %s", ex.Arch, ex.API)) + "\n")
+			if ex.Unmanaged {
+				b.WriteString(env.Styles.Faint.Render(
+					"    found, untracked — press enter, then m") + "\n")
+			}
 		}
 	}
 

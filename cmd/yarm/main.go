@@ -80,6 +80,7 @@ func newRootCmd() *cobra.Command {
 						StateDir:  dirs.Data,
 					},
 					Uninstaller: app.RealUninstaller{StateDir: dirs.Data},
+					Adopter:     app.RealAdopter{StateDir: dirs.Data},
 					CacheStatus: c,
 					Defaults:    cfg.Defaults,
 					Cache:       c,

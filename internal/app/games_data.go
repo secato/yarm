@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/secato/yarm/internal/game"
+	"github.com/secato/yarm/internal/install"
 	"github.com/secato/yarm/internal/platform"
 	"github.com/secato/yarm/internal/state"
 )
@@ -15,6 +16,13 @@ type Executable struct {
 	game.Executable
 	// Installed is the recorded install for this executable, if any.
 	Installed *state.Install
+	// Unmanaged is true when the executable's own directory holds what
+	// looks like a ReShade install (a known proxy DLL plus ReShade.ini)
+	// that yarm is not tracking — installed by hand, or by another tool,
+	// before this game was ever added to yarm. Only checked when
+	// Installed is nil: an install yarm already knows about is by
+	// definition not unmanaged.
+	Unmanaged bool
 }
 
 // GameEntry is a discovered game as the UI shows it.
@@ -40,6 +48,17 @@ func (g GameEntry) InstalledSummary() string {
 		}
 	}
 	return ""
+}
+
+// HasUnmanaged reports whether any executable in this game looks like it
+// already has an unmanaged ReShade install.
+func (g GameEntry) HasUnmanaged() bool {
+	for _, e := range g.Exes {
+		if e.Unmanaged {
+			return true
+		}
+	}
+	return false
 }
 
 // PlayableExes returns the executables worth offering, hiding the ones the
@@ -107,6 +126,8 @@ func (l ProviderLoader) LoadGames(ctx context.Context) ([]GameEntry, error) {
 			if in, ok := reg.FindInstall(g.ID, filepath.ToSlash(e.Path)); ok {
 				installed := in
 				ex.Installed = &installed
+			} else {
+				ex.Unmanaged = install.DetectUnmanaged(g.Root, e.Path)
 			}
 			entry.Exes = append(entry.Exes, ex)
 		}

@@ -14,6 +14,7 @@ type Deps struct {
 	WizardData  WizardDataLoader
 	Installer   Installer
 	Uninstaller UninstallRunner
+	Adopter     AdoptRunner
 	CacheStatus CacheStatus // may be nil: badges just show nothing
 	Defaults    config.DefaultsConfig
 

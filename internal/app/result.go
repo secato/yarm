@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/secato/yarm/internal/install"
+	"github.com/secato/yarm/internal/state"
 )
 
 // ResultScreen is the terminal screen of a flow: what an install or an
@@ -75,6 +76,24 @@ func NewUninstallResultScreen(exePath string, res install.UninstallResult, err e
 	if n := len(res.Restored); n > 0 {
 		s.lines = append(s.lines, fmt.Sprintf("%d backed-up file(s) restored.", n))
 	}
+	return s
+}
+
+// NewAdoptResultScreen summarizes an install.Adopt call.
+func NewAdoptResultScreen(exePath string, in state.Install, err error) *ResultScreen {
+	s := &ResultScreen{keys: DefaultKeyMap()}
+
+	if err != nil {
+		s.title = "tracking failed"
+		s.lines = append(s.lines, err.Error())
+		return s
+	}
+
+	s.ok = true
+	s.title = "now tracked"
+	s.lines = append(s.lines, exePath)
+	s.lines = append(s.lines, fmt.Sprintf("%d file(s) recorded; nothing on disk changed.", len(in.Files)))
+	s.lines = append(s.lines, "yarm can update or uninstall this ReShade install from now on.")
 	return s
 }
 
