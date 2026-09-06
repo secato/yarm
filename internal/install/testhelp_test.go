@@ -122,9 +122,9 @@ func (f *fixture) GameFile(rel, content string) string {
 func (f *fixture) Request() Request {
 	return Request{
 		Game: game.Game{
-			ID: "steam:1245620", Name: "ELDEN RING", Provider: "steam", Root: f.GameDir,
+			ID: "steam:700110", Name: "Ember Hollow", Provider: "steam", Root: f.GameDir,
 		},
-		Exe:      game.Executable{Path: filepath.FromSlash("Game/eldenring.exe"), Arch: game.ArchX64, API: game.APID3D12},
+		Exe:      game.Executable{Path: filepath.FromSlash("Game/emberhollow.exe"), Arch: game.ArchX64, API: game.APID3D12},
 		Version:  "6.8.0",
 		Flavor:   FlavorAddon,
 		DLLName:  "dxgi.dll",

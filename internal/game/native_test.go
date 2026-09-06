@@ -31,7 +31,7 @@ func TestHasNativeBuild(t *testing.T) {
 	}{
 		{
 			name:  "linux native at depth 4 (Source layout)",
-			files: map[string][]byte{"game/bin/linuxsteamrt64/dota2": elfMagic},
+			files: map[string][]byte{"game/bin/linuxsteamrt64/ridgeline": elfMagic},
 			want:  true,
 		},
 		{
@@ -91,8 +91,8 @@ func TestHasNativeBuild(t *testing.T) {
 // native build: that pair is what lets the UI explain itself.
 func TestNativeGameHasNoExecutables(t *testing.T) {
 	root := t.TempDir()
-	writeBytes(t, root, "game/bin/linuxsteamrt64/dota2", elfMagic)
-	writeBytes(t, root, "game/dota.sh", []byte("#!/bin/sh\n"))
+	writeBytes(t, root, "game/bin/linuxsteamrt64/ridgeline", elfMagic)
+	writeBytes(t, root, "game/ridgeline.sh", []byte("#!/bin/sh\n"))
 
 	exes, err := Scan(root)
 	if err != nil {

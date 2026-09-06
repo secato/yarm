@@ -104,9 +104,9 @@ func TestGamesScreenListsGames(t *testing.T) {
 	s := newTest(t, New(NewGamesScreen(fakeLoader{entries: sampleEntries()}, fakeDeps(), false)))
 
 	for _, want := range []string{
-		"Control Ultimate Edition",
-		"ELDEN RING",
-		"Dota 2",
+		"Vantage Point Deluxe",
+		"Ember Hollow",
+		"Ridgeline",
 		"My GOG Game",
 		"steam",
 		"manual",
@@ -164,7 +164,7 @@ func TestGamesScreenReportsLoadError(t *testing.T) {
 
 func TestHelpOverlayListsScreenBindings(t *testing.T) {
 	s := newTest(t, New(NewGamesScreen(fakeLoader{entries: sampleEntries()}, fakeDeps(), false)))
-	waitForText(t, s, "ELDEN RING")
+	waitForText(t, s, "Ember Hollow")
 
 	s.send(tea.KeyPressMsg{Code: '?', Text: "?"})
 	waitForText(t, s, "Keys")
@@ -175,18 +175,18 @@ func TestHelpOverlayListsScreenBindings(t *testing.T) {
 
 func TestGameDetailRenders(t *testing.T) {
 	s := newTest(t, New(NewGamesScreen(fakeLoader{entries: sampleEntries()}, fakeDeps(), false)))
-	waitForText(t, s, "ELDEN RING")
+	waitForText(t, s, "Ember Hollow")
 
 	s.send(tea.KeyPressMsg{Code: tea.KeyEnter})
-	waitForText(t, s, "Control Ultimate Edition")
-	waitForText(t, s, "Control.exe")
+	waitForText(t, s, "Vantage Point Deluxe")
+	waitForText(t, s, "Vantage.exe")
 
 	finish(t, s)
 }
 
 func TestAddFolderScreenRejectsMissingPath(t *testing.T) {
 	s := newTest(t, New(NewGamesScreen(fakeLoader{entries: sampleEntries()}, fakeDeps(), false)))
-	waitForText(t, s, "ELDEN RING")
+	waitForText(t, s, "Ember Hollow")
 
 	s.send(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	waitForText(t, s, "add a game folder")
@@ -201,7 +201,7 @@ func TestAddFolderScreenRejectsMissingPath(t *testing.T) {
 func TestAddFolderScreenWarnsOnEmptyFolder(t *testing.T) {
 	dir := t.TempDir()
 	s := newTest(t, New(NewGamesScreen(fakeLoader{entries: sampleEntries()}, fakeDeps(), false)))
-	waitForText(t, s, "ELDEN RING")
+	waitForText(t, s, "Ember Hollow")
 
 	s.send(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	waitForText(t, s, "add a game folder")
@@ -215,10 +215,10 @@ func TestAddFolderScreenWarnsOnEmptyFolder(t *testing.T) {
 // is otherwise swallowing keys.
 func TestCtrlCQuitsFromTextInput(t *testing.T) {
 	s := newTest(t, New(NewGamesScreen(fakeLoader{entries: sampleEntries()}, fakeDeps(), false)))
-	waitForText(t, s, "ELDEN RING")
+	waitForText(t, s, "Ember Hollow")
 
 	s.send(tea.KeyPressMsg{Code: '/', Text: "/"})
-	s.typeText("dota")
+	s.typeText("ridge")
 	s.send(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 
 	s.tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))

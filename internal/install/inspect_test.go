@@ -6,12 +6,12 @@ import (
 
 func TestInspectRuntimeReadsVersionFromLog(t *testing.T) {
 	f := newFixture(t)
-	f.GameFile("Game/eldenring.exe", "the game")
+	f.GameFile("Game/emberhollow.exe", "the game")
 	f.GameFile("Game/"+LogName,
 		"12:34:56:789 [1234] | INFO  | Initializing crosire's ReShade version '6.8.0' (64-bit) "+
-			"loaded from 'dxgi.dll' into 'eldenring.exe' ...\n")
+			"loaded from 'dxgi.dll' into 'emberhollow.exe' ...\n")
 
-	info := InspectRuntime(f.GameDir, "Game/eldenring.exe")
+	info := InspectRuntime(f.GameDir, "Game/emberhollow.exe")
 	if info.Version != "6.8.0" {
 		t.Errorf("Version = %q, want 6.8.0", info.Version)
 	}
@@ -19,9 +19,9 @@ func TestInspectRuntimeReadsVersionFromLog(t *testing.T) {
 
 func TestInspectRuntimeNoLogIsEmpty(t *testing.T) {
 	f := newFixture(t)
-	f.GameFile("Game/eldenring.exe", "the game")
+	f.GameFile("Game/emberhollow.exe", "the game")
 
-	info := InspectRuntime(f.GameDir, "Game/eldenring.exe")
+	info := InspectRuntime(f.GameDir, "Game/emberhollow.exe")
 	if info.Version != "" {
 		t.Errorf("Version = %q, want empty (no log yet)", info.Version)
 	}
@@ -35,7 +35,7 @@ func TestInspectRuntimeNoLogIsEmpty(t *testing.T) {
 
 func TestInspectRuntimeReadsActiveTechniquesFromPreset(t *testing.T) {
 	f := newFixture(t)
-	f.GameFile("Game/eldenring.exe", "the game")
+	f.GameFile("Game/emberhollow.exe", "the game")
 	f.GameFile("Game/"+ININame, "[GENERAL]\nPresetPath=.\\"+PresetName+"\n")
 	// A literal comma in a technique name is escaped as two commas in a
 	// row, per ReShade's own ini_file.cpp — must not be split in half.
@@ -43,7 +43,7 @@ func TestInspectRuntimeReadsActiveTechniquesFromPreset(t *testing.T) {
 		"Techniques=Deband@Deband.fx,Clarity@Clarity.fx,Comma,,Name@Odd.fx\n"+
 			"TechniqueSorting=Deband@Deband.fx,Clarity@Clarity.fx\n")
 
-	info := InspectRuntime(f.GameDir, "Game/eldenring.exe")
+	info := InspectRuntime(f.GameDir, "Game/emberhollow.exe")
 	want := []string{"Deband", "Clarity", "Comma,Name"}
 	if len(info.ActiveTechniques) != len(want) {
 		t.Fatalf("ActiveTechniques = %v, want %v", info.ActiveTechniques, want)
@@ -57,10 +57,10 @@ func TestInspectRuntimeReadsActiveTechniquesFromPreset(t *testing.T) {
 
 func TestInspectRuntimeIgnoresAbsolutePresetPath(t *testing.T) {
 	f := newFixture(t)
-	f.GameFile("Game/eldenring.exe", "the game")
+	f.GameFile("Game/emberhollow.exe", "the game")
 	f.GameFile("Game/"+ININame, `[GENERAL]`+"\n"+`PresetPath=C:\Users\x\ReShadePreset.ini`+"\n")
 
-	info := InspectRuntime(f.GameDir, "Game/eldenring.exe")
+	info := InspectRuntime(f.GameDir, "Game/emberhollow.exe")
 	if info.ActiveTechniques != nil {
 		t.Errorf("ActiveTechniques = %v, want nil for an absolute Windows path", info.ActiveTechniques)
 	}
@@ -68,12 +68,12 @@ func TestInspectRuntimeIgnoresAbsolutePresetPath(t *testing.T) {
 
 func TestInspectRuntimeListsAvailableEffects(t *testing.T) {
 	f := newFixture(t)
-	f.GameFile("Game/eldenring.exe", "the game")
+	f.GameFile("Game/emberhollow.exe", "the game")
 	f.GameFile("Game/reshade-shaders/Shaders/Deband.fx", "// deband")
 	f.GameFile("Game/reshade-shaders/Shaders/Clarity.fx", "// clarity")
 	f.GameFile("Game/reshade-shaders/Shaders/ReShade.fxh", "// header, not an effect")
 
-	info := InspectRuntime(f.GameDir, "Game/eldenring.exe")
+	info := InspectRuntime(f.GameDir, "Game/emberhollow.exe")
 	want := []string{"Clarity.fx", "Deband.fx"} // sorted
 	if len(info.AvailableEffects) != len(want) {
 		t.Fatalf("AvailableEffects = %v, want %v", info.AvailableEffects, want)

@@ -21,9 +21,9 @@ func TestScan(t *testing.T) {
 	root := t.TempDir()
 
 	kept := []string{
-		"Game.exe",                   // depth 1
-		"Game/GameBin/eldenring.exe", // depth 3
-		"game/bin/win64/dota2.exe",   // depth 4 (Source layout; the boundary case)
+		"Game.exe",                     // depth 1
+		"Game/GameBin/emberhollow.exe", // depth 3
+		"game/bin/win64/ridgeline.exe", // depth 4 (Source layout; the boundary case)
 	}
 	skippedButPresent := []string{
 		"unins000.exe",                   // skip filename

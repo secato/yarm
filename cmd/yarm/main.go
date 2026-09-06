@@ -776,6 +776,7 @@ func newInstallCmd(verbose, debug *bool) *cobra.Command {
 		addons    []string
 		custom    []string
 		overwrite bool
+		noBackup  bool
 		dryRun    bool
 	)
 
@@ -822,6 +823,7 @@ func newInstallCmd(verbose, debug *bool) *cobra.Command {
 				Addons:    addons,
 				Custom:    custom,
 				Overwrite: overwrite,
+				NoBackup:  noBackup,
 				TargetOS:  artifacts.CurrentTargetOS(),
 			}
 
@@ -867,7 +869,7 @@ func newInstallCmd(verbose, debug *bool) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&gameID, "game", "", "game id, e.g. steam:1245620 (required)")
+	cmd.Flags().StringVar(&gameID, "game", "", "game id, e.g. steam:700110 (required)")
 	cmd.Flags().StringVar(&exeRel, "exe", "", "executable path relative to the game root (required)")
 	cmd.Flags().StringVar(&version, "version", "", "ReShade version, e.g. 6.8.0 (required)")
 	cmd.Flags().BoolVar(&addon, "addon", false, "use the add-on-enabled ReShade build")
@@ -876,6 +878,7 @@ func newInstallCmd(verbose, debug *bool) *cobra.Command {
 	cmd.Flags().StringSliceVar(&addons, "addons", nil, "add-on ids")
 	cmd.Flags().StringSliceVar(&custom, "custom", nil, "custom content ids")
 	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "replace files yarm does not own, backing them up first")
+	cmd.Flags().BoolVar(&noBackup, "no-backup", false, "with --overwrite, discard the replaced files instead of saving them as .yarm-bak")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show the plan without changing anything")
 	_ = cmd.MarkFlagRequired("game")
 	_ = cmd.MarkFlagRequired("exe")

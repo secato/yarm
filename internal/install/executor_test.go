@@ -67,7 +67,7 @@ func TestRunFreshInstall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load(): %v", err)
 	}
-	in, ok := reg.FindInstall("steam:1245620", "Game/eldenring.exe")
+	in, ok := reg.FindInstall("steam:700110", "Game/emberhollow.exe")
 	if !ok {
 		t.Fatal("no install recorded")
 	}
@@ -255,7 +255,7 @@ func TestRunRollsBackOnFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load(): %v", err)
 	}
-	if _, ok := reg.FindInstall("steam:1245620", "Game/eldenring.exe"); ok {
+	if _, ok := reg.FindInstall("steam:700110", "Game/emberhollow.exe"); ok {
 		t.Error("a manifest was written despite the failure")
 	}
 }
@@ -272,8 +272,8 @@ func TestRunFailedUpgradeRestoresRemovedFiles(t *testing.T) {
 	f.GameFile("Game/dxgi.dll", "old reshade")
 
 	var reg state.Registry
-	reg.Record("steam:1245620", state.Game{Root: f.GameDir}, state.Install{
-		Exe: "Game/eldenring.exe",
+	reg.Record("steam:700110", state.Game{Root: f.GameDir}, state.Install{
+		Exe: "Game/emberhollow.exe",
 		Files: []state.File{
 			{Path: "Game/dxgi.dll", SHA256: sha256Of("old reshade"), Origin: state.OriginReShade},
 			{Path: "Game/reshade-shaders/Shaders/Dropped.fx", SHA256: sha256Of(stale), Origin: state.PackageOrigin("gone")},
@@ -326,8 +326,8 @@ func TestRunUpgradeRemovesStaleFiles(t *testing.T) {
 	f.GameFile("Game/reshade-shaders/Shaders/Dropped.fx", stale)
 
 	var reg state.Registry
-	reg.Record("steam:1245620", state.Game{Root: f.GameDir}, state.Install{
-		Exe: "Game/eldenring.exe",
+	reg.Record("steam:700110", state.Game{Root: f.GameDir}, state.Install{
+		Exe: "Game/emberhollow.exe",
 		Files: []state.File{
 			{Path: "Game/reshade-shaders/Shaders/Dropped.fx", SHA256: sha256Of(stale), Origin: state.PackageOrigin("gone")},
 		},
@@ -462,5 +462,30 @@ func TestPlanCountersMatchFiles(t *testing.T) {
 	}
 	if plan.TotalBytes() != wantBytes {
 		t.Errorf("TotalBytes = %d, want %d", plan.TotalBytes(), wantBytes)
+	}
+}
+
+// With NoBackup the displaced file is gone: no .yarm-bak on disk, and
+// nothing in the manifest for uninstall to restore.
+func TestRunDiscardsForeignFileWhenBackupIsOff(t *testing.T) {
+	f := newFixture(t).WithReShade()
+	f.GameFile("Game/dxgi.dll", "a pre-existing dxgi.dll from something else")
+
+	req := f.Request()
+	req.Overwrite = true
+	req.NoBackup = true
+
+	res, err := planAndRun(t, f, req, state.Registry{})
+	if err != nil {
+		t.Fatalf("Run(): %v", err)
+	}
+	if got := f.read("Game/dxgi.dll"); got != "reshade 64-bit body" {
+		t.Errorf("dxgi.dll = %q, want the ReShade body", got)
+	}
+	if f.exists("Game/dxgi.dll" + BackupSuffix) {
+		t.Error("NoBackup should leave no backup file behind")
+	}
+	if len(res.Install.Backups) != 0 {
+		t.Errorf("manifest records %d backups, want none", len(res.Install.Backups))
 	}
 }

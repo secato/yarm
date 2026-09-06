@@ -234,8 +234,8 @@ func TestPlanConflictDetection(t *testing.T) {
 		f.GameFile("Game/dxgi.dll", "reshade 64-bit body") // same as the cached source
 
 		var reg state.Registry
-		reg.Record("steam:1245620", state.Game{Root: f.GameDir}, state.Install{
-			Exe: "Game/eldenring.exe",
+		reg.Record("steam:700110", state.Game{Root: f.GameDir}, state.Install{
+			Exe: "Game/emberhollow.exe",
 			Files: []state.File{
 				{Path: dest, SHA256: sha256Of("reshade 64-bit body"), Origin: state.OriginReShade},
 			},
@@ -258,8 +258,8 @@ func TestPlanConflictDetection(t *testing.T) {
 		f.GameFile("Game/dxgi.dll", "edited by the user")
 
 		var reg state.Registry
-		reg.Record("steam:1245620", state.Game{Root: f.GameDir}, state.Install{
-			Exe: "Game/eldenring.exe",
+		reg.Record("steam:700110", state.Game{Root: f.GameDir}, state.Install{
+			Exe: "Game/emberhollow.exe",
 			Files: []state.File{
 				{Path: dest, SHA256: sha256Of("the original we installed"), Origin: state.OriginReShade},
 			},
@@ -300,8 +300,8 @@ func TestPlanUpgradeRemovesStaleFiles(t *testing.T) {
 			map[string]string{"Shaders/Deband.fx": "// deband"})
 
 	var reg state.Registry
-	reg.Record("steam:1245620", state.Game{Root: f.GameDir}, state.Install{
-		Exe: "Game/eldenring.exe",
+	reg.Record("steam:700110", state.Game{Root: f.GameDir}, state.Install{
+		Exe: "Game/emberhollow.exe",
 		Files: []state.File{
 			{Path: "Game/dxgi.dll", SHA256: "old", Origin: state.OriginReShade},
 			{Path: "Game/reshade-shaders/Shaders/Deband.fx", SHA256: "old", Origin: state.PackageOrigin("standard-effects")},
@@ -460,4 +460,44 @@ func TestPlanExeAtGameRoot(t *testing.T) {
 	if !slices.Contains(dests(plan), "dxgi.dll") {
 		t.Errorf("want dxgi.dll at the root, got %v", dests(plan))
 	}
+}
+
+// Overwrite with NoBackup is the only irreversible thing the installer
+// does, so it is a distinct action rather than a quieter kind of backup:
+// the plan, its warnings and the progress log all have to say so.
+func TestPlanDiscardsForeignFileWhenBackupIsOff(t *testing.T) {
+	f := newFixture(t).WithReShade()
+	f.GameFile("Game/dxgi.dll", "something else's dxgi.dll")
+
+	req := f.Request()
+	req.Overwrite = true
+	req.NoBackup = true
+
+	plan, err := (Planner{}).Plan(req, f.Art)
+	if err != nil {
+		t.Fatalf("Plan(): %v", err)
+	}
+
+	var got Action
+	for _, pf := range plan.Files {
+		if pf.Dest == "Game/dxgi.dll" {
+			got = pf.Action
+		}
+	}
+	if got != ActionDiscard {
+		t.Errorf("dxgi.dll action = %q, want %q", got, ActionDiscard)
+	}
+	if !hasWarningContaining(plan.Warnings, "uninstall cannot put it back") {
+		t.Errorf("warnings = %v, want one saying the original is gone for good", plan.Warnings)
+	}
+}
+
+// hasWarningContaining reports whether any warning contains sub.
+func hasWarningContaining(warnings []string, sub string) bool {
+	for _, w := range warnings {
+		if strings.Contains(w, sub) {
+			return true
+		}
+	}
+	return false
 }

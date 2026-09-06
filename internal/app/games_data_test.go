@@ -87,7 +87,7 @@ func TestGroupByFolderSharesOneReShadeStatusPerDirectory(t *testing.T) {
 	}
 
 	exes := []Executable{
-		{Executable: game.Executable{Path: "Game/eldenring.exe"}},
+		{Executable: game.Executable{Path: "Game/emberhollow.exe"}},
 		{Executable: game.Executable{Path: "Game/start_protected_game.exe"}},
 	}
 	groups := groupByFolder(dir, exes)
@@ -118,11 +118,11 @@ func TestGameDetailShowsOneUnmanagedStatusNotPerExecutable(t *testing.T) {
 	}
 
 	exes := []Executable{
-		{Executable: game.Executable{Path: "Game/eldenring.exe", Arch: game.ArchX64, API: game.APID3D12}},
+		{Executable: game.Executable{Path: "Game/emberhollow.exe", Arch: game.ArchX64, API: game.APID3D12}},
 		{Executable: game.Executable{Path: "Game/start_protected_game.exe", Arch: game.ArchX64}},
 	}
 	entry := GameEntry{
-		Game:   game.Game{ID: "manual:x", Name: "ELDEN RING", Root: dir},
+		Game:   game.Game{ID: "manual:x", Name: "Ember Hollow", Root: dir},
 		Exes:   exes,
 		Groups: groupByFolder(dir, exes),
 	}
@@ -187,26 +187,26 @@ func TestWriteReShadeStatusShowsRuntimeInfoAndListsPackages(t *testing.T) {
 	}
 }
 
-// Three executables sharing one folder (Control.exe, Control_DX11.exe,
-// Control_DX12.exe) have exactly one install between them: pressing i
+// Three executables sharing one folder (Vantage.exe, Vantage_DX11.exe,
+// Vantage_DX12.exe) have exactly one install between them: pressing i
 // must edit the actual install regardless of which of the three the
 // registry happens to name — there is no per-executable selection to get
 // wrong, since ReShade applies to the whole folder and there is only one
 // folder here.
 func TestFolderLevelInstallTargetsTheActuallyInstalledExe(t *testing.T) {
 	installed := state.Install{
-		Exe:     "Control.exe",
+		Exe:     "Vantage.exe",
 		ReShade: state.ReShadeInfo{Version: "6.8.0", Flavor: "addon", DLL: "dxgi.dll"},
 	}
 	exes := []Executable{
-		{Executable: game.Executable{Path: "Control.exe", Arch: game.ArchX64}, Installed: &installed},
-		{Executable: game.Executable{Path: "Control_DX11.exe", Arch: game.ArchX64, API: game.APID3D11}},
-		{Executable: game.Executable{Path: "Control_DX12.exe", Arch: game.ArchX64, API: game.APID3D12}},
+		{Executable: game.Executable{Path: "Vantage.exe", Arch: game.ArchX64}, Installed: &installed},
+		{Executable: game.Executable{Path: "Vantage_DX11.exe", Arch: game.ArchX64, API: game.APID3D11}},
+		{Executable: game.Executable{Path: "Vantage_DX12.exe", Arch: game.ArchX64, API: game.APID3D12}},
 	}
 	entry := GameEntry{
-		Game:   game.Game{ID: "steam:870780", Name: "Control", Provider: "steam", Root: "/games/Control"},
+		Game:   game.Game{ID: "steam:700220", Name: "Vantage Point", Provider: "steam", Root: "/games/Vantage"},
 		Exes:   exes,
-		Groups: groupByFolder("/games/Control", exes),
+		Groups: groupByFolder("/games/Vantage", exes),
 	}
 	if len(entry.Groups) != 1 {
 		t.Fatalf("groups = %d, want 1 (all three exes share the game root)", len(entry.Groups))
@@ -237,8 +237,8 @@ func TestFolderLevelInstallTargetsTheActuallyInstalledExe(t *testing.T) {
 	if !ok {
 		t.Fatalf("pushed screen = %T, want *WizardScreen", push.screen)
 	}
-	if got := wiz.exe.Path; got != "Control.exe" {
-		t.Errorf("wizard targets %q, want Control.exe (the one actually installed)", got)
+	if got := wiz.exe.Path; got != "Vantage.exe" {
+		t.Errorf("wizard targets %q, want Vantage.exe (the one actually installed)", got)
 	}
 }
 

@@ -94,7 +94,7 @@ func TestInstallUninstallRoundTripIsByteIdentical(t *testing.T) {
 				WithCustom("mine", map[string]string{"Shaders/Mine.fx": "// mine"})
 
 			// The game as shipped, including files YARM must not touch.
-			f.GameFile("Game/eldenring.exe", "the game binary")
+			f.GameFile("Game/emberhollow.exe", "the game binary")
 			f.GameFile("Game/data/assets.pak", "game assets")
 			f.GameFile("readme.txt", "game readme")
 
@@ -121,7 +121,7 @@ func TestInstallUninstallRoundTripIsByteIdentical(t *testing.T) {
 
 			out, err := NewUninstaller(f.StateDir).Run(UninstallRequest{
 				GameID: req.Game.ID,
-				Exe:    "Game/eldenring.exe",
+				Exe:    "Game/emberhollow.exe",
 			})
 			if err != nil {
 				t.Fatalf("uninstall: %v", err)
@@ -142,7 +142,7 @@ func TestInstallUninstallRoundTripIsByteIdentical(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Load(): %v", err)
 			}
-			if _, ok := reg.FindInstall(req.Game.ID, "Game/eldenring.exe"); ok {
+			if _, ok := reg.FindInstall(req.Game.ID, "Game/emberhollow.exe"); ok {
 				t.Error("the install is still recorded after uninstall")
 			}
 		})
@@ -165,7 +165,7 @@ func TestUninstallKeepsModifiedFiles(t *testing.T) {
 	f.GameFile("Game/reshade-shaders/Shaders/A.fx", edited)
 
 	out, err := NewUninstaller(f.StateDir).Run(UninstallRequest{
-		GameID: req.Game.ID, Exe: "Game/eldenring.exe",
+		GameID: req.Game.ID, Exe: "Game/emberhollow.exe",
 	})
 	if err != nil {
 		t.Fatalf("uninstall: %v", err)
@@ -195,7 +195,7 @@ func TestUninstallPreservesUserData(t *testing.T) {
 	f.GameFile("Game/"+LogName, "log output")
 
 	out, err := NewUninstaller(f.StateDir).Run(UninstallRequest{
-		GameID: req.Game.ID, Exe: "Game/eldenring.exe",
+		GameID: req.Game.ID, Exe: "Game/emberhollow.exe",
 	})
 	if err != nil {
 		t.Fatalf("uninstall: %v", err)
@@ -224,7 +224,7 @@ func TestUninstallRemovesUserDataOnRequest(t *testing.T) {
 	f.GameFile("Game/"+LogName, "log")
 
 	if _, err := NewUninstaller(f.StateDir).Run(UninstallRequest{
-		GameID: req.Game.ID, Exe: "Game/eldenring.exe", RemoveUserData: true,
+		GameID: req.Game.ID, Exe: "Game/emberhollow.exe", RemoveUserData: true,
 	}); err != nil {
 		t.Fatalf("uninstall: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestUninstallRestoresBackup(t *testing.T) {
 	}
 
 	out, err := NewUninstaller(f.StateDir).Run(UninstallRequest{
-		GameID: req.Game.ID, Exe: "Game/eldenring.exe",
+		GameID: req.Game.ID, Exe: "Game/emberhollow.exe",
 	})
 	if err != nil {
 		t.Fatalf("uninstall: %v", err)
@@ -284,7 +284,7 @@ func TestUninstallToleratesMissingFiles(t *testing.T) {
 	}
 
 	out, err := NewUninstaller(f.StateDir).Run(UninstallRequest{
-		GameID: req.Game.ID, Exe: "Game/eldenring.exe",
+		GameID: req.Game.ID, Exe: "Game/emberhollow.exe",
 	})
 	if err != nil {
 		t.Fatalf("uninstall: %v", err)
@@ -333,7 +333,7 @@ func TestUninstallLeavesSiblingInstall(t *testing.T) {
 	}
 
 	if _, err := NewUninstaller(f.StateDir).Run(UninstallRequest{
-		GameID: first.Game.ID, Exe: "Game/eldenring.exe",
+		GameID: first.Game.ID, Exe: "Game/emberhollow.exe",
 	}); err != nil {
 		t.Fatalf("uninstall: %v", err)
 	}
@@ -395,7 +395,7 @@ func TestUpgradeKeepsOwnershipOfINI(t *testing.T) {
 	}
 
 	if _, err := NewUninstaller(f.StateDir).Run(UninstallRequest{
-		GameID: req.Game.ID, Exe: "Game/eldenring.exe",
+		GameID: req.Game.ID, Exe: "Game/emberhollow.exe",
 	}); err != nil {
 		t.Fatalf("uninstall: %v", err)
 	}
@@ -432,7 +432,7 @@ func TestUninstallKeepsEditedINI(t *testing.T) {
 	}
 
 	out, err := NewUninstaller(f.StateDir).Run(UninstallRequest{
-		GameID: req.Game.ID, Exe: "Game/eldenring.exe",
+		GameID: req.Game.ID, Exe: "Game/emberhollow.exe",
 	})
 	if err != nil {
 		t.Fatalf("uninstall: %v", err)
@@ -461,7 +461,7 @@ func TestUninstallLeavesPreExistingINI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load(): %v", err)
 	}
-	in, _ := res.FindInstall(req.Game.ID, "Game/eldenring.exe")
+	in, _ := res.FindInstall(req.Game.ID, "Game/emberhollow.exe")
 	for _, fl := range in.Files {
 		if fl.Origin == state.OriginINI {
 			t.Error("yarm claimed ownership of an ini it did not create")
@@ -469,7 +469,7 @@ func TestUninstallLeavesPreExistingINI(t *testing.T) {
 	}
 
 	if _, err := NewUninstaller(f.StateDir).Run(UninstallRequest{
-		GameID: req.Game.ID, Exe: "Game/eldenring.exe",
+		GameID: req.Game.ID, Exe: "Game/emberhollow.exe",
 	}); err != nil {
 		t.Fatalf("uninstall: %v", err)
 	}

@@ -28,9 +28,9 @@ func wizardEnv() Env {
 // unsupported-API case).
 func sampleGameEntry() GameEntry {
 	return GameEntry{
-		Game: game.Game{ID: "steam:1245620", Name: "ELDEN RING", Provider: "steam", Root: "/games/ER"},
+		Game: game.Game{ID: "steam:700110", Name: "Ember Hollow", Provider: "steam", Root: "/games/EH"},
 		Exes: []Executable{
-			{Executable: game.Executable{Path: "Game/eldenring.exe", Arch: game.ArchX64, API: game.APID3D12}},
+			{Executable: game.Executable{Path: "Game/emberhollow.exe", Arch: game.ArchX64, API: game.APID3D12}},
 			{Executable: game.Executable{Path: "Game/launcher.exe", Arch: game.ArchX86, API: game.APIVulkan}},
 		},
 	}
@@ -156,7 +156,7 @@ func TestWizardReShadeStepShowsBothBuildsAsPanes(t *testing.T) {
 func TestWizardEditingExistingInstallPreselectsWhatIsThere(t *testing.T) {
 	entry := sampleGameEntry()
 	entry.Exes[0].Installed = &state.Install{
-		Exe:      "Game/eldenring.exe",
+		Exe:      "Game/emberhollow.exe",
 		ReShade:  state.ReShadeInfo{Version: "6.7.3", Flavor: "normal", DLL: "dxgi.dll"},
 		Packages: []string{"sweetfx-by-ceejay-dk"},
 	}
@@ -240,7 +240,7 @@ func TestWizardFullForwardFlowBuildsRequest(t *testing.T) {
 	if req.DLLName != "dxgi.dll" {
 		t.Errorf("DLLName = %q, want dxgi.dll", req.DLLName)
 	}
-	if req.Exe.Path != "Game/eldenring.exe" {
+	if req.Exe.Path != "Game/emberhollow.exe" {
 		t.Errorf("Exe.Path = %q, want the first executable", req.Exe.Path)
 	}
 	wantPackages := map[string]bool{"standard-effects": true, "sweetfx-by-ceejay-dk": true}
@@ -508,10 +508,10 @@ func TestWizardShowsTargetFolderNotExecutable(t *testing.T) {
 	s := loadWizard(t, sampleGameEntry(), 0, fakeDeps())
 	body := s.View(wizardEnv())
 
-	if !strings.Contains(body, "/games/ER/Game") {
+	if !strings.Contains(body, "/games/EH/Game") {
 		t.Errorf("the wizard should name the target folder:\n%s", body)
 	}
-	if strings.Contains(body, "eldenring.exe") {
+	if strings.Contains(body, "emberhollow.exe") {
 		t.Errorf("the wizard should not present an executable as the target:\n%s", body)
 	}
 }
@@ -1170,5 +1170,80 @@ func TestWizardReviewWithConflictsFitsNarrowTerminals(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// Backups start on, and the request says so — the only irreversible thing
+// an install does must be chosen, not defaulted into.
+func TestWizardBackupIsOnByDefault(t *testing.T) {
+	s := advance(t, loadWizard(t, sampleGameEntry(), 0, fakeDeps()), stepReview)
+
+	if !s.backup() {
+		t.Error("the backup option should start on")
+	}
+	req, ok := s.buildRequest()
+	if !ok {
+		t.Fatal("buildRequest() failed")
+	}
+	if req.NoBackup {
+		t.Error("Request.NoBackup should be false while the backup option is on")
+	}
+}
+
+// Turning backups off is allowed, reaches the request, and the review page
+// says plainly what it costs.
+func TestWizardBackupCanBeTurnedOff(t *testing.T) {
+	entry := gameWithExistingFiles(t, map[string]int{"dxgi.dll": 25872384})
+	s := advance(t, loadWizard(t, entry, 0, fakeDeps()), stepReview)
+	s = pressSpecial(t, s, tea.KeySpace) // overwrite on
+	s = pressSpecial(t, s, tea.KeyDown)
+	s = pressSpecial(t, s, tea.KeySpace) // backup off
+
+	req, ok := s.buildRequest()
+	if !ok {
+		t.Fatal("buildRequest() failed")
+	}
+	if !req.NoBackup {
+		t.Error("Request.NoBackup should be true once the backup option is off")
+	}
+
+	body := s.View(wizardEnv())
+	if !strings.Contains(body, "original discarded") || !strings.Contains(body, "gone for good") {
+		t.Errorf("review should say the originals are not recoverable:\n%s", body)
+	}
+}
+
+// Overwriting is a fresh decision each time it is turned on, so the safe
+// default comes back with it rather than inheriting an earlier "no
+// backups" from a decision the user may not remember making.
+func TestWizardTurningOverwriteBackOnRestoresBackups(t *testing.T) {
+	s := advance(t, loadWizard(t, sampleGameEntry(), 0, fakeDeps()), stepReview)
+
+	s = pressSpecial(t, s, tea.KeySpace) // overwrite on
+	s = pressSpecial(t, s, tea.KeyDown)
+	s = pressSpecial(t, s, tea.KeySpace) // backup off
+	s = pressSpecial(t, s, tea.KeyUp)
+	s = pressSpecial(t, s, tea.KeySpace) // overwrite off
+	if s.backup() {
+		t.Fatal("turning overwrite off should leave the backup choice alone")
+	}
+	s = pressSpecial(t, s, tea.KeySpace) // overwrite on again
+
+	if !s.backup() {
+		t.Error("turning overwrite back on should restore backups to the safe default")
+	}
+}
+
+// While nothing is being overwritten the option does nothing, and says so
+// rather than presenting a checkbox with no effect.
+func TestWizardBackupOptionSaysItOnlyAppliesWhenOverwriting(t *testing.T) {
+	s := advance(t, loadWizard(t, sampleGameEntry(), 0, fakeDeps()), stepReview)
+
+	if !strings.Contains(s.View(wizardEnv()), "only when overwriting") {
+		t.Errorf("the backup row should say when it applies:\n%s", s.View(wizardEnv()))
+	}
+	s = pressSpecial(t, s, tea.KeySpace)
+	if strings.Contains(s.View(wizardEnv()), "only when overwriting") {
+		t.Errorf("with overwrite on, the caveat is wrong:\n%s", s.View(wizardEnv()))
 	}
 }

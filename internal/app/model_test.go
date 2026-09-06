@@ -140,13 +140,13 @@ func TestFilterSwallowsGlobalKeys(t *testing.T) {
 func TestFilterNarrowsAndClears(t *testing.T) {
 	m := loaded(t)
 	m = drive(t, m, tea.KeyPressMsg{Code: '/', Text: "/"})
-	for _, r := range "dota" {
+	for _, r := range "ridge" {
 		m = drive(t, m, tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
 
 	gs := m.Screen().(*GamesScreen)
-	if len(gs.filtered) != 1 || gs.filtered[0].Name != "Dota 2" {
-		t.Fatalf("filtered = %d entries, want just Dota 2", len(gs.filtered))
+	if len(gs.filtered) != 1 || gs.filtered[0].Name != "Ridgeline" {
+		t.Fatalf("filtered = %d entries, want just Ridgeline", len(gs.filtered))
 	}
 	if got := gs.Title(); got != "games — 1 of 4" {
 		t.Errorf("title = %q", got)
@@ -166,7 +166,7 @@ func TestFilterClampsCursor(t *testing.T) {
 	gs.table.SetCursor(3)
 
 	m = drive(t, m, tea.KeyPressMsg{Code: '/', Text: "/"})
-	for _, r := range "dota" {
+	for _, r := range "ridge" {
 		m = drive(t, m, tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
 
@@ -313,7 +313,7 @@ func TestPushedScreenIsSized(t *testing.T) {
 	}
 
 	body := ds.View(m.env())
-	if !strings.Contains(body, "Control.exe") {
+	if !strings.Contains(body, "Vantage.exe") {
 		t.Errorf("the detail view did not render its executables:\n%s", body)
 	}
 }
@@ -340,15 +340,15 @@ func TestPoppedScreenIsResized(t *testing.T) {
 // on an installed executable, confirm, and land on a Result screen.
 func TestUninstallConfirmFlow(t *testing.T) {
 	m := loaded(t)
-	// Navigate to ELDEN RING (index 2 of sampleEntries), which has an
+	// Navigate to Ember Hollow (index 2 of sampleEntries), which has an
 	// install recorded on its first executable.
 	m = drive(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"})
 	m = drive(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"})
 	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	gd, ok := m.Screen().(*GameDetailScreen)
-	if !ok || gd.entry.Name != "ELDEN RING" {
-		t.Fatalf("screen = %T (%q), want *GameDetailScreen for ELDEN RING", m.Screen(), gd.entry.Name)
+	if !ok || gd.entry.Name != "Ember Hollow" {
+		t.Fatalf("screen = %T (%q), want *GameDetailScreen for Ember Hollow", m.Screen(), gd.entry.Name)
 	}
 
 	m = drive(t, m, tea.KeyPressMsg{Code: 'u', Text: "u"})
@@ -373,7 +373,7 @@ func TestUninstallConfirmFlow(t *testing.T) {
 // 'u' must do nothing on an executable with no recorded install — there
 // is nothing to confirm.
 func TestUninstallKeyNoOpWithoutInstall(t *testing.T) {
-	m := loaded(t) // cursor starts on Control Ultimate Edition, uninstalled
+	m := loaded(t) // cursor starts on Vantage Point Deluxe, uninstalled
 	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if _, ok := m.Screen().(*GameDetailScreen); !ok {
@@ -389,7 +389,7 @@ func TestUninstallKeyNoOpWithoutInstall(t *testing.T) {
 // Pressing i opens the wizard on the highlighted executable.
 func TestInstallKeyOpensWizard(t *testing.T) {
 	m := loaded(t)
-	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // -> Control's detail
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // -> Vantage Point's detail
 
 	m = drive(t, m, tea.KeyPressMsg{Code: 'i', Text: "i"})
 	if _, ok := m.Screen().(*WizardScreen); !ok {
@@ -400,7 +400,7 @@ func TestInstallKeyOpensWizard(t *testing.T) {
 // A single-folder game can be installed into directly from the games
 // list, without drilling into the detail screen first.
 func TestGamesScreenInstallDirectlyFromList(t *testing.T) {
-	m := loaded(t) // cursor starts on Control Ultimate Edition, single folder, uninstalled
+	m := loaded(t) // cursor starts on Vantage Point Deluxe, single folder, uninstalled
 
 	m = drive(t, m, tea.KeyPressMsg{Code: 'i', Text: "i"})
 	if _, ok := m.Screen().(*WizardScreen); !ok {
@@ -413,14 +413,14 @@ func TestGamesScreenInstallDirectlyFromList(t *testing.T) {
 func TestGamesScreenEditDirectlyFromList(t *testing.T) {
 	m := loaded(t)
 	m = drive(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"})
-	m = drive(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"}) // -> ELDEN RING, installed
+	m = drive(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"}) // -> Ember Hollow, installed
 
 	m = drive(t, m, tea.KeyPressMsg{Code: 'e', Text: "e"})
 	wiz, ok := m.Screen().(*WizardScreen)
 	if !ok {
 		t.Fatalf("screen after 'e' from the list = %T, want *WizardScreen", m.Screen())
 	}
-	if got := wiz.exe.Path; got != "Game/eldenring.exe" {
+	if got := wiz.exe.Path; got != "Game/emberhollow.exe" {
 		t.Errorf("wizard targets %q, want the actually-installed exe", got)
 	}
 }
@@ -430,7 +430,7 @@ func TestGamesScreenEditDirectlyFromList(t *testing.T) {
 func TestGamesScreenUninstallDirectlyFromList(t *testing.T) {
 	m := loaded(t)
 	m = drive(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"})
-	m = drive(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"}) // -> ELDEN RING, installed
+	m = drive(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"}) // -> Ember Hollow, installed
 
 	m = drive(t, m, tea.KeyPressMsg{Code: 'u', Text: "u"})
 	if m.overlay == nil {
@@ -506,9 +506,9 @@ func TestPopToRootClearsStackAndReloads(t *testing.T) {
 func TestAdoptConfirmFlow(t *testing.T) {
 	dir := t.TempDir()
 	for name, body := range map[string]string{
-		"dxgi.dll":      "dll body",
-		install.ININame: "[GENERAL]\n",
-		"eldenring.exe": "the game",
+		"dxgi.dll":        "dll body",
+		install.ININame:   "[GENERAL]\n",
+		"emberhollow.exe": "the game",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
 			t.Fatalf("WriteFile(%s): %v", name, err)
@@ -516,7 +516,7 @@ func TestAdoptConfirmFlow(t *testing.T) {
 	}
 
 	exes := []Executable{{
-		Executable: game.Executable{Path: "eldenring.exe", Arch: game.ArchX64, API: game.APID3D12},
+		Executable: game.Executable{Path: "emberhollow.exe", Arch: game.ArchX64, API: game.APID3D12},
 	}}
 	entry := GameEntry{
 		Game:   game.Game{ID: "manual:x", Name: "Manual Game", Provider: "manual", Root: dir},
@@ -557,7 +557,7 @@ func TestAdoptConfirmFlow(t *testing.T) {
 // 'a' must do nothing on a folder that is not flagged unmanaged — there
 // is nothing to confirm.
 func TestAdoptKeyNoOpWithoutUnmanaged(t *testing.T) {
-	m := loaded(t) // cursor starts on Control Ultimate Edition, not unmanaged
+	m := loaded(t) // cursor starts on Vantage Point Deluxe, not unmanaged
 	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	m = drive(t, m, tea.KeyPressMsg{Code: 'a', Text: "a"})
@@ -584,7 +584,7 @@ func TestFirstRunWelcomeBanner(t *testing.T) {
 	if !strings.Contains(body, "Welcome to yarm") {
 		t.Errorf("the welcome banner should be shown:\n%s", body)
 	}
-	// sampleEntries has 3 steam-provider games (Control, Dota 2, ELDEN
+	// sampleEntries has 3 steam-provider games (Vantage Point, Ridgeline, Ember Hollow
 	// RING) and 1 manual one; the banner counts only the Steam ones.
 	if !strings.Contains(body, "Steam found 3 games") {
 		t.Errorf("banner should count only Steam-provided games:\n%s", body)

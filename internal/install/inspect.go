@@ -35,7 +35,7 @@ type RuntimeInfo struct {
 
 // reshadeVersionLine matches ReShade's own startup log line, e.g.
 // `Initializing crosire's ReShade version '6.8.0' (64-bit) loaded from
-// 'dxgi.dll' into 'eldenring.exe' ...` (verified against
+// 'dxgi.dll' into 'game.exe' ...` (verified against
 // github.com/crosire/reshade's dll_main.cpp).
 var reshadeVersionLine = regexp.MustCompile(`Initializing crosire's ReShade version '([^']+)'`)
 

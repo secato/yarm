@@ -242,6 +242,11 @@ func (p Planner) classify(req Request, prev state.Install, hasPrev bool, f Plann
 		return ActionKeep, fmt.Sprintf(
 			"%s already exists and is not managed by yarm; it will be kept", f.Dest), nil
 	}
+	if req.NoBackup {
+		return ActionDiscard, fmt.Sprintf(
+			"%s will be replaced and the original discarded; uninstall cannot put it back",
+			f.Dest), nil
+	}
 	return ActionBackup, fmt.Sprintf(
 		"%s will be replaced; the original is saved as %s",
 		f.Dest, f.Dest+BackupSuffix), nil
@@ -365,16 +370,25 @@ func buildSteps(p Plan) []Step {
 		})
 	}
 
-	backups := 0
+	backups, discards := 0, 0
 	for _, f := range p.Files {
-		if f.Action == ActionBackup {
+		switch f.Action {
+		case ActionBackup:
 			backups++
+		case ActionDiscard:
+			discards++
 		}
 	}
 	if backups > 0 {
 		steps = append(steps, Step{
 			Kind:        StepBackup,
 			Description: fmt.Sprintf("back up %d existing file(s)", backups),
+		})
+	}
+	if discards > 0 {
+		steps = append(steps, Step{
+			Kind:        StepBackup,
+			Description: fmt.Sprintf("replace %d existing file(s), keeping no copy", discards),
 		})
 	}
 

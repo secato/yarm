@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A "Back up what it replaces" option beside Overwrite on the review page,
+  on by default and re-asserted whenever Overwrite is turned on. Turning it
+  off replaces displaced files without keeping a copy — the only
+  irreversible thing an install does, so the review page says so plainly
+  ("replaced, original discarded" / "gone for good"). `install.Request`
+  gained `NoBackup`, negated so the zero value stays recoverable, and
+  `yarm install` gained `--no-backup`.
+
 - The wizard's review page lists what is already in the target folder and
   what will happen to it, before the install runs. A file yarm does not
   own is kept unless Overwrite is on — which, for the proxy DLL, means the
@@ -37,6 +45,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   actually offers are ever selected.
 
 ### Changed
+
+- Tests and fixtures no longer use real game names. ELDEN RING, Control and
+  Dota 2 are now the fictional Ember Hollow, Vantage Point and Ridgeline,
+  with app ids in a reserved-looking 7001xx range. The plan documents and
+  older changelog entries keep the real names, since those record what was
+  actually verified on a real machine.
 
 - README brought up to date: the feature list covers the resources
   browser, adopting a hand-made install, the curated shortlist and

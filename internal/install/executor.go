@@ -145,9 +145,10 @@ func (e *Executor) run(ctx context.Context, plan Plan, jr *journal, onProgress P
 		emit(Event{Kind: StepRemove, Description: "removed files from the previous install"})
 	}
 
-	// 2. Back up foreign files that will be replaced.
+	// 2. Get foreign files out of the way: saved alongside, or deleted
+	//    outright when the request said not to keep a copy.
 	for _, f := range plan.Files {
-		if f.Action != ActionBackup {
+		if f.Action != ActionBackup && f.Action != ActionDiscard {
 			continue
 		}
 		if err := ctx.Err(); err != nil {
@@ -157,6 +158,14 @@ func (e *Executor) run(ctx context.Context, plan Plan, jr *journal, onProgress P
 		if err != nil {
 			return Result{}, err
 		}
+		if f.Action == ActionDiscard {
+			if err := os.Remove(abs); err != nil {
+				return Result{}, fmt.Errorf("replace %s: %w", f.Dest, err)
+			}
+			emit(Event{Kind: StepBackup, Description: "discarded " + f.Dest})
+			continue
+		}
+
 		backupRel := f.Dest + BackupSuffix
 		backupAbs := abs + BackupSuffix
 		// An existing backup is an older original — from an install that

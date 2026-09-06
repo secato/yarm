@@ -36,12 +36,12 @@ func TestParseLibraryFoldersMissingFile(t *testing.T) {
 }
 
 func TestParseAppManifest(t *testing.T) {
-	m, err := parseAppManifest(filepath.Join(fixtureDir, "appmanifest_1245620.acf"))
+	m, err := parseAppManifest(filepath.Join(fixtureDir, "appmanifest_700110.acf"))
 	if err != nil {
 		t.Fatalf("parseAppManifest() error = %v", err)
 	}
 
-	want := appManifest{appID: "1245620", name: "ELDEN RING", installDir: "ELDEN RING"}
+	want := appManifest{appID: "700110", name: "Ember Hollow", installDir: "Ember Hollow"}
 	if m != want {
 		t.Errorf("parseAppManifest() = %+v, want %+v", m, want)
 	}
@@ -52,12 +52,12 @@ func TestIsSkippedApp(t *testing.T) {
 		m    appManifest
 		want bool
 	}{
-		{appManifest{appID: "1245620", name: "ELDEN RING", installDir: "ELDEN RING"}, false},
+		{appManifest{appID: "700110", name: "Ember Hollow", installDir: "Ember Hollow"}, false},
 		{appManifest{appID: "228980", name: "Steamworks Common Redistributables", installDir: "Steamworks Shared"}, true},
 		{appManifest{appID: "1070560", name: "Steam Linux Runtime", installDir: "SteamLinuxRuntime"}, true},
 		{appManifest{appID: "9999999", name: "Proton Experimental", installDir: "Proton - Experimental"}, true},
 		{appManifest{appID: "9999998", name: "SteamVR", installDir: "SteamVR"}, true},
-		{appManifest{appID: "9999997", name: "Control", installDir: "Control"}, false},
+		{appManifest{appID: "9999997", name: "Vantage Point", installDir: "Vantage Point"}, false},
 	}
 
 	for _, tt := range tests {
@@ -116,8 +116,8 @@ func TestDiscover(t *testing.T) {
 
 	writeVDF(t, filepath.Join(steamRoot, "steamapps", "libraryfolders.vdf"), []string{steamRoot})
 
-	writeManifest(t, steamRoot, "1245620", "ELDEN RING", "ELDEN RING")
-	mkGameDir(t, steamRoot, "ELDEN RING")
+	writeManifest(t, steamRoot, "700110", "Ember Hollow", "Ember Hollow")
+	mkGameDir(t, steamRoot, "Ember Hollow")
 
 	writeManifest(t, steamRoot, "228980", "Steamworks Common Redistributables", "Steamworks Shared")
 	mkGameDir(t, steamRoot, "Steamworks Shared")
@@ -126,8 +126,8 @@ func TestDiscover(t *testing.T) {
 	// be excluded (docs/plan/04-external-sources.md §4.5).
 	writeManifest(t, steamRoot, "9999999", "Uninstalled Game", "Uninstalled Game")
 
-	writeManifest(t, extraLibrary, "1928420", "Control", "Control")
-	mkGameDir(t, extraLibrary, "Control")
+	writeManifest(t, extraLibrary, "700220", "Vantage Point", "Vantage Point")
+	mkGameDir(t, extraLibrary, "Vantage Point")
 
 	p := NewWithRoots([]string{steamRoot}, []string{extraLibrary})
 	if got := p.Name(); got != "steam" {
@@ -150,11 +150,11 @@ func TestDiscover(t *testing.T) {
 	if len(games) != 2 {
 		t.Fatalf("Discover() returned %d games, want 2: %+v", len(games), games)
 	}
-	if name, ok := byID["steam:1245620"]; !ok || name != "ELDEN RING" {
-		t.Errorf("expected steam:1245620 = ELDEN RING, got %q (present=%v)", name, ok)
+	if name, ok := byID["steam:700110"]; !ok || name != "Ember Hollow" {
+		t.Errorf("expected steam:700110 = Ember Hollow, got %q (present=%v)", name, ok)
 	}
-	if name, ok := byID["steam:1928420"]; !ok || name != "Control" {
-		t.Errorf("expected steam:1928420 = Control (from extra library), got %q (present=%v)", name, ok)
+	if name, ok := byID["steam:700220"]; !ok || name != "Vantage Point" {
+		t.Errorf("expected steam:700220 = Vantage Point (from extra library), got %q (present=%v)", name, ok)
 	}
 	if _, ok := byID["steam:228980"]; ok {
 		t.Error("Steamworks Common Redistributables should be skipped")

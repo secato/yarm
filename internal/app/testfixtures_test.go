@@ -32,7 +32,7 @@ var errLoader = fakeLoader{err: errors.New("steam library is unreadable")}
 // without, one native build, and one whose only executables are skipped.
 func sampleEntries() []GameEntry {
 	installed := state.Install{
-		Exe: "Game/eldenring.exe",
+		Exe: "Game/emberhollow.exe",
 		ReShade: state.ReShadeInfo{
 			Version: "6.8.0", Flavor: "addon", Arch: "x64", API: "d3d12", DLL: "dxgi.dll",
 		},
@@ -41,11 +41,11 @@ func sampleEntries() []GameEntry {
 	return withGroups([]GameEntry{
 		{
 			Game: game.Game{
-				ID: "steam:870780", Name: "Control Ultimate Edition",
-				Provider: "steam", Root: "/games/Control",
+				ID: "steam:700220", Name: "Vantage Point Deluxe",
+				Provider: "steam", Root: "/games/Vantage",
 			},
 			Exes: []Executable{
-				{Executable: game.Executable{Path: "Control.exe", Arch: game.ArchX64, API: game.APIDXGI}},
+				{Executable: game.Executable{Path: "Vantage.exe", Arch: game.ArchX64, API: game.APIDXGI}},
 				{Executable: game.Executable{
 					Path: "VC_redist.x64.exe", Arch: game.ArchX86,
 					API: game.APIUnknown, Skipped: true,
@@ -54,20 +54,20 @@ func sampleEntries() []GameEntry {
 		},
 		{
 			Game: game.Game{
-				ID: "steam:570", Name: "Dota 2",
-				Provider: "steam", Root: "/games/dota 2 beta",
+				ID: "steam:700330", Name: "Ridgeline",
+				Provider: "steam", Root: "/games/ridgeline beta",
 			},
 			NativeBuild: true,
 		},
 		{
 			Game: game.Game{
-				ID: "steam:1245620", Name: "ELDEN RING",
-				Provider: "steam", Root: "/games/ELDEN RING",
+				ID: "steam:700110", Name: "Ember Hollow",
+				Provider: "steam", Root: "/games/Ember Hollow",
 			},
 			Exes: []Executable{
 				{
 					Executable: game.Executable{
-						Path: "Game/eldenring.exe", Arch: game.ArchX64, API: game.APID3D12,
+						Path: "Game/emberhollow.exe", Arch: game.ArchX64, API: game.APID3D12,
 					},
 					Installed: &installed,
 				},

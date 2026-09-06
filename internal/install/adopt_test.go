@@ -12,7 +12,7 @@ import (
 
 func TestScanUnmanagedFull(t *testing.T) {
 	f := newFixture(t)
-	f.GameFile("Game/eldenring.exe", "the game")
+	f.GameFile("Game/emberhollow.exe", "the game")
 	f.GameFile("Game/dxgi.dll", "dll body")
 	f.GameFile("Game/"+ININame, "[GENERAL]\n")
 	f.GameFile("Game/"+artifacts.D3DCompiler, "d3dcompiler body")
@@ -21,7 +21,7 @@ func TestScanUnmanagedFull(t *testing.T) {
 	f.GameFile("Game/reshade-shaders/Shaders/ReShade.fxh", "// header")
 	f.GameFile("Game/reshade-shaders/Textures/noise.png", "png")
 
-	exe := game.Executable{Path: filepath.FromSlash("Game/eldenring.exe"), Arch: game.ArchX64, API: game.APID3D12}
+	exe := game.Executable{Path: filepath.FromSlash("Game/emberhollow.exe"), Arch: game.ArchX64, API: game.APID3D12}
 	c, ok := ScanUnmanaged(f.GameDir, exe)
 	if !ok {
 		t.Fatal("ScanUnmanaged() ok = false, want true")
@@ -57,11 +57,11 @@ func TestScanUnmanagedFull(t *testing.T) {
 // exist.
 func TestScanUnmanagedBareInstall(t *testing.T) {
 	f := newFixture(t)
-	f.GameFile("Game/eldenring.exe", "the game")
+	f.GameFile("Game/emberhollow.exe", "the game")
 	f.GameFile("Game/dxgi.dll", "dll body")
 	f.GameFile("Game/"+ININame, "[GENERAL]\n")
 
-	exe := game.Executable{Path: filepath.FromSlash("Game/eldenring.exe")}
+	exe := game.Executable{Path: filepath.FromSlash("Game/emberhollow.exe")}
 	c, ok := ScanUnmanaged(f.GameDir, exe)
 	if !ok {
 		t.Fatal("ok = false, want true")
@@ -76,8 +76,8 @@ func TestScanUnmanagedBareInstall(t *testing.T) {
 
 func TestScanUnmanagedNotFound(t *testing.T) {
 	f := newFixture(t)
-	f.GameFile("Game/eldenring.exe", "the game")
-	exe := game.Executable{Path: filepath.FromSlash("Game/eldenring.exe")}
+	f.GameFile("Game/emberhollow.exe", "the game")
+	exe := game.Executable{Path: filepath.FromSlash("Game/emberhollow.exe")}
 
 	if _, ok := ScanUnmanaged(f.GameDir, exe); ok {
 		t.Error("ok = true for a directory with nothing ReShade-shaped in it")
@@ -103,20 +103,20 @@ func TestScanUnmanagedAtGameRoot(t *testing.T) {
 
 func TestAdoptRecordsRealHashesAndTouchesNothing(t *testing.T) {
 	f := newFixture(t)
-	f.GameFile("Game/eldenring.exe", "the game")
+	f.GameFile("Game/emberhollow.exe", "the game")
 	f.GameFile("Game/dxgi.dll", "dll body")
 	f.GameFile("Game/"+ININame, "[GENERAL]\n")
 	f.GameFile("Game/reshade-shaders/Shaders/Deband.fx", "// deband")
 
 	before := snapshot(t, f.GameDir)
 
-	exe := game.Executable{Path: filepath.FromSlash("Game/eldenring.exe"), Arch: game.ArchX64, API: game.APID3D12}
+	exe := game.Executable{Path: filepath.FromSlash("Game/emberhollow.exe"), Arch: game.ArchX64, API: game.APID3D12}
 	candidate, ok := ScanUnmanaged(f.GameDir, exe)
 	if !ok {
 		t.Fatal("ScanUnmanaged ok = false")
 	}
 
-	g := game.Game{ID: "manual:abc123", Name: "ELDEN RING", Provider: "manual", Root: f.GameDir}
+	g := game.Game{ID: "manual:abc123", Name: "Ember Hollow", Provider: "manual", Root: f.GameDir}
 	in, err := Adopt(f.StateDir, g, exe, candidate)
 	if err != nil {
 		t.Fatalf("Adopt() error = %v", err)
@@ -148,7 +148,7 @@ func TestAdoptRecordsRealHashesAndTouchesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("state.Load(): %v", err)
 	}
-	got, ok := reg.FindInstall(g.ID, "Game/eldenring.exe")
+	got, ok := reg.FindInstall(g.ID, "Game/emberhollow.exe")
 	if !ok {
 		t.Fatal("the adopted install should be findable in the registry")
 	}
@@ -161,12 +161,12 @@ func TestAdoptRecordsRealHashesAndTouchesNothing(t *testing.T) {
 // build, and Adopt must record it accordingly and pick up the arch.
 func TestAdoptDetectsAddonFlavor(t *testing.T) {
 	f := newFixture(t)
-	f.GameFile("Game/eldenring.exe", "the game")
+	f.GameFile("Game/emberhollow.exe", "the game")
 	f.GameFile("Game/dxgi.dll", "dll body")
 	f.GameFile("Game/"+ININame, "[GENERAL]\n")
 	f.GameFile("Game/swapchain.addon64", "addon body")
 
-	exe := game.Executable{Path: filepath.FromSlash("Game/eldenring.exe"), Arch: game.ArchX86}
+	exe := game.Executable{Path: filepath.FromSlash("Game/emberhollow.exe"), Arch: game.ArchX86}
 	candidate, ok := ScanUnmanaged(f.GameDir, exe)
 	if !ok {
 		t.Fatal("ScanUnmanaged ok = false")
@@ -191,7 +191,7 @@ func TestAdoptDetectsAddonFlavor(t *testing.T) {
 // itself.
 func TestAdoptThenUninstallIsByteIdentical(t *testing.T) {
 	f := newFixture(t)
-	f.GameFile("Game/eldenring.exe", "the game")
+	f.GameFile("Game/emberhollow.exe", "the game")
 	f.GameFile("Game/data/assets.pak", "unrelated game data")
 	f.GameFile("Game/dxgi.dll", "dll body")
 	f.GameFile("Game/"+ININame, "[GENERAL]\n")
@@ -206,7 +206,7 @@ func TestAdoptThenUninstallIsByteIdentical(t *testing.T) {
 	delete(pristine, "Game/reshade-shaders/Shaders/Deband.fx")
 	delete(pristine, "Game/reshade-shaders/Textures/noise.png")
 
-	exe := game.Executable{Path: filepath.FromSlash("Game/eldenring.exe"), Arch: game.ArchX64, API: game.APID3D12}
+	exe := game.Executable{Path: filepath.FromSlash("Game/emberhollow.exe"), Arch: game.ArchX64, API: game.APID3D12}
 	candidate, ok := ScanUnmanaged(f.GameDir, exe)
 	if !ok {
 		t.Fatal("ScanUnmanaged ok = false")
@@ -216,7 +216,7 @@ func TestAdoptThenUninstallIsByteIdentical(t *testing.T) {
 		t.Fatalf("Adopt(): %v", err)
 	}
 
-	out, err := NewUninstaller(f.StateDir).Run(UninstallRequest{GameID: g.ID, Exe: "Game/eldenring.exe"})
+	out, err := NewUninstaller(f.StateDir).Run(UninstallRequest{GameID: g.ID, Exe: "Game/emberhollow.exe"})
 	if err != nil {
 		t.Fatalf("uninstall: %v", err)
 	}

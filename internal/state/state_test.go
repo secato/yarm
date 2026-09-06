@@ -34,9 +34,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		t.Errorf("fresh registry has %d games, want 0", len(reg.Games))
 	}
 
-	reg.Record("steam:1245620", Game{
-		Name: "ELDEN RING", Provider: "steam", Root: "/games/ER",
-	}, sampleInstall("Game/eldenring.exe"))
+	reg.Record("steam:700110", Game{
+		Name: "Ember Hollow", Provider: "steam", Root: "/games/EH",
+	}, sampleInstall("Game/emberhollow.exe"))
 
 	if err := Save(dir, reg); err != nil {
 		t.Fatalf("Save(): %v", err)

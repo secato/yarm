@@ -55,9 +55,15 @@ type Request struct {
 	Packages []string
 	Addons   []string
 	Custom   []string
-	// Overwrite allows replacing files YARM does not own, after backing
-	// them up. Without it, such files are left alone and reported.
+	// Overwrite allows replacing files YARM does not own. Without it, such
+	// files are left alone and reported.
 	Overwrite bool
+	// NoBackup discards the files Overwrite displaces instead of saving
+	// each as <name>.yarm-bak for Uninstall to put back. It is negated so
+	// that the zero value is the recoverable one: a caller that forgets
+	// this field must not silently get the irreversible behavior.
+	// Meaningless without Overwrite.
+	NoBackup bool
 	// TargetOS decides OS-specific rules, chiefly whether
 	// d3dcompiler_47.dll is part of the install. It is a field rather than
 	// a runtime.GOOS read so both branches are testable anywhere.
@@ -115,13 +121,21 @@ const (
 	// ActionBackup overwrites a file YARM does not own, saving the
 	// original alongside first.
 	ActionBackup Action = "backup"
+	// ActionDiscard overwrites a file YARM does not own without keeping a
+	// copy — Overwrite with Backup explicitly turned off. The only
+	// irreversible action in the set, which is why it is not folded into
+	// ActionReplace: the plan, the warnings and the progress log all have
+	// to be able to tell the two apart.
+	ActionDiscard Action = "discard"
 	// ActionKeep leaves a foreign file untouched because Overwrite was
 	// not given.
 	ActionKeep Action = "keep"
 )
 
 // Writes reports whether an action puts a file on disk.
-func (a Action) Writes() bool { return a == ActionCreate || a == ActionReplace || a == ActionBackup }
+func (a Action) Writes() bool {
+	return a == ActionCreate || a == ActionReplace || a == ActionBackup || a == ActionDiscard
+}
 
 // PlannedFile is one file the install will place in the game directory.
 type PlannedFile struct {

@@ -174,10 +174,25 @@ func NewWizardScreen(entry GameEntry, exe Executable, deps Deps) *WizardScreen {
 		existing: existing,
 		loading:  true,
 		flavor:   flavor,
-		options: newMultiSelect([]selectItem{
-			{ID: "overwrite", Name: "Overwrite existing files"},
-		}),
+		options:  newOptions(),
 	}
+}
+
+// newOptions builds the review page's checklist. Backups start on: the
+// only irreversible thing an install does is replacing a file the user had
+// without keeping a copy, and that has to be something they chose rather
+// than something they failed to notice.
+func newOptions() multiSelect {
+	m := newMultiSelect([]selectItem{
+		{ID: "overwrite", Name: "Overwrite existing files"},
+		{
+			ID:          "backup",
+			Name:        "Back up what it replaces",
+			Description: "saved as .yarm-bak beside each file, and put back when you uninstall",
+		},
+	})
+	m.selected["backup"] = true
+	return m
 }
 
 // Init implements Screen.
@@ -543,6 +558,11 @@ func (s *WizardScreen) selectedDLL() string {
 // option is checked.
 func (s *WizardScreen) overwrite() bool { return s.options.selected["overwrite"] }
 
+// backup reports whether displaced files are saved rather than discarded.
+// Only meaningful alongside overwrite, which is the only thing that
+// displaces anything.
+func (s *WizardScreen) backup() bool { return s.options.selected["backup"] }
+
 // cached reports whether the given version is already downloaded for the
 // given build.
 func (s *WizardScreen) cached(version string, flavor install.Flavor) bool {
@@ -632,7 +652,14 @@ func (s *WizardScreen) handleReviewKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 	case key.Matches(msg, s.keys.Down):
 		s.options.down()
 	case key.Matches(msg, s.keys.Toggle):
+		was := s.overwrite()
 		s.options.toggle()
+		// Turning overwrite on re-asserts the safe default: whatever was
+		// decided about backups the last time overwriting was on should
+		// not quietly carry over into a new decision to overwrite.
+		if !was && s.overwrite() {
+			s.options.selected["backup"] = true
+		}
 	case key.Matches(msg, s.keys.Enter):
 		req, ok := s.buildRequest()
 		if !ok {
@@ -671,6 +698,7 @@ func (s *WizardScreen) buildRequest() (install.Request, bool) {
 		// rather than merely not installing an add-on.
 		Addons:    addonsForDownload(s.flavor, s.addons),
 		Overwrite: s.overwrite(),
+		NoBackup:  !s.backup(),
 		TargetOS:  s.targetOS,
 	}, true
 }
@@ -1099,7 +1127,23 @@ func (s *WizardScreen) viewReview(b *strings.Builder, env Env, height int) {
 			marker = "▸ "
 		}
 		line := fmt.Sprintf("%s%s %s", marker, box, it.Name)
-		if i == s.options.cursor {
+
+		// The backup option only does anything while overwriting, and
+		// saying so is better than offering a checkbox that silently means
+		// nothing.
+		note := ""
+		if it.ID == "backup" && !s.overwrite() {
+			note = "  — only when overwriting"
+		}
+		line, note = splitRow(line, note, env.Width)
+		switch {
+		case note != "":
+			line = env.Styles.Faint.Render(line)
+			if i == s.options.cursor {
+				line = env.Styles.Selected.Render(line)
+			}
+			line += env.Styles.Faint.Render(note)
+		case i == s.options.cursor:
 			line = env.Styles.Selected.Render(line)
 		}
 		opts.WriteString(line)
@@ -1194,8 +1238,10 @@ func (s *WizardScreen) describeConflict(c install.Conflict, env Env) (string, li
 		return fmt.Sprintf("  %s — your settings, kept", name), env.Styles.Faint
 	case c.Kind == install.ConflictManaged:
 		return fmt.Sprintf("  %s — yours, replaced", name), env.Styles.Faint
+	case s.overwrite() && s.backup():
+		return fmt.Sprintf("  %s (%s) — replaced, original saved", name, humanSize(c.Size)), env.Styles.Warn
 	case s.overwrite():
-		return fmt.Sprintf("  %s (%s) — replaced", name, humanSize(c.Size)), env.Styles.Warn
+		return fmt.Sprintf("  ! %s (%s) — replaced, original discarded", name, humanSize(c.Size)), env.Styles.Bad
 	default:
 		// The size is here because it is often what identifies the file: a
 		// 24 MiB dxgi.dll is some other injector, not a stale ReShade.
@@ -1212,9 +1258,11 @@ func (s *WizardScreen) conflictAdvice(blocking bool) string {
 	case blocking:
 		return "Turn on Overwrite below to replace these. The originals are saved next to them as " +
 			install.BackupSuffix + " files and put back when you uninstall."
-	case s.overwrite():
+	case s.overwrite() && s.backup():
 		return "Originals are saved as " + install.BackupSuffix +
 			" files and put back when you uninstall."
+	case s.overwrite():
+		return "Backups are off, so these files are gone for good — uninstall cannot put them back."
 	default:
 		return ""
 	}
