@@ -70,6 +70,12 @@ func (s *GameDetailScreen) currentGroup() (FolderGroup, bool) {
 // to, means anything at all.
 func (s *GameDetailScreen) multi() bool { return len(s.entry.Groups) > 1 }
 
+// editInstallBinding edits a folder's existing install — a distinct key
+// from Install (which only ever means "there is nothing here yet"), so
+// the shortcut always matches what it does rather than overloading one
+// key with two different meanings depending on state.
+var editInstallBinding = key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit install"))
+
 // KeyBindings implements Screen.
 func (s *GameDetailScreen) KeyBindings() []key.Binding {
 	bindings := []key.Binding{s.keys.Back}
@@ -85,10 +91,7 @@ func (s *GameDetailScreen) KeyBindings() []key.Binding {
 	case grp.Unmanaged != nil:
 		bindings = append([]key.Binding{s.keys.Adopt}, bindings...)
 	case len(s.entry.PlayableExes()) > 0 && grp.Installed != nil:
-		bindings = append([]key.Binding{
-			key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "update ReShade")),
-			s.keys.Uninstall,
-		}, bindings...)
+		bindings = append([]key.Binding{editInstallBinding, s.keys.Uninstall}, bindings...)
 	case len(s.entry.PlayableExes()) > 0:
 		bindings = append([]key.Binding{s.keys.Install}, bindings...)
 	}
@@ -112,7 +115,7 @@ func (s *GameDetailScreen) Update(msg tea.Msg, env Env) (Screen, tea.Cmd) {
 		case s.multi() && key.Matches(msg, s.keys.Down):
 			s.cursor.down()
 			return s, nil
-		case key.Matches(msg, s.keys.Install):
+		case key.Matches(msg, s.keys.Install) || key.Matches(msg, editInstallBinding):
 			return s.startInstall()
 		case key.Matches(msg, s.keys.Uninstall):
 			return s.startUninstall()
@@ -123,20 +126,48 @@ func (s *GameDetailScreen) Update(msg tea.Msg, env Env) (Screen, tea.Cmd) {
 	return s, nil
 }
 
-// startInstall opens the wizard on the current folder — or, when it
-// already has an install, on whichever executable that install is
-// actually recorded against, since it may not be the folder's usual
-// "primary" one. A folder yarm has not adopted an unmanaged install in
-// yet is not a fresh-install candidate: attempting one would collide with
-// the files already there, so this hands off to the adopt confirmation
-// instead, same as pressing a directly.
+// startInstall opens the wizard on, or adopts, the current folder — see
+// startInstallForGroup.
 func (s *GameDetailScreen) startInstall() (Screen, tea.Cmd) {
 	grp, ok := s.currentGroup()
 	if !ok {
 		return s, nil
 	}
+	return s, startInstallForGroup(s.entry, grp, s.deps)
+}
+
+// startUninstall confirms, then removes, the install covering the current
+// folder — see startUninstallForGroup.
+func (s *GameDetailScreen) startUninstall() (Screen, tea.Cmd) {
+	grp, ok := s.currentGroup()
+	if !ok {
+		return s, nil
+	}
+	return s, startUninstallForGroup(s.entry, grp, s.deps)
+}
+
+// startAdopt confirms, then records, the unmanaged install found in the
+// current folder — see startAdoptForGroup.
+func (s *GameDetailScreen) startAdopt() (Screen, tea.Cmd) {
+	grp, ok := s.currentGroup()
+	if !ok {
+		return s, nil
+	}
+	return s, startAdoptForGroup(s.entry, grp, s.deps)
+}
+
+// startInstallForGroup opens the wizard on grp — or, when it already has
+// an install, on whichever executable that install is actually recorded
+// against, since it may not be the folder's usual "primary" one. A folder
+// yarm has not adopted an unmanaged install in yet is not a fresh-install
+// candidate: attempting one would collide with the files already there,
+// so this hands off to the adopt confirmation instead, same as pressing
+// the adopt binding directly. Shared between GameDetailScreen (any
+// folder) and GamesScreen (a game with exactly one, acted on directly
+// from the list without drilling in).
+func startInstallForGroup(entry GameEntry, grp FolderGroup, deps Deps) tea.Cmd {
 	if grp.Unmanaged != nil {
-		return s.startAdopt()
+		return startAdoptForGroup(entry, grp, deps)
 	}
 
 	target := grp.primaryExe()
@@ -146,33 +177,32 @@ func (s *GameDetailScreen) startInstall() (Screen, tea.Cmd) {
 	// The wizard's own exe step starts from PlayableExes(), so the
 	// preselection has to be an index into that list.
 	preselected := 0
-	for i, e := range s.entry.PlayableExes() {
+	for i, e := range entry.PlayableExes() {
 		if e.Path == target.Path {
 			preselected = i
 			break
 		}
 	}
-	return s, PushScreen(NewWizardScreen(s.entry, preselected, s.deps))
+	return PushScreen(NewWizardScreen(entry, preselected, deps))
 }
 
-// startUninstall confirms, then removes, the install covering the current
-// folder — resolved to whichever executable it is actually recorded
-// against, which may not be the one a fresh install would default to.
-func (s *GameDetailScreen) startUninstall() (Screen, tea.Cmd) {
-	grp, ok := s.currentGroup()
-	if !ok || grp.Installed == nil || s.deps.Uninstaller == nil {
-		return s, nil
+// startUninstallForGroup confirms, then removes, the install covering
+// grp — resolved to whichever executable it is actually recorded against,
+// which may not be the one a fresh install would default to.
+func startUninstallForGroup(entry GameEntry, grp FolderGroup, deps Deps) tea.Cmd {
+	if grp.Installed == nil || deps.Uninstaller == nil {
+		return nil
 	}
 	target, ok := grp.installedExe()
 	if !ok {
-		return s, nil
+		return nil
 	}
 
 	exePath := target.Path
 	action := Async(context.Background(),
 		func(ctx context.Context) (install.UninstallResult, error) {
-			return s.deps.Uninstaller.Uninstall(install.UninstallRequest{
-				GameID: s.entry.ID,
+			return deps.Uninstaller.Uninstall(install.UninstallRequest{
+				GameID: entry.ID,
 				Exe:    exePath,
 			})
 		},
@@ -181,31 +211,30 @@ func (s *GameDetailScreen) startUninstall() (Screen, tea.Cmd) {
 		},
 	)
 
-	return s, Confirm(
+	return Confirm(
 		"Uninstall ReShade from "+exePath+"?",
 		"This removes only the files yarm created; anything you edited afterward is kept.",
 		action,
 	)
 }
 
-// startAdopt confirms, then records, the unmanaged install found in the
-// current folder. The install is tied to the folder's primary executable
-// — ReShade intercepts by directory, so this is not necessarily whichever
+// startAdoptForGroup confirms, then records, the unmanaged install found
+// in grp. The install is tied to the folder's primary executable —
+// ReShade intercepts by directory, so this is not necessarily whichever
 // executable a user might expect, but it is the one yarm will report
 // against from now on.
-func (s *GameDetailScreen) startAdopt() (Screen, tea.Cmd) {
-	grp, ok := s.currentGroup()
-	if !ok || grp.Unmanaged == nil || s.deps.Adopter == nil {
-		return s, nil
+func startAdoptForGroup(entry GameEntry, grp FolderGroup, deps Deps) tea.Cmd {
+	if grp.Unmanaged == nil || deps.Adopter == nil {
+		return nil
 	}
 	candidate := *grp.Unmanaged
 	target := grp.primaryExe()
 
 	exePath := target.Path
-	g, executable := s.entry.Game, target.Executable
+	g, executable := entry.Game, target.Executable
 	action := Async(context.Background(),
 		func(ctx context.Context) (state.Install, error) {
-			return s.deps.Adopter.Adopt(g, executable, candidate)
+			return deps.Adopter.Adopt(g, executable, candidate)
 		},
 		func(in state.Install) tea.Msg {
 			return adoptDoneMsg{exePath: exePath, install: in}
@@ -219,7 +248,7 @@ func (s *GameDetailScreen) startAdopt() (Screen, tea.Cmd) {
 			"uninstall this install for you from then on, the same as one it created itself.",
 		candidate.DLLName, candidate.FileCount())
 
-	return s, Confirm("Adopt the existing ReShade install on "+exePath+"?", detail, action)
+	return Confirm("Adopt the existing ReShade install on "+exePath+"?", detail, action)
 }
 
 // View implements Screen.
@@ -293,6 +322,13 @@ func (s *GameDetailScreen) writeGroup(b *strings.Builder, grp FolderGroup, i int
 		}
 		name := strings.TrimPrefix(e.Path, stripPrefix)
 		_, _ = fmt.Fprintf(b, "%s  %s · %s · %s\n", indent, name, e.Arch, apiLabel(e.API))
+	}
+
+	// Last, below everything else in this folder's block: a real safety
+	// warning belongs at the bottom of the pane, not sandwiched between
+	// the ReShade status and the executables list.
+	if groupIsAddon(grp) {
+		b.WriteString(indent + env.Styles.Bad.Render(anticheatWarning) + "\n")
 	}
 }
 

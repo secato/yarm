@@ -126,10 +126,38 @@ func (s *GamesScreen) Title() string {
 
 // KeyBindings implements Screen.
 func (s *GamesScreen) KeyBindings() []key.Binding {
-	return []key.Binding{
+	bindings := []key.Binding{
 		s.keys.Enter, s.keys.Filter, s.keys.Rescan, s.keys.AddGame,
 		s.keys.Cache, s.keys.Custom, s.keys.Setting,
 	}
+
+	// Acting directly from the list only makes sense for a game with
+	// exactly one folder — with more than one there is no single
+	// install/uninstall to act on without saying which, which is what the
+	// detail view (enter) is for.
+	entry, grp, ok := s.singleGroupSelection()
+	if !ok {
+		return bindings
+	}
+	switch {
+	case grp.Unmanaged != nil:
+		bindings = append([]key.Binding{key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "adopt ReShade"))}, bindings...)
+	case len(entry.PlayableExes()) > 0 && grp.Installed != nil:
+		bindings = append([]key.Binding{editInstallBinding, s.keys.Uninstall}, bindings...)
+	case len(entry.PlayableExes()) > 0:
+		bindings = append([]key.Binding{s.keys.Install}, bindings...)
+	}
+	return bindings
+}
+
+// singleGroupSelection returns the highlighted game and its one folder
+// group, when it has exactly one.
+func (s *GamesScreen) singleGroupSelection() (GameEntry, FolderGroup, bool) {
+	entry, ok := s.selected()
+	if !ok || len(entry.Groups) != 1 {
+		return GameEntry{}, FolderGroup{}, false
+	}
+	return entry, entry.Groups[0], true
 }
 
 // Update implements Screen.
@@ -148,6 +176,12 @@ func (s *GamesScreen) Update(msg tea.Msg, env Env) (Screen, tea.Cmd) {
 		s.applyFilter()
 		s.resize(env)
 		return s, SetStatus(fmt.Sprintf("found %d game(s)", len(s.entries)))
+
+	case uninstallDoneMsg:
+		return s, PushScreen(NewUninstallResultScreen(msg.exePath, msg.result, nil))
+
+	case adoptDoneMsg:
+		return s, PushScreen(NewAdoptResultScreen(msg.exePath, msg.install, nil))
 
 	case tea.KeyPressMsg:
 		return s.handleKey(msg, env)
@@ -204,6 +238,18 @@ func (s *GamesScreen) handleKey(msg tea.KeyPressMsg, env Env) (Screen, tea.Cmd) 
 
 	case key.Matches(msg, s.keys.Setting):
 		return s, PushScreen(NewSettingsScreen(s.deps.ConfigDir, s.deps.Config))
+
+	case key.Matches(msg, s.keys.Install) || key.Matches(msg, editInstallBinding):
+		if entry, grp, ok := s.singleGroupSelection(); ok {
+			return s, startInstallForGroup(entry, grp, s.deps)
+		}
+		return s, nil
+
+	case key.Matches(msg, s.keys.Uninstall):
+		if entry, grp, ok := s.singleGroupSelection(); ok {
+			return s, startUninstallForGroup(entry, grp, s.deps)
+		}
+		return s, nil
 
 	case key.Matches(msg, s.keys.Enter):
 		if entry, ok := s.selected(); ok {
@@ -431,6 +477,12 @@ func (s *GamesScreen) renderDetail(e GameEntry, env Env) string {
 				b.WriteString(indent + "  " + truncate(name, s.detailWidth-8) + "\n")
 				b.WriteString(env.Styles.Faint.Render(
 					indent+fmt.Sprintf("    %s · %s", ex.Arch, apiLabel(ex.API))) + "\n")
+			}
+			// Last, below everything else in this folder's block: a real
+			// safety warning belongs at the bottom of the pane, not
+			// sandwiched between the ReShade status and the executables.
+			if groupIsAddon(grp) {
+				b.WriteString(indent + env.Styles.Bad.Render(anticheatWarning) + "\n")
 			}
 		}
 	}

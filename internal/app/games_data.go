@@ -116,8 +116,24 @@ func groupByFolder(root string, exes []Executable) []FolderGroup {
 // anticheatWarning is shown wherever the add-on build is in play — it can
 // load code beyond ReShade's own effects, which some anti-cheat systems
 // treat as a cheat-tool signature; using it in an online or competitive
-// game can get an account flagged or banned.
+// game can get an account flagged or banned. Callers print it once, at
+// the very bottom of a folder's whole block (after its executables, not
+// sandwiched inside the ReShade status above them), so it reads as a
+// standing notice rather than one more fact among several.
 const anticheatWarning = "⚠ add-ons can trigger anti-cheat detection — avoid them in online or competitive games unless you know the game allows it"
+
+// groupIsAddon reports whether grp's install (or, if unmanaged, what was
+// found) is the add-on build — the condition for showing anticheatWarning.
+func groupIsAddon(grp FolderGroup) bool {
+	switch {
+	case grp.Installed != nil:
+		return strings.EqualFold(grp.Installed.ReShade.Flavor, string(install.FlavorAddon))
+	case grp.Unmanaged != nil:
+		return grp.Unmanaged.HasAddons
+	default:
+		return false
+	}
+}
 
 // reshadeStatusText returns what is installed (or found) in grp as plain,
 // styled text, one fact per line, always starting with a "ReShade - "
@@ -128,12 +144,10 @@ const anticheatWarning = "⚠ add-ons can trigger anti-cheat detection — avoid
 // styling) of "what's installed" matches wherever it is shown.
 func reshadeStatusText(grp FolderGroup, env Env, hint string) string {
 	var b strings.Builder
-	addon := false
 
 	switch {
 	case grp.Installed != nil:
 		in := grp.Installed
-		addon = strings.EqualFold(in.ReShade.Flavor, string(install.FlavorAddon))
 		b.WriteString("ReShade - ")
 		b.WriteString(env.Styles.Good.Render(
 			fmt.Sprintf("✓ %s (%s) — %s", in.ReShade.Version, in.ReShade.Flavor, dllWithCoverage(in.ReShade.DLL))))
@@ -145,7 +159,6 @@ func reshadeStatusText(grp FolderGroup, env Env, hint string) string {
 		writeIndentedList(&b, env, "packages", in.Packages)
 		writeIndentedList(&b, env, "add-ons", in.Addons)
 	case grp.Unmanaged != nil:
-		addon = grp.Unmanaged.HasAddons
 		b.WriteString("ReShade - ")
 		b.WriteString(env.Styles.Warn.Render("⚠ found, untracked (" + dllWithCoverage(grp.Unmanaged.DLLName) + ")"))
 		b.WriteString("\n")
@@ -156,11 +169,6 @@ func reshadeStatusText(grp FolderGroup, env Env, hint string) string {
 	default:
 		b.WriteString("ReShade - ")
 		b.WriteString(env.Styles.Faint.Render("not installed"))
-		b.WriteString("\n")
-	}
-
-	if addon {
-		b.WriteString(env.Styles.Bad.Render(anticheatWarning))
 		b.WriteString("\n")
 	}
 

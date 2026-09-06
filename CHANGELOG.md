@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The anti-cheat warning for the add-on build now shows once, at the very
+  bottom of a folder's whole block (games list side panel and
+  `GameDetailScreen` alike) — after its executables, not sandwiched
+  between the ReShade status and the executables list where it could
+  scroll out of view above a long package or technique list.
+- `GameDetailScreen`'s "update ReShade" is renamed "edit install", on its
+  own key (`e`) rather than reusing `i` (which now only ever means
+  "install", i.e. there is nothing here yet) — a shortcut that no longer
+  means two different things depending on state.
+- Installing, editing or uninstalling no longer requires drilling into
+  the detail screen first: `GamesScreen` now offers `i`/`e`/`u` directly
+  on the highlighted game, for a game with exactly one folder (the common
+  case). A game with more than one folder still needs the detail screen,
+  since there is no single install to act on without saying which.
+
 - The cache manager (`c`) is replaced by a resources browser: three panes
   (ReShade versions, effect packages/shaders, add-ons) that answer
   "what's available", not just "what's cached" — the two used to be

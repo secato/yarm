@@ -217,12 +217,12 @@ func TestFolderLevelInstallTargetsTheActuallyInstalledExe(t *testing.T) {
 
 	foundUpdate := false
 	for _, b := range gd.KeyBindings() {
-		if strings.Contains(b.Help().Desc, "update ReShade") {
+		if strings.Contains(b.Help().Desc, "edit install") {
 			foundUpdate = true
 		}
 	}
 	if !foundUpdate {
-		t.Error(`KeyBindings() should offer "update ReShade" since the folder already has an install`)
+		t.Error(`KeyBindings() should offer "edit install" since the folder already has an install`)
 	}
 
 	_, cmd := gd.Update(tea.KeyPressMsg{Code: 'i', Text: "i"}, env)
@@ -278,7 +278,7 @@ func TestMultiFolderCursorOffersPerFolderActions(t *testing.T) {
 	// update binding, not an adopt one.
 	hasUpdate := false
 	for _, b := range gd.KeyBindings() {
-		if strings.Contains(b.Help().Desc, "update ReShade") {
+		if strings.Contains(b.Help().Desc, "edit install") {
 			hasUpdate = true
 		}
 	}
@@ -307,26 +307,52 @@ func TestMultiFolderCursorOffersPerFolderActions(t *testing.T) {
 // account-ban risk in an online game — the warning must show for both an
 // already-tracked add-on install and an unmanaged one found with add-on
 // files, but not for a plain normal-flavor install.
-func TestReshadeStatusTextWarnsAboutAddonAntiCheatRisk(t *testing.T) {
-	env := Env{Styles: NewStyles(true), Width: 100, Height: 30}
-
+func TestGroupIsAddonDetectsAddonAntiCheatRisk(t *testing.T) {
 	addonInstalled := FolderGroup{Installed: &state.Install{
 		ReShade: state.ReShadeInfo{Version: "6.8.0", Flavor: "addon", DLL: "dxgi.dll"},
 	}}
-	if body := reshadeStatusText(addonInstalled, env, ""); !strings.Contains(body, anticheatWarning) {
-		t.Errorf("an installed add-on build should warn about anti-cheat risk:\n%s", body)
+	if !groupIsAddon(addonInstalled) {
+		t.Error("an installed add-on build should be flagged as addon")
 	}
 
 	normalInstalled := FolderGroup{Installed: &state.Install{
 		ReShade: state.ReShadeInfo{Version: "6.8.0", Flavor: "normal", DLL: "dxgi.dll"},
 	}}
-	if body := reshadeStatusText(normalInstalled, env, ""); strings.Contains(body, anticheatWarning) {
-		t.Errorf("a normal-flavor install should not warn about add-ons:\n%s", body)
+	if groupIsAddon(normalInstalled) {
+		t.Error("a normal-flavor install should not be flagged as addon")
 	}
 
 	unmanagedAddon := FolderGroup{Unmanaged: &install.AdoptCandidate{DLLName: "dxgi.dll", HasAddons: true}}
-	if body := reshadeStatusText(unmanagedAddon, env, ""); !strings.Contains(body, anticheatWarning) {
-		t.Errorf("an unmanaged install with add-on files should warn about anti-cheat risk:\n%s", body)
+	if !groupIsAddon(unmanagedAddon) {
+		t.Error("an unmanaged install with add-on files should be flagged as addon")
+	}
+}
+
+// The anti-cheat warning must appear once, at the very bottom of a
+// folder's whole block — after its executables — not sandwiched between
+// the ReShade status and the executables list.
+func TestGameDetailShowsAntiCheatWarningAtBottomOfPane(t *testing.T) {
+	installed := state.Install{
+		Exe:     "game.exe",
+		ReShade: state.ReShadeInfo{Version: "6.8.0", Flavor: "addon", DLL: "dxgi.dll"},
+	}
+	exes := []Executable{{Executable: game.Executable{Path: "game.exe"}, Installed: &installed}}
+	entry := GameEntry{
+		Game:   game.Game{ID: "manual:x", Name: "X", Root: "/games/x"},
+		Exes:   exes,
+		Groups: groupByFolder("/games/x", exes),
+	}
+
+	gd := NewGameDetailScreen(entry, Deps{})
+	body := gd.View(Env{Styles: NewStyles(true), Width: 100, Height: 30})
+
+	execIdx := strings.Index(body, "Executables")
+	warnIdx := strings.Index(body, "anti-cheat")
+	if execIdx < 0 || warnIdx < 0 {
+		t.Fatalf("expected both \"Executables\" and the anti-cheat warning in the body:\n%s", body)
+	}
+	if warnIdx < execIdx {
+		t.Errorf("the anti-cheat warning should come after \"Executables\", not before:\n%s", body)
 	}
 }
 

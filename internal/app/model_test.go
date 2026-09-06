@@ -10,6 +10,7 @@ import (
 
 	"github.com/secato/yarm/internal/game"
 	"github.com/secato/yarm/internal/install"
+	"github.com/secato/yarm/internal/state"
 )
 
 // drive feeds messages through the root model, resolving the control
@@ -369,6 +370,85 @@ func TestInstallKeyOpensWizard(t *testing.T) {
 	m = drive(t, m, tea.KeyPressMsg{Code: 'i', Text: "i"})
 	if _, ok := m.Screen().(*WizardScreen); !ok {
 		t.Fatalf("screen after 'i' = %T, want *WizardScreen", m.Screen())
+	}
+}
+
+// A single-folder game can be installed into directly from the games
+// list, without drilling into the detail screen first.
+func TestGamesScreenInstallDirectlyFromList(t *testing.T) {
+	m := loaded(t) // cursor starts on Control Ultimate Edition, single folder, uninstalled
+
+	m = drive(t, m, tea.KeyPressMsg{Code: 'i', Text: "i"})
+	if _, ok := m.Screen().(*WizardScreen); !ok {
+		t.Fatalf("screen after 'i' from the list = %T, want *WizardScreen", m.Screen())
+	}
+}
+
+// A single-folder game that already has an install can be edited directly
+// from the list with 'e'.
+func TestGamesScreenEditDirectlyFromList(t *testing.T) {
+	m := loaded(t)
+	m = drive(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"})
+	m = drive(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"}) // -> ELDEN RING, installed
+
+	m = drive(t, m, tea.KeyPressMsg{Code: 'e', Text: "e"})
+	wiz, ok := m.Screen().(*WizardScreen)
+	if !ok {
+		t.Fatalf("screen after 'e' from the list = %T, want *WizardScreen", m.Screen())
+	}
+	if got, ok := wiz.selectedExe(); !ok || got.Path != "Game/eldenring.exe" {
+		t.Errorf("wizard preselected %+v, want the actually-installed exe", got)
+	}
+}
+
+// A single-folder game that already has an install can be uninstalled
+// directly from the list with 'u'.
+func TestGamesScreenUninstallDirectlyFromList(t *testing.T) {
+	m := loaded(t)
+	m = drive(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"})
+	m = drive(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"}) // -> ELDEN RING, installed
+
+	m = drive(t, m, tea.KeyPressMsg{Code: 'u', Text: "u"})
+	if m.overlay == nil {
+		t.Fatal("'u' from the list on an installed game should open a confirm overlay")
+	}
+
+	m = drive(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if _, ok := m.Screen().(*ResultScreen); !ok {
+		t.Fatalf("screen after confirming = %T, want *ResultScreen", m.Screen())
+	}
+}
+
+// A game with more than one folder has nothing unambiguous to act on from
+// the list itself — it must not offer i/e/u until the user has drilled in
+// and picked a folder.
+func TestGamesScreenNoDirectActionsForMultiFolderGame(t *testing.T) {
+	installed := state.Install{Exe: "Release/Game.exe", ReShade: state.ReShadeInfo{Version: "6.8.0", Flavor: "normal"}}
+	exes := []Executable{
+		{Executable: game.Executable{Path: "Release/Game.exe"}, Installed: &installed},
+		{Executable: game.Executable{Path: "Ship/Game.exe"}},
+	}
+	entry := GameEntry{
+		Game:   game.Game{ID: "manual:x", Name: "Two Folders", Root: "/games/two"},
+		Exes:   exes,
+		Groups: groupByFolder("/games/two", exes),
+	}
+	if len(entry.Groups) != 2 {
+		t.Fatalf("setup: groups = %d, want 2", len(entry.Groups))
+	}
+
+	m := New(NewGamesScreen(fakeLoader{entries: []GameEntry{entry}}, fakeDeps(), false))
+	m = drive(t, m,
+		tea.WindowSizeMsg{Width: termWidth, Height: termHeight},
+		gamesLoadedMsg{entries: []GameEntry{entry}},
+	)
+
+	gs := m.Screen().(*GamesScreen)
+	for _, b := range gs.KeyBindings() {
+		desc := b.Help().Desc
+		if strings.Contains(desc, "install") || strings.Contains(desc, "edit") || strings.Contains(desc, "uninstall") {
+			t.Errorf("a multi-folder game should not offer %q from the list", desc)
+		}
 	}
 }
 
