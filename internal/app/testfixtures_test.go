@@ -131,7 +131,7 @@ func sampleWizardData() WizardData {
 		},
 		Addons: []catalog.Addon{
 			{
-				ID: "swapchain-override-by-crosire", Name: "Swap chain override by crosire",
+				ID: "swap-chain-override-by-crosire", Name: "Swap chain override by crosire",
 				URL64: "https://example.invalid/swapchain.addon64",
 				URL32: "https://example.invalid/swapchain.addon32",
 			},

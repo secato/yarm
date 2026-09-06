@@ -9,35 +9,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The install wizard is restructured, cutting a 6-step flow down to what
-  the common case actually needs:
-  - The "Exe" step is gone — which executable (and folder) to target is
-    already resolved by whichever screen opened the wizard, so there was
-    nothing left to ask.
-  - The "API" (DLL) step is now conditional: skipped whenever the target
-    executable's guessed graphics API resolves a proxy DLL with
-    confidence (the common case), shown only when it can't (an unknown or
-    unsupported API) — the same way "Add-ons" was already skipped for the
-    normal flavor.
-  - "Packages" is renamed "Shaders", matching how the ReShade community
-    actually refers to them; the "cached" badge on each row is gone (the
-    user found it redundant) — a plain checklist of name and description.
-  - The version list is capped to the 10 most recent (was unbounded, ~40
-    entries) — editing an install whose recorded version has since aged
-    out of that window still finds it rather than silently jumping to
-    latest. The resources browser's ReShade panes are capped the same
-    way (was top 3).
-  - The version step now shows the resolved DLL inline (`DLL: dxgi.dll
-    (D3D10 / D3D11 / D3D12)`), so it is not a mystery even when its own
-    step gets skipped.
-  - Review is redesigned into clearly labeled sections (Folder, ReShade,
-    Shaders, Add-ons, To download, Options) instead of one
-    undifferentiated block, and "overwrite existing files" is now an
-    Options checklist entry toggled with space (up/down to reach it) —
-    the same interaction packages/add-ons already use — rather than its
-    own dedicated `o` key, a foundation for more options later. The
-    "files not created by yarm are left in place" disclaimer is now
-    styled as a warning (yellow) instead of plain faint gray.
+- The install wizard's Shaders and Add-ons steps open on a curated
+  shortlist instead of upstream's whole catalog (43 effect packages, 24
+  add-ons, most of them niche). `a` widens either list to everything and
+  back; the footer says how much is hidden. Nothing is removed — an item
+  that is selected, or that a recorded install already uses, stays visible
+  whichever view is on, and custom content is never filtered.
+  - Shortlisted shaders: Standard effects, SweetFX, iMMERSE, METEOR,
+    qUINT, AstrayFX, prod80 Color effects, OtisFX, CobraFX, Insane-Shaders,
+    FXShaders, LumeniteFX, Legacy effects.
+  - Shortlisted add-ons: Swap chain override, ShaderToggler, REST, AutoHDR,
+    IGCS Connector, Display Commander, OBS Capture, and RenoDX — which
+    upstream publishes no download for, so it stays greyed with its
+    repository URL rather than disappearing.
+  - New `insane` and `lumenite` package aliases for `defaults.packages`.
+
+- A manual-only add-on now says why it is greyed out rather than just
+  showing a URL: `manual install only: <repository>`.
+
+- The install wizard keeps its steps, but every page after the first now
+  shows a `✓` summary of what the earlier ones decided (`✓ ReShade 6.8.0
+  (addon)   ✓ dxgi.dll   ✓ Standard effects`), directly under the
+  breadcrumb. Paging was never the problem — not being able to see what
+  you already chose was.
+  - Step 1 shows the two ReShade builds as side-by-side panes,
+    "ReShade (normal)" and "ReShade (addon)", over the same version list —
+    the split the resources browser already shows. `←`/`→` chooses the
+    build, `↑`/`↓` the version, and the cursor is shared, so switching
+    build keeps the version. The hidden `tab` flavor toggle is gone. On a
+    narrow terminal the panes fold to the focused build, with a strip
+    naming both.
+  - The Add-ons step still only appears when the chosen version is an
+    add-on build, which is the only one that can load them.
+  - The API step is no longer skipped when the graphics API is detected:
+    it marks the matching option `← detected DirectX 12`, so skipping the
+    question no longer means hiding the answer.
+  - The wizard names the *folder* ReShade attaches to, not one executable
+    inside it (the old Review page labeled a section "Folder" and then
+    printed an executable path).
+  - Review shrank to what the earlier steps could not already show: the
+    download list and the options. What was chosen is in the header
+    summary rather than repeated.
+
+- Along the way, also still in effect: the "Exe" step was removed
+  outright — which folder to target is resolved by whichever screen
+  opens the wizard; "Packages" was
+  renamed "Shaders", matching how the ReShade community refers to them,
+  and lost its per-row "cached" badge as noise; the version list is
+  capped to the 10 most recent (was unbounded, ~40 entries), still
+  finding an edited install's version if it has aged out of that window,
+  and the resources browser's ReShade panes are capped the same way (was
+  top 3); "overwrite existing files" became a checkbox toggled with
+  `space` rather than its own `o` key.
+
+### Fixed
+
+- A confirm dialog (uninstall, delete a cached resource, adopt an
+  unmanaged install) no longer treats Enter as "yes" — only `y` confirms
+  now; Enter joins `n`/Esc as "no". A stray Enter left over from whatever
+  the previous screen was doing could otherwise fire a destructive action
+  with no warning, since the dialog's own text never mentioned Enter did
+  anything at all. It now reads `n/esc/enter no`.
+- The wizard's Shaders/Add-ons steps (a real catalog runs ~40 packages)
+  now window around the cursor instead of printing every row
+  unconditionally — a list longer than the available height was
+  overrunning the shell's own footer with no sign anything was cut off.
+  A "↑ N more above"/"↓ N more below" line appears when scrolled.
+- The resources browser's 4-pane layout now folds to a single, full-width
+  pane with a tab strip (still `←`/`→` to switch) below the width where
+  every pane could keep its 20-column floor — at 60 columns (a `tmux
+  split-window -h` on an 80-column terminal) the four panes previously
+  needed 80 columns between them and overflowed.
+- A terminal below 40×8 — where none of the app's layouts can render
+  honestly — now shows a plain "terminal too small" message instead of
+  whatever truncated or overlapping output the layouts happened to
+  produce.
+- Every list that can grow now scrolls instead of printing past the
+  bottom of the window:
+  - The game detail screen scrolls by folder around the cursor, saying
+    how many folders are hidden above and below; a folder with many
+    executables lists the first six and counts the rest.
+  - The games list's side panel is clipped to its own box (lipgloss
+    `Height` sets a minimum, not a maximum, so a tall game detail used
+    to push the panel's bottom border off-screen).
+  - The custom-content screen and settings' manual-games list both
+    window around their cursor.
+  - The wizard's own lists (versions, shaders, add-ons, downloads)
+    window to whatever height the header and footer leave.
 
 - The resources browser (`c`) is refined:
   - The ReShade pane is split into two — "ReShade (normal)" and "ReShade

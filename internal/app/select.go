@@ -101,6 +101,35 @@ func newMultiSelect(items []selectItem) multiSelect {
 	return m
 }
 
+// setItems replaces the visible rows, keeping every selection — including
+// selections whose row is no longer shown, since the wizard hides rows
+// (the curated shortlist) rather than unchecking them. The cursor follows
+// the row it was on when that row survives, and otherwise falls back to
+// the first row it can rest on.
+func (m *multiSelect) setItems(items []selectItem) {
+	var on string
+	if m.cursor >= 0 && m.cursor < len(m.items) {
+		on = m.items[m.cursor].ID
+	}
+	m.items = items
+	m.cursor = 0
+	for i, it := range items {
+		if !it.Header {
+			m.cursor = i
+			break
+		}
+	}
+	if on == "" {
+		return
+	}
+	for i, it := range items {
+		if it.ID == on && !it.Header {
+			m.cursor = i
+			return
+		}
+	}
+}
+
 // canToggle reports whether the row at i responds to space: not a header,
 // not disabled, and not required (required rows are permanently on).
 func (m multiSelect) canToggle(i int) bool {

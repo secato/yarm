@@ -267,11 +267,33 @@ func (s *GameDetailScreen) View(env Env) string {
 	}
 
 	multi := s.multi()
+	blocks := make([]string, len(s.entry.Groups))
 	for i, grp := range s.entry.Groups {
-		if i > 0 {
+		var gb strings.Builder
+		s.writeGroup(&gb, grp, i, multi, env)
+		blocks[i] = gb.String()
+	}
+
+	// A game with several folders, each with several executables, runs past
+	// the window long before it runs out of folders. Scroll it by folder —
+	// the unit the cursor and every action here already work in — showing
+	// as many as fit around the current one and counting the rest, rather
+	// than printing off the bottom with no sign of it.
+	height := env.Height - countLines(b.String()) - 2 // room for both markers
+	start, end := fitBlocks(blocks, s.cursor.Cursor(), height)
+	if start > 0 {
+		b.WriteString(env.Styles.Faint.Render(fmt.Sprintf("↑ %d more folder(s) above", start)))
+		b.WriteString("\n")
+	}
+	for i := start; i < end; i++ {
+		if i > start {
 			b.WriteString("\n")
 		}
-		s.writeGroup(&b, grp, i, multi, env)
+		b.WriteString(blocks[i])
+	}
+	if end < len(blocks) {
+		b.WriteString(env.Styles.Faint.Render(fmt.Sprintf("↓ %d more folder(s) below", len(blocks)-end)))
+		b.WriteString("\n")
 	}
 	return b.String()
 }
@@ -306,13 +328,28 @@ func (s *GameDetailScreen) writeGroup(b *strings.Builder, grp FolderGroup, i int
 	if grp.Dir != "" {
 		stripPrefix = grp.Dir + "/"
 	}
+	// Executables are context, not something to act on — ReShade covers the
+	// whole folder either way — so a folder with a dozen of them lists the
+	// first few and counts the rest rather than filling the window.
+	const maxExes = 6
 	b.WriteString(indent + "Executables\n")
+	shown := 0
+	hidden := 0
 	for _, e := range grp.Exes {
 		if e.Skipped {
 			continue
 		}
+		if shown >= maxExes {
+			hidden++
+			continue
+		}
+		shown++
 		name := strings.TrimPrefix(e.Path, stripPrefix)
 		_, _ = fmt.Fprintf(b, "%s  %s · %s · %s\n", indent, name, e.Arch, apiLabel(e.API))
+	}
+	if hidden > 0 {
+		b.WriteString(env.Styles.Faint.Render(fmt.Sprintf("%s  +%d more", indent, hidden)))
+		b.WriteString("\n")
 	}
 
 	// Last, below everything else in this folder's block: a real safety

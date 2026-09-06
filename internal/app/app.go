@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -202,12 +203,27 @@ func (m Model) View() tea.View {
 	return v
 }
 
+// minWidth and minHeight are the hard floor below which yarm's own chrome
+// (title, status bar, at least a couple of body rows) cannot render
+// honestly — no screen layout degrades gracefully past this, so it is
+// better to say so plainly than to draw something garbled.
+const (
+	minWidth  = 40
+	minHeight = 8
+)
+
 func (m Model) render() string {
 	if !m.ready {
 		return "starting yarm…"
 	}
 	if m.quitting {
 		return ""
+	}
+	if m.width < minWidth || m.height < minHeight {
+		msg := fmt.Sprintf("terminal too small — need at least %dx%d, have %dx%d",
+			minWidth, minHeight, m.width, m.height)
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+			m.styles.Bad.Render(msg))
 	}
 
 	env := m.env()

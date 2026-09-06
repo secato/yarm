@@ -26,7 +26,6 @@ type KeyMap struct {
 	Uninstall key.Binding
 	Adopt     key.Binding // a: adopt an unmanaged install found on disk
 	Toggle    key.Binding // space: multi-select toggle
-	Flavor    key.Binding // tab: normal/addon flavor toggle
 }
 
 // DefaultKeyMap returns the standard bindings.
@@ -44,14 +43,13 @@ func DefaultKeyMap() KeyMap {
 		Setting: key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "settings")),
 		Help:    key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 		Quit:    key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
-		Confirm: key.NewBinding(key.WithKeys("y", "enter"), key.WithHelp("y", "confirm")),
-		Cancel:  key.NewBinding(key.WithKeys("n", "esc"), key.WithHelp("n", "cancel")),
+		Confirm: key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "confirm")),
+		Cancel:  key.NewBinding(key.WithKeys("n", "esc", "enter"), key.WithHelp("n", "cancel")),
 
 		Install:   key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "install ReShade")),
 		Uninstall: key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "uninstall")),
 		Adopt:     key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "adopt ReShade")),
 		Toggle:    key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "toggle")),
-		Flavor:    key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "toggle flavor")),
 	}
 }
 

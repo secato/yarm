@@ -12,6 +12,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/secato/yarm/internal/cache"
 	"github.com/secato/yarm/internal/catalog"
@@ -57,7 +58,7 @@ func resourcesTestDeps(t *testing.T) (Deps, *httptest.Server) {
 	data := WizardData{
 		Versions: []catalog.Version{{Version: "6.8.0", Latest: true}, {Version: "6.7.3"}, {Version: "6.7.2"}, {Version: "6.7.1"}},
 		Packages: []catalog.Package{{ID: "standard-effects", Name: "Standard effects", DownloadURL: srv.URL + "/pkg.zip"}},
-		Addons:   []catalog.Addon{{ID: "swapchain-override-by-crosire", Name: "Swap chain override", URL64: srv.URL + "/addon64", URL32: srv.URL + "/addon32"}},
+		Addons:   []catalog.Addon{{ID: "swap-chain-override-by-crosire", Name: "Swap chain override", URL64: srv.URL + "/addon64", URL32: srv.URL + "/addon32"}},
 	}
 
 	return Deps{
@@ -362,6 +363,29 @@ func TestResourcesScreenRendersHeaderAndPanes(t *testing.T) {
 	for _, want := range []string{"ReShade", "Shaders", "Add-ons", "total:"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q:\n%s", want, body)
+		}
+	}
+}
+
+// At 60 columns — a `tmux split-window -h` on an 80-column terminal — four
+// panes at their 20-column floor would need 80 columns and overflow. The
+// screen must fold to a single, full-width pane with a tab strip instead
+// of wrapping or overlapping.
+func TestResourcesScreenFoldsToSinglePaneWhenNarrow(t *testing.T) {
+	deps, _ := resourcesTestDeps(t)
+	s := loadResourcesScreen(t, deps)
+
+	body := s.View(Env{Styles: NewStyles(true), Width: 60, Height: 30})
+	for _, line := range strings.Split(body, "\n") {
+		if lipgloss.Width(line) > 60 {
+			t.Errorf("line exceeds 60 columns (%d):\n%q", lipgloss.Width(line), line)
+		}
+	}
+	// The tab strip must still name every pane, so the other three stay
+	// reachable rather than disappearing.
+	for _, want := range []string{"ReShade (normal)", "ReShade (addon)", "Shaders", "Add-ons"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("narrow body missing pane label %q:\n%s", want, body)
 		}
 	}
 }

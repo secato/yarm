@@ -242,6 +242,30 @@ func TestConfirmOverlayRunsActionOnYes(t *testing.T) {
 	}
 }
 
+// A confirm dialog must never treat Enter as "yes" — a destructive action
+// (uninstall, delete, adopt) should not fire from a leftover Enter press
+// carried in from whatever the user was doing on the previous screen.
+func TestConfirmOverlayEnterDoesNotRunAction(t *testing.T) {
+	m := loaded(t)
+
+	ran := false
+	action := func() tea.Msg {
+		ran = true
+		return statusMsg{text: "done"}
+	}
+
+	m = drive(t, m, showOverlayMsg{overlay: confirmOverlay{
+		question: "Delete everything?", keys: DefaultKeyMap(), onYes: action,
+	}})
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if ran {
+		t.Error("Enter ran the confirm action; it must default to no")
+	}
+	if m.overlay != nil {
+		t.Error("Enter should close the overlay as a cancel, not leave it open")
+	}
+}
+
 // The theme is chosen from what the terminal reports, not guessed.
 func TestBackgroundColorSetsTheme(t *testing.T) {
 	m := loaded(t)
@@ -607,5 +631,25 @@ func TestNoWelcomeBannerOnNormalRun(t *testing.T) {
 	gs := m.Screen().(*GamesScreen)
 	if strings.Contains(gs.View(m.env()), "Welcome to yarm") {
 		t.Error("a normal run should never show the welcome banner")
+	}
+}
+
+// Below the hard floor, no screen's layout degrades gracefully — the shell
+// must say so plainly instead of drawing something truncated or garbled.
+func TestTooSmallTerminalShowsHonestMessage(t *testing.T) {
+	m := New(NewGamesScreen(fakeLoader{entries: sampleEntries()}, fakeDeps(), false))
+	m = drive(t, m,
+		tea.WindowSizeMsg{Width: 20, Height: 5},
+		gamesLoadedMsg{entries: sampleEntries()},
+	)
+
+	body := m.render()
+	if !strings.Contains(body, "terminal too small") {
+		t.Errorf("a 20x5 terminal should show the too-small message, got:\n%s", body)
+	}
+
+	m = drive(t, m, tea.WindowSizeMsg{Width: termWidth, Height: termHeight})
+	if strings.Contains(m.render(), "terminal too small") {
+		t.Error("growing back above the floor should stop showing the too-small message")
 	}
 }

@@ -581,21 +581,47 @@ func (s *ResourcesScreen) View(env Env) string {
 		header += "   refreshing…"
 	}
 
-	paneWidth := env.Width/int(paneCount) - 2
-	if paneWidth < 20 {
-		paneWidth = 20
-	}
 	height := env.Height - 5
 	if height < 5 {
 		height = 5
 	}
 
+	// Four panes need at least a usable 20 columns each, or they wrap and
+	// overlap rather than read as columns — a 60-column split, exactly
+	// what the terminal itself offers as `tmux split-window -h`, doesn't
+	// have that. Below the point where every pane can still have its
+	// floor, show only the focused one, full width, with a tab strip so
+	// the other three stay reachable instead of just disappearing.
+	const minPaneWidth = 20
+	const minGutter = 2
+	if env.Width < int(paneCount)*(minPaneWidth+minGutter) {
+		return env.Styles.Faint.Render(header) + "\n\n" +
+			s.renderTabStrip(env) + "\n" +
+			s.renderPane(s.focus, env.Width-2, height, env)
+	}
+
+	paneWidth := env.Width/int(paneCount) - minGutter
 	cols := make([]string, 0, paneCount)
 	for p := resourcePane(0); p < paneCount; p++ {
 		cols = append(cols, s.renderPane(p, paneWidth, height, env))
 	}
 
 	return env.Styles.Faint.Render(header) + "\n\n" + lipgloss.JoinHorizontal(lipgloss.Top, cols...)
+}
+
+// renderTabStrip lists every pane so the narrow, single-pane layout does
+// not hide that the other three still exist and are one ←/→ away.
+func (s *ResourcesScreen) renderTabStrip(env Env) string {
+	var parts []string
+	for p := resourcePane(0); p < paneCount; p++ {
+		label := p.label()
+		if p == s.focus {
+			parts = append(parts, env.Styles.Selected.Render("▸ "+label))
+		} else {
+			parts = append(parts, env.Styles.Faint.Render(label))
+		}
+	}
+	return strings.Join(parts, "   ")
 }
 
 func (s *ResourcesScreen) renderPane(p resourcePane, width, height int, env Env) string {

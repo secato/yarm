@@ -61,6 +61,8 @@ var aliases = map[string]string{
 	"cobrafx":   "cobrafx-by-sircobra",
 	"corgifx":   "corgifx-by-originalnicodr",
 	"cshade":    "cshade-by-papadanku",
+	"insane":    "insane-shaders-by-lord-of-lunacy",
+	"lumenite":  "lumenitefx",
 }
 
 // ResolveAlias maps a short alias to its full package id. Anything that is

@@ -3,10 +3,12 @@ package app
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/secato/yarm/internal/artifacts"
 	"github.com/secato/yarm/internal/catalog"
@@ -14,29 +16,36 @@ import (
 	"github.com/secato/yarm/internal/state"
 )
 
-// wizardStep is one page of the install wizard, in the order §6.1 lists
-// them. There is no longer an "Exe" step: which executable (and which
-// folder it lives in) is resolved by the screen that opened the wizard —
-// the games list or the game detail screen — before it ever appears, so
-// there is nothing left to ask about here.
+// wizardStep is one page of the install wizard. Each page asks exactly one
+// question, and every page after the first carries a summary line of what
+// the earlier ones already answered — the reason a step sequence is
+// workable here at all, since the cost of paging is not being able to see
+// what you already chose.
+//
+// There is no Exe step: which executable (and therefore which folder) is
+// resolved by the screen that opened the wizard — the games list or the
+// game detail screen — before it ever appears.
 type wizardStep int
 
 const (
-	stepVersion wizardStep = iota
-	stepDLL
-	stepPackages
+	stepReShade wizardStep = iota
+	stepAPI
+	stepShaders
 	stepAddons
 	stepReview
 )
 
+// wizardSteps is every step in order, for the breadcrumb.
+var wizardSteps = []wizardStep{stepReShade, stepAPI, stepShaders, stepAddons, stepReview}
+
 // label names a step for the breadcrumb.
 func (s wizardStep) label() string {
 	switch s {
-	case stepVersion:
-		return "Version"
-	case stepDLL:
+	case stepReShade:
+		return "ReShade"
+	case stepAPI:
 		return "API"
-	case stepPackages:
+	case stepShaders:
 		return "Shaders"
 	case stepAddons:
 		return "Add-ons"
@@ -47,8 +56,21 @@ func (s wizardStep) label() string {
 	}
 }
 
-// dllOption is one radio choice on the API/DLL step, matching ReShade's
-// own installer (docs/plan/04-external-sources.md §4.6).
+// Pane navigation on the ReShade step, named the same way the resources
+// browser names its own — the two screens show the same normal/addon
+// split, so they should be driven by the same keys.
+var (
+	wizardPaneLeft  = key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "normal"))
+	wizardPaneRight = key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "addon"))
+)
+
+// wizardShowAll widens the shaders and add-ons steps from the curated
+// shortlist to the whole catalog. Not a global binding: it means nothing
+// on the other three steps.
+var wizardShowAll = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "show all"))
+
+// dllOption is one radio choice on the API step, matching ReShade's own
+// installer (docs/plan/04-external-sources.md §4.6).
 type dllOption struct {
 	Name string
 	For  string
@@ -63,6 +85,10 @@ var dllOptions = []dllOption{
 	{"opengl32.dll", "OpenGL"},
 }
 
+// wizardFlavors is the order the two ReShade builds are shown in, left to
+// right — the same order the resources browser lists its panes.
+var wizardFlavors = []install.Flavor{install.FlavorNormal, install.FlavorAddon}
+
 // wizardDataLoadedMsg carries the catalog/custom data the wizard needs,
 // once it has loaded — successfully or not.
 //
@@ -76,10 +102,10 @@ type wizardDataLoadedMsg struct {
 }
 
 // WizardScreen walks the user through installing ReShade: which version
-// and flavor, which proxy DLL (skipped when it can be inferred with
-// confidence), which effect shaders and add-ons, then a review before
-// running. The executable it targets is fixed at construction — decided
-// by whichever screen opened the wizard — not something picked here.
+// and build, which proxy DLL, which effect shaders and add-ons, then a
+// review before running. The folder it targets is fixed at construction —
+// decided by whichever screen opened the wizard. ReShade intercepts by
+// directory, so there is nothing per-executable to ask about here.
 //
 // It is one Screen implementation holding a step index and one field group
 // per step, rather than several pushed screens, so the in-progress Request
@@ -91,10 +117,10 @@ type WizardScreen struct {
 	deps     Deps
 	targetOS artifacts.TargetOS
 
-	// existing is the install already recorded for exe, if any — the
-	// wizard starts every step's selection from it instead of the
+	// existing is the install already recorded for this folder, if any —
+	// the wizard starts every step's selection from it instead of the
 	// configured defaults, so re-running the wizard to add an add-on or
-	// switch flavor does not silently reset everything else.
+	// switch build does not silently reset everything else.
 	existing *state.Install
 
 	step    wizardStep
@@ -102,29 +128,31 @@ type WizardScreen struct {
 	loadErr string
 	data    WizardData
 
-	// Step: version + flavor
+	// Step: ReShade. The two builds are side-by-side panes over the same
+	// version list, so ←/→ switches build without losing which version is
+	// highlighted.
 	flavor        install.Flavor
 	versionCursor cursorList
 
-	// Step: API/DLL — shown only when it cannot be inferred confidently
-	// (see dllResolved).
+	// Step: API
 	dllCursor cursorList
 
-	// Steps: shaders, add-ons
+	// Steps: shaders, add-ons. Both lists show a curated shortlist until
+	// showAll is toggled on; the selections behind them are unaffected by
+	// which rows are visible.
 	packages multiSelect
 	addons   multiSelect
+	showAll  bool
 
-	// Step: review — a read-only summary plus an options checklist
-	// (currently just "overwrite"), navigated the same way shaders/
-	// add-ons are: up/down to move, space to toggle.
-	reviewOptions multiSelect
+	// Step: review — an options checklist (currently just "overwrite"),
+	// navigated the same way shaders/add-ons are.
+	options multiSelect
 }
 
-// NewWizardScreen returns a wizard targeting exe. When exe already has a
-// recorded install, the wizard edits it: every step starts from what is
-// already installed (flavor, version, packages, add-ons) instead of the
-// configured defaults, so running the wizard again to add an add-on or
-// switch flavor does not silently reset everything else.
+// NewWizardScreen returns a wizard targeting the folder exe lives in. When
+// that folder already has a recorded install, the wizard edits it: every
+// step starts from what is already installed (build, version, DLL,
+// packages, add-ons) instead of the configured defaults.
 func NewWizardScreen(entry GameEntry, exe Executable, deps Deps) *WizardScreen {
 	existing := exe.Installed
 
@@ -145,7 +173,7 @@ func NewWizardScreen(entry GameEntry, exe Executable, deps Deps) *WizardScreen {
 		existing: existing,
 		loading:  true,
 		flavor:   flavor,
-		reviewOptions: newMultiSelect([]selectItem{
+		options: newMultiSelect([]selectItem{
 			{ID: "overwrite", Name: "Overwrite existing files"},
 		}),
 	}
@@ -163,75 +191,76 @@ func (s *WizardScreen) Init() tea.Cmd {
 	}
 }
 
+// verb is what finishing the wizard will actually do, given whether this
+// folder already has an install recorded.
+func (s *WizardScreen) verb() string {
+	if s.existing != nil {
+		return "update"
+	}
+	return "install"
+}
+
 // Title implements Screen.
 func (s *WizardScreen) Title() string {
-	verb := "install"
-	if s.existing != nil {
-		verb = "update"
-	}
-	return fmt.Sprintf("%s ReShade — %d %s", verb, s.step+1, s.step.label())
+	return fmt.Sprintf("%s ReShade — %d %s", s.verb(), s.stepNumber(s.step), s.step.label())
 }
+
+// stepNumber is a step's 1-based position in the breadcrumb.
+func (s *WizardScreen) stepNumber(step wizardStep) int { return int(step) + 1 }
 
 // KeyBindings implements Screen.
 func (s *WizardScreen) KeyBindings() []key.Binding {
 	switch s.step {
-	case stepVersion:
-		return []key.Binding{s.keys.Enter, s.keys.Flavor, s.keys.Back}
-	case stepPackages, stepAddons:
-		return []key.Binding{s.keys.Toggle, s.keys.Enter, s.keys.Back}
+	case stepReShade:
+		return []key.Binding{s.keys.Up, s.keys.Down, wizardPaneLeft, wizardPaneRight, s.keys.Enter, s.keys.Back}
+	case stepShaders, stepAddons:
+		return []key.Binding{s.keys.Up, s.keys.Down, s.keys.Toggle, wizardShowAll, s.keys.Enter, s.keys.Back}
 	case stepReview:
-		return []key.Binding{s.keys.Up, s.keys.Down, s.keys.Toggle, s.keys.Enter, s.keys.Back}
+		return []key.Binding{
+			s.keys.Up, s.keys.Down, s.keys.Toggle,
+			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", s.verb())),
+			s.keys.Back,
+		}
 	default:
-		return []key.Binding{s.keys.Enter, s.keys.Back}
+		return []key.Binding{s.keys.Up, s.keys.Down, s.keys.Enter, s.keys.Back}
 	}
 }
 
 // HandleBack implements backHandler: step back a page rather than leaving
 // the wizard outright, except from the first page.
 func (s *WizardScreen) HandleBack() (Screen, tea.Cmd, bool) {
-	if s.step == stepVersion {
+	if s.step == stepReShade {
 		return s, nil, false
 	}
 	s.step = s.prevStep(s.step)
 	return s, nil, true
 }
 
-// dllResolved reports whether a DLL choice is already known with enough
-// confidence to skip asking: either a recorded install already has one,
-// or the target executable's guessed API maps to exactly one ReShade
-// proxy DLL.
-func (s *WizardScreen) dllResolved() bool {
-	if s.existing != nil && s.existing.ReShade.DLL != "" {
-		return true
-	}
-	return s.exe.API.RecommendedDLL() != ""
-}
-
-// prevStep steps backward, skipping API when it was resolved without
-// asking and Add-ons when the flavor does not support it.
+// prevStep steps backward, skipping Add-ons when the build cannot load
+// them.
 func (s *WizardScreen) prevStep(from wizardStep) wizardStep {
 	prev := from - 1
 	if prev == stepAddons && !s.flavor.Addon() {
 		prev--
 	}
-	if prev == stepDLL && s.dllResolved() {
-		prev--
-	}
 	return prev
 }
 
-// nextStep steps forward, skipping API when it was resolved without
-// asking, and Add-ons when the flavor does not support it (§6.1: "skipped
-// when flavor = normal").
+// nextStep steps forward, skipping Add-ons when the build cannot load them
+// (§6.1: "skipped when flavor = normal").
 func (s *WizardScreen) nextStep(from wizardStep) wizardStep {
 	next := from + 1
-	if next == stepDLL && s.dllResolved() {
-		next++
-	}
 	if next == stepAddons && !s.flavor.Addon() {
 		next++
 	}
 	return next
+}
+
+// folder is the directory the install lands in — what the user actually
+// chose, and what ReShade attaches to. The executable underneath it only
+// decides which entry yarm records the install against.
+func (s *WizardScreen) folder() string {
+	return filepath.Join(s.entry.Root, filepath.FromSlash(install.ExeDir(s.exe.Path)))
 }
 
 // Update implements Screen.
@@ -247,19 +276,21 @@ func (s *WizardScreen) Update(msg tea.Msg, env Env) (Screen, tea.Cmd) {
 		s.data.Versions = capVersions(s.data.Versions, existingVersion)
 
 		s.packages = newMultiSelect(s.data.PackagesWithCustom(s.deps.CacheStatus))
+		s.addons = newMultiSelect(s.data.AddonsWithCustom(s.deps.CacheStatus))
 		versionIndex := s.indexOfLatest()
 		if s.existing != nil {
 			s.preselectExistingIDs(s.packages, s.existing.Packages)
+			s.preselectExistingIDs(s.addons, s.existing.Addons)
 			versionIndex = s.indexOfVersion(s.existing.ReShade.Version)
 		} else {
 			s.preselectDefaultPackages()
 		}
-		s.addons = newMultiSelect(s.data.AddonsWithCustom(s.deps.CacheStatus))
-		if s.existing != nil {
-			s.preselectExistingIDs(s.addons, s.existing.Addons)
-		}
+		// After preselection, not before: what is already selected is part
+		// of what the shortlist has to keep visible.
+		s.refreshLists()
 		s.versionCursor = newCursorList(len(s.data.Versions), versionIndex)
 		s.dllCursor = newCursorList(len(dllOptions), s.recommendedDLLIndex())
+
 		switch {
 		case msg.err != nil:
 			s.loadErr = msg.err.Error()
@@ -297,6 +328,36 @@ func capVersions(versions []catalog.Version, existing string) []catalog.Version 
 		}
 	}
 	return append(versions, catalog.Version{Version: existing})
+}
+
+// refreshLists rebuilds what the shaders and add-ons steps show, given
+// whether the shortlist is in force. Selections survive it: curate keeps
+// every checked row visible, so selectedIDs stays complete whichever view
+// is on.
+func (s *WizardScreen) refreshLists() {
+	s.packages.setItems(curate(s.fullPackages(), curatedPackages, s.showAll, s.packages.selected))
+	s.addons.setItems(curate(s.fullAddons(), curatedAddons, s.showAll, s.addons.selected))
+}
+
+func (s *WizardScreen) fullPackages() []selectItem {
+	return s.data.PackagesWithCustom(s.deps.CacheStatus)
+}
+
+func (s *WizardScreen) fullAddons() []selectItem {
+	return s.data.AddonsWithCustom(s.deps.CacheStatus)
+}
+
+// showAllHint is the footer's half of the shortlist: a list that hides
+// most of the catalog has to say so, and how much of it is hidden.
+func (s *WizardScreen) showAllHint() string {
+	if s.showAll {
+		return "a recommended"
+	}
+	total := len(s.fullPackages())
+	if s.step == stepAddons {
+		total = len(s.fullAddons())
+	}
+	return fmt.Sprintf("a all (%d)", total)
 }
 
 // preselectDefaultPackages adds the user's configured default packages
@@ -343,6 +404,11 @@ func (s *WizardScreen) indexOfVersion(version string) int {
 	return s.indexOfLatest()
 }
 
+// apiKnown reports whether the target executable's guessed API maps to
+// exactly one ReShade proxy DLL — the case where the API step's
+// preselection is a real recommendation rather than a bare default.
+func (s *WizardScreen) apiKnown() bool { return s.exe.API.RecommendedDLL() != "" }
+
 // recommendedDLLIndex returns the dllOptions index to preselect: the
 // recorded DLL when editing an existing install, otherwise a guess from
 // the target exe's API, or 0 (dxgi.dll) when there is no safe
@@ -365,7 +431,7 @@ func (s *WizardScreen) recommendedDLLIndex() int {
 	return 0
 }
 
-// selectedVersion returns the version highlighted on the version step.
+// selectedVersion returns the version highlighted on the ReShade step.
 func (s *WizardScreen) selectedVersion() (catalog.Version, bool) {
 	i := s.versionCursor.Cursor()
 	if i < 0 || i >= len(s.data.Versions) {
@@ -374,8 +440,7 @@ func (s *WizardScreen) selectedVersion() (catalog.Version, bool) {
 	return s.data.Versions[i], true
 }
 
-// selectedDLL returns the DLL name highlighted on the API step (or
-// resolved automatically when that step was skipped).
+// selectedDLL returns the DLL name highlighted on the API step.
 func (s *WizardScreen) selectedDLL() string {
 	i := s.dllCursor.Cursor()
 	if i < 0 || i >= len(dllOptions) {
@@ -386,18 +451,22 @@ func (s *WizardScreen) selectedDLL() string {
 
 // overwrite reports whether the review's "overwrite existing files"
 // option is checked.
-func (s *WizardScreen) overwrite() bool {
-	return s.reviewOptions.selected["overwrite"]
+func (s *WizardScreen) overwrite() bool { return s.options.selected["overwrite"] }
+
+// cached reports whether the given version is already downloaded for the
+// given build.
+func (s *WizardScreen) cached(version string, flavor install.Flavor) bool {
+	return s.deps.CacheStatus != nil && s.deps.CacheStatus.HasReShade(version, flavor.Addon())
 }
 
 func (s *WizardScreen) handleKey(msg tea.KeyPressMsg, env Env) (Screen, tea.Cmd) {
 	switch s.step {
-	case stepVersion:
-		return s.handleVersionKey(msg)
-	case stepDLL:
-		return s.handleDLLKey(msg)
-	case stepPackages:
-		return s.handleMultiSelectKey(msg, &s.packages, stepPackages)
+	case stepReShade:
+		return s.handleReShadeKey(msg)
+	case stepAPI:
+		return s.handleAPIKey(msg)
+	case stepShaders:
+		return s.handleMultiSelectKey(msg, &s.packages, stepShaders)
 	case stepAddons:
 		return s.handleMultiSelectKey(msg, &s.addons, stepAddons)
 	case stepReview:
@@ -406,18 +475,16 @@ func (s *WizardScreen) handleKey(msg tea.KeyPressMsg, env Env) (Screen, tea.Cmd)
 	return s, nil
 }
 
-func (s *WizardScreen) handleVersionKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
+func (s *WizardScreen) handleReShadeKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 	switch {
 	case key.Matches(msg, s.keys.Up):
 		s.versionCursor.up()
 	case key.Matches(msg, s.keys.Down):
 		s.versionCursor.down()
-	case key.Matches(msg, s.keys.Flavor):
-		if s.flavor.Addon() {
-			s.flavor = install.FlavorNormal
-		} else {
-			s.flavor = install.FlavorAddon
-		}
+	case key.Matches(msg, wizardPaneLeft):
+		s.flavor = install.FlavorNormal
+	case key.Matches(msg, wizardPaneRight):
+		s.flavor = install.FlavorAddon
 	case key.Matches(msg, s.keys.Enter):
 		if _, ok := s.selectedVersion(); ok {
 			s.step = s.nextStep(s.step)
@@ -426,7 +493,7 @@ func (s *WizardScreen) handleVersionKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 	return s, nil
 }
 
-func (s *WizardScreen) handleDLLKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
+func (s *WizardScreen) handleAPIKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 	switch {
 	case key.Matches(msg, s.keys.Up):
 		s.dllCursor.up()
@@ -448,6 +515,9 @@ func (s *WizardScreen) handleMultiSelectKey(msg tea.KeyPressMsg, m *multiSelect,
 		m.down()
 	case key.Matches(msg, s.keys.Toggle):
 		m.toggle()
+	case key.Matches(msg, wizardShowAll):
+		s.showAll = !s.showAll
+		s.refreshLists()
 	case key.Matches(msg, s.keys.Enter):
 		s.step = s.nextStep(current)
 	}
@@ -457,11 +527,11 @@ func (s *WizardScreen) handleMultiSelectKey(msg tea.KeyPressMsg, m *multiSelect,
 func (s *WizardScreen) handleReviewKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 	switch {
 	case key.Matches(msg, s.keys.Up):
-		s.reviewOptions.up()
+		s.options.up()
 	case key.Matches(msg, s.keys.Down):
-		s.reviewOptions.down()
+		s.options.down()
 	case key.Matches(msg, s.keys.Toggle):
-		s.reviewOptions.toggle()
+		s.options.toggle()
 	case key.Matches(msg, s.keys.Enter):
 		req, ok := s.buildRequest()
 		if !ok {
@@ -494,141 +564,332 @@ func (s *WizardScreen) buildRequest() (install.Request, bool) {
 		DLLName:  dll,
 		Packages: s.packages.selectedIDs(),
 		// Selections made while add-ons were on offer must not survive a
-		// later switch back to the normal flavor: normal can't load them
-		// at all, and install.Request.Validate rejects a request that
-		// tries, so a stale selection here would silently block the
-		// install rather than merely not installing an add-on.
+		// later switch back to the normal build: normal can't load them at
+		// all, and install.Request.Validate rejects a request that tries,
+		// so a stale selection here would silently block the install
+		// rather than merely not installing an add-on.
 		Addons:    addonsForDownload(s.flavor, s.addons),
 		Overwrite: s.overwrite(),
 		TargetOS:  s.targetOS,
 	}, true
 }
 
+// missing names what finishing the wizard would still have to download.
+func (s *WizardScreen) missing() []string {
+	version, ok := s.selectedVersion()
+	if !ok {
+		return nil
+	}
+	return describeMissing(s.deps.CacheStatus, version.Version, s.flavor.Addon(),
+		s.packages.selectedIDs(), addonsForDownload(s.flavor, s.addons),
+		s.exe.Arch, artifacts.NeedsD3DCompiler(s.targetOS))
+}
+
 // View implements Screen.
 func (s *WizardScreen) View(env Env) string {
-	var b strings.Builder
-	b.WriteString(s.breadcrumb(env))
-	b.WriteString("\n\n")
-
 	if s.loading {
-		b.WriteString(env.Styles.Faint.Render("loading catalog data…"))
-		return b.String()
+		return env.Styles.Faint.Render("loading catalog data…")
 	}
 	if s.loadErr != "" {
-		b.WriteString(env.Styles.Bad.Render(s.loadErr))
-		return b.String()
+		return env.Styles.Bad.Render(s.loadErr)
 	}
 
-	switch s.step {
-	case stepVersion:
-		s.viewVersion(&b, env)
-	case stepDLL:
-		s.viewDLL(&b, env)
-	case stepPackages:
-		s.viewMultiSelect(&b, env, s.packages, "Select shaders.")
-	case stepAddons:
-		s.viewMultiSelect(&b, env, s.addons, "Select add-ons.")
-	case stepReview:
-		s.viewReview(&b, env)
+	head := s.viewHeader(env)
+	foot := s.viewFooter(env)
+
+	// Whatever the header and footer do not use belongs to the step's own
+	// list, which windows into it rather than printing past the bottom.
+	body := env.Height - countLines(head) - countLines(foot)
+	if body < 4 {
+		body = 4
 	}
+
+	var b strings.Builder
+	b.WriteString(head)
+	switch s.step {
+	case stepReShade:
+		s.viewReShade(&b, env, body)
+	case stepAPI:
+		s.viewAPI(&b, env, body)
+	case stepShaders:
+		writeSelectList(&b, env, s.packages, body)
+	case stepAddons:
+		writeSelectList(&b, env, s.addons, body)
+	case stepReview:
+		s.viewReview(&b, env, body)
+	}
+	b.WriteString(foot)
+	return b.String()
+}
+
+// viewHeader is the block above every step: where the install is going,
+// how far through the wizard we are, and — the point of paging at all
+// being bearable — what the earlier steps already decided.
+func (s *WizardScreen) viewHeader(env Env) string {
+	var b strings.Builder
+	b.WriteString(s.breadcrumb(env))
+	b.WriteString("\n")
+	b.WriteString(env.Styles.Faint.Render(truncate(s.folder(), env.Width-1)))
+	b.WriteString("\n")
+	if summary := s.decided(env); summary != "" {
+		b.WriteString(summary)
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
 	return b.String()
 }
 
 func (s *WizardScreen) breadcrumb(env Env) string {
-	steps := []wizardStep{stepVersion, stepDLL, stepPackages, stepAddons, stepReview}
 	var parts []string
-	for i, st := range steps {
-		label := fmt.Sprintf("%d %s", i+1, st.label())
+	for _, st := range wizardSteps {
+		label := fmt.Sprintf("%d %s", s.stepNumber(st), st.label())
 		switch {
 		case st == stepAddons && !s.flavor.Addon():
 			parts = append(parts, env.Styles.Faint.Render(label+" (skipped)"))
-			continue
-		case st == stepDLL && s.dllResolved():
-			parts = append(parts, env.Styles.Faint.Render(label+" (skipped)"))
-			continue
-		}
-		if st == s.step {
+		case st == s.step:
 			parts = append(parts, env.Styles.Accent.Render(label))
+		default:
+			parts = append(parts, env.Styles.Faint.Render(label))
+		}
+	}
+	line := strings.Join(parts, " › ")
+	if lipgloss.Width(line) <= env.Width {
+		return line
+	}
+	// Too narrow for the trail: where you are still fits, and matters more
+	// than what the other four steps are called.
+	return env.Styles.Accent.Render(fmt.Sprintf("%d/%d %s",
+		s.stepNumber(s.step), len(wizardSteps), s.step.label()))
+}
+
+// decided is the running summary of every step already answered, so a
+// later step never has to be taken on trust or paged back to. Empty on the
+// first step, where nothing has been decided yet.
+func (s *WizardScreen) decided(env Env) string {
+	var parts []string
+	add := func(text string) {
+		parts = append(parts, env.Styles.Good.Render("✓")+" "+text)
+	}
+
+	if s.step > stepReShade {
+		if v, ok := s.selectedVersion(); ok {
+			add(fmt.Sprintf("ReShade %s (%s)", v.Version, s.flavor))
+		}
+	}
+	if s.step > stepAPI {
+		// Just the name here: which APIs it covers is what the API step
+		// itself is for, and spelling it out again pushes the summary onto
+		// a second line for no new information.
+		add(s.selectedDLL())
+	}
+	if s.step > stepShaders {
+		add(countSummary(s.packages, "shader"))
+	}
+	if s.step > stepAddons && s.flavor.Addon() {
+		add(countSummary(s.addons, "add-on"))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+
+	// Three spaces read as a gap between facts without needing a
+	// separator glyph; if they do not fit, one per line does.
+	line := strings.Join(parts, "   ")
+	if lipgloss.Width(line) <= env.Width {
+		return line
+	}
+	return strings.Join(parts, "\n")
+}
+
+// countSummary names a selection by its picks when there are few enough to
+// read, and by a count when there are not.
+func countSummary(m multiSelect, noun string) string {
+	var names []string
+	for i, it := range m.items {
+		if !it.Header && m.isSelected(i) {
+			names = append(names, it.Name)
+		}
+	}
+	switch {
+	case len(names) == 0:
+		return "no " + noun + "s"
+	case len(names) <= 2:
+		return strings.Join(names, ", ")
+	default:
+		return fmt.Sprintf("%d %ss", len(names), noun)
+	}
+}
+
+// viewFooter is the block under every step: the add-on safety warning when
+// it applies, and the keys.
+func (s *WizardScreen) viewFooter(env Env) string {
+	var b strings.Builder
+	b.WriteString("\n")
+	if s.flavor.Addon() {
+		b.WriteString(env.Styles.Bad.Render(wrap(anticheatWarning, env.Width-1)))
+		b.WriteString("\n")
+	}
+
+	action, hint := "enter continues", ""
+	switch s.step {
+	case stepReShade:
+		hint = "↑↓ version · ←→ normal/addon"
+	case stepAPI:
+		hint = "↑↓ move"
+	case stepShaders, stepAddons:
+		hint = "↑↓ move · space toggles · " + s.showAllHint()
+	case stepReview:
+		action = "enter " + s.verb()
+		hint = "↑↓ move · space toggles"
+	}
+	if s.step > stepReShade {
+		hint += " · esc back"
+	}
+
+	b.WriteString(env.Styles.Accent.Render(action))
+	b.WriteString(env.Styles.Faint.Render(clipTail("  ·  "+hint, env.Width-lipgloss.Width(action))))
+	b.WriteString("\n")
+	return b.String()
+}
+
+// minVersionPaneWidth is the narrowest a version pane can be and still
+// read as a column of versions with their badges.
+const minVersionPaneWidth = 22
+
+// viewReShade draws the two builds as side-by-side panes over the same
+// version list, so the choice between them is a visible comparison rather
+// than a toggle the user has to know about. ←/→ moves between panes; the
+// version cursor is shared, so switching builds keeps the version.
+func (s *WizardScreen) viewReShade(b *strings.Builder, env Env, height int) {
+	if len(s.data.Versions) == 0 {
+		b.WriteString(env.Styles.Faint.Render("No versions available."))
+		b.WriteString("\n")
+		return
+	}
+
+	// Two panes need room for both; below that, show the focused build
+	// full width with a strip naming the other, the same fold the
+	// resources browser uses when its four panes stop fitting.
+	const gutter = 2
+	if env.Width < len(wizardFlavors)*(minVersionPaneWidth+gutter) {
+		b.WriteString(s.flavorStrip(env))
+		b.WriteString("\n")
+		// The strip is already this pane's header; repeating it inside
+		// would just say the same thing twice.
+		b.WriteString(s.versionPane(s.flavor, env.Width, height-1, env, false))
+		b.WriteString("\n")
+		return
+	}
+
+	paneWidth := env.Width/len(wizardFlavors) - gutter
+	cols := make([]string, 0, len(wizardFlavors))
+	for _, fl := range wizardFlavors {
+		cols = append(cols, s.versionPane(fl, paneWidth, height, env, true))
+	}
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, cols[0], strings.Repeat(" ", gutter), cols[1]))
+	b.WriteString("\n")
+}
+
+// flavorStrip names both builds when only one pane fits, so the other does
+// not simply vanish.
+func (s *WizardScreen) flavorStrip(env Env) string {
+	var parts []string
+	for _, fl := range wizardFlavors {
+		label := "ReShade (" + string(fl) + ")"
+		if fl == s.flavor {
+			parts = append(parts, env.Styles.Selected.Render("▸ "+label))
 		} else {
 			parts = append(parts, env.Styles.Faint.Render(label))
 		}
 	}
-	return strings.Join(parts, " › ")
+	return strings.Join(parts, "   ")
 }
 
-func (s *WizardScreen) viewVersion(b *strings.Builder, env Env) {
-	b.WriteString("flavor: ")
-	if s.flavor.Addon() {
-		b.WriteString(env.Styles.Accent.Render("addon"))
-	} else {
-		b.WriteString(env.Styles.Accent.Render("normal"))
-	}
-	b.WriteString(env.Styles.Faint.Render("  (tab to toggle)"))
-	b.WriteString("\n")
-	b.WriteString(env.Styles.Faint.Render("DLL: " + dllWithCoverage(s.selectedDLL())))
-	b.WriteString("\n")
-	if s.flavor.Addon() {
-		b.WriteString(env.Styles.Bad.Render(anticheatWarning))
-		b.WriteString("\n")
-	}
-	b.WriteString("\n")
+// versionPane renders one build's version list. Only the focused pane
+// draws a cursor: the other is there to be compared against, not moved in.
+func (s *WizardScreen) versionPane(flavor install.Flavor, width, height int, env Env, showHeader bool) string {
+	focused := flavor == s.flavor
 
-	if len(s.data.Versions) == 0 {
-		b.WriteString(env.Styles.Faint.Render("No versions available."))
-		return
+	var b strings.Builder
+	if showHeader {
+		header := "ReShade (" + string(flavor) + ")"
+		if focused {
+			b.WriteString(env.Styles.Selected.Render(header))
+		} else {
+			b.WriteString(env.Styles.Faint.Render(header))
+		}
+		b.WriteString("\n")
+		height--
 	}
-	for i, v := range s.data.Versions {
+
+	writeWindow(&b, env, len(s.data.Versions), s.versionCursor.Cursor(), height, "", func(i int) {
+		v := s.data.Versions[i]
 		marker := "  "
-		if i == s.versionCursor.Cursor() {
+		if focused && i == s.versionCursor.Cursor() {
 			marker = "▸ "
 		}
-		badges := ""
+		line := marker + v.Version
 		if v.Latest {
-			badges += "  latest"
+			line += "  latest"
 		}
-		if s.deps.CacheStatus != nil && s.deps.CacheStatus.HasReShade(v.Version, s.flavor.Addon()) {
-			badges += "  cached"
+		if s.cached(v.Version, flavor) {
+			line += "  cached"
 		}
-		line := marker + v.Version + badges
-		if i == s.versionCursor.Cursor() {
-			b.WriteString(env.Styles.Selected.Render(line))
-		} else {
-			b.WriteString(line)
+		line = clipTail(line, width)
+		switch {
+		case focused && i == s.versionCursor.Cursor():
+			line = env.Styles.Selected.Render(line)
+		case !focused:
+			line = env.Styles.Faint.Render(line)
 		}
+		b.WriteString(line)
 		b.WriteString("\n")
-	}
+	})
+
+	// A fixed width keeps the right-hand pane's column straight however
+	// long the left one's rows happen to be; the trailing newline would
+	// otherwise become an empty row once the panes are joined.
+	return lipgloss.NewStyle().Width(width).Render(strings.TrimSuffix(b.String(), "\n"))
 }
 
-func (s *WizardScreen) viewDLL(b *strings.Builder, env Env) {
+func (s *WizardScreen) viewAPI(b *strings.Builder, env Env, height int) {
 	if !s.exe.API.Supported() {
-		b.WriteString(env.Styles.Warn.Render(
-			fmt.Sprintf("%s is not supported in v1 — pick a DLL manually.", s.exe.API)))
+		b.WriteString(env.Styles.Warn.Render(wrap(fmt.Sprintf(
+			"%s is not supported in v1 — pick a DLL yourself.", apiLabel(s.exe.API)), env.Width-1)))
 		b.WriteString("\n\n")
+		height -= 2
 	}
-	for i, o := range dllOptions {
+
+	recommended := s.exe.API.RecommendedDLL()
+	writeWindow(b, env, len(dllOptions), s.dllCursor.Cursor(), height, "", func(i int) {
+		o := dllOptions[i]
 		marker := "  "
 		if i == s.dllCursor.Cursor() {
 			marker = "▸ "
 		}
 		line := fmt.Sprintf("%s%-14s %s", marker, o.Name, o.For)
-		if i == s.dllCursor.Cursor() {
-			b.WriteString(env.Styles.Selected.Render(line))
-		} else {
-			b.WriteString(line)
+		if o.Name == recommended {
+			line += "  ← detected " + apiLabel(s.exe.API)
 		}
+		line = clipTail(line, env.Width)
+		if i == s.dllCursor.Cursor() {
+			line = env.Styles.Selected.Render(line)
+		}
+		b.WriteString(line)
 		b.WriteString("\n")
-	}
+	})
 }
 
-func (s *WizardScreen) viewMultiSelect(b *strings.Builder, env Env, m multiSelect, hint string) {
-	b.WriteString(env.Styles.Faint.Render(hint + " space toggles, enter continues."))
-	b.WriteString("\n\n")
-
-	for i, it := range m.items {
+// writeSelectList renders a checkbox step's rows, windowed to height.
+func writeSelectList(b *strings.Builder, env Env, m multiSelect, height int) {
+	// The row under the cursor also prints its description, so it costs two
+	// lines rather than one.
+	writeWindow(b, env, len(m.items), m.cursor, height-1, "", func(i int) {
+		it := m.items[i]
 		if it.Header {
 			b.WriteString(env.Styles.Faint.Render(it.Name))
 			b.WriteString("\n")
-			continue
+			return
 		}
 
 		box := "[ ]"
@@ -639,7 +900,6 @@ func (s *WizardScreen) viewMultiSelect(b *strings.Builder, env Env, m multiSelec
 		if i == m.cursor {
 			marker = "▸ "
 		}
-
 		name := it.Name
 		if it.Required {
 			name += "  (required)"
@@ -648,103 +908,87 @@ func (s *WizardScreen) viewMultiSelect(b *strings.Builder, env Env, m multiSelec
 		line := fmt.Sprintf("%s%s %s", marker, box, name)
 		switch {
 		case it.Disabled:
-			line = env.Styles.Faint.Render(line + "  — " + it.DisabledNote)
+			// A manual-only add-on says both things: that yarm cannot
+			// install it, which is why the row is greyed, and where to get
+			// it by hand when the catalog knows.
+			note := "  — manual install only"
+			if it.DisabledNote != "" {
+				note += ": " + it.DisabledNote
+			}
+			line = env.Styles.Faint.Render(clipTail(line+note, env.Width))
 		case i == m.cursor:
-			line = env.Styles.Selected.Render(line)
+			line = env.Styles.Selected.Render(clipTail(line, env.Width))
+		default:
+			line = clipTail(line, env.Width)
 		}
 		b.WriteString(line)
 		b.WriteString("\n")
 		if it.Description != "" && i == m.cursor {
-			b.WriteString(env.Styles.Faint.Render("    " + it.Description))
+			b.WriteString(env.Styles.Faint.Render(clipTail("    "+it.Description, env.Width)))
 			b.WriteString("\n")
 		}
-	}
+	})
 }
 
-func (s *WizardScreen) viewReview(b *strings.Builder, env Env) {
-	version, _ := s.selectedVersion()
-
-	section := func(title string) {
-		b.WriteString(env.Styles.Subtitle.Render(title))
-		b.WriteString("\n")
+// viewReview is the commit page. What was chosen is already spelled out in
+// the header's summary, so this adds only what the earlier steps could not
+// know: what it will have to download, and the options that apply to the
+// run itself.
+func (s *WizardScreen) viewReview(b *strings.Builder, env Env, height int) {
+	section := func(into *strings.Builder, title string) {
+		into.WriteString(env.Styles.Subtitle.Render(title))
+		into.WriteString("\n")
 	}
 
-	section("Folder")
-	_, _ = fmt.Fprintf(b, "  %s\n\n", s.exe.Path)
-
-	section("ReShade")
-	_, _ = fmt.Fprintf(b, "  %s (%s) → %s\n", version.Version, s.flavor, dllWithCoverage(s.selectedDLL()))
-	if s.flavor.Addon() {
-		b.WriteString("  ")
-		b.WriteString(env.Styles.Bad.Render(anticheatWarning))
-		b.WriteString("\n")
-	}
-	b.WriteString("\n")
-
-	section("Shaders")
-	if ids := s.packages.selectedIDs(); len(ids) > 0 {
-		b.WriteString("  " + strings.Join(ids, ", ") + "\n")
-	} else {
-		b.WriteString(env.Styles.Faint.Render("  none selected") + "\n")
-	}
-	b.WriteString("\n")
-
-	if s.flavor.Addon() {
-		section("Add-ons")
-		if ids := s.addons.selectedIDs(); len(ids) > 0 {
-			b.WriteString("  " + strings.Join(ids, ", ") + "\n")
-		} else {
-			b.WriteString(env.Styles.Faint.Render("  none selected") + "\n")
-		}
-		b.WriteString("\n")
-	}
-
-	needsD3D := artifacts.NeedsD3DCompiler(s.targetOS)
-	missing := describeMissing(s.deps.CacheStatus, version.Version, s.flavor.Addon(),
-		s.packages.selectedIDs(), addonsForDownload(s.flavor, s.addons), s.exe.Arch, needsD3D)
-	if len(missing) > 0 {
-		section("To download")
-		for _, m := range missing {
-			b.WriteString("  " + m + "\n")
-		}
-		b.WriteString("\n")
-	}
-
-	section("Options")
-	for i, it := range s.reviewOptions.items {
+	// The options block is fixed-size but its disclaimer wraps, so measure
+	// it rather than assuming a line count; the download list is the only
+	// part that can grow, so it is what gives way on a short terminal.
+	var opts strings.Builder
+	section(&opts, "Options")
+	for i, it := range s.options.items {
 		box := "[ ]"
-		if s.reviewOptions.isSelected(i) {
+		if s.options.isSelected(i) {
 			box = "[x]"
 		}
 		marker := "  "
-		if i == s.reviewOptions.cursor {
+		if i == s.options.cursor {
 			marker = "▸ "
 		}
 		line := fmt.Sprintf("%s%s %s", marker, box, it.Name)
-		if i == s.reviewOptions.cursor {
+		if i == s.options.cursor {
 			line = env.Styles.Selected.Render(line)
 		}
-		b.WriteString(line)
+		opts.WriteString(line)
+		opts.WriteString("\n")
+	}
+	if !s.overwrite() {
+		opts.WriteString("\n")
+		opts.WriteString(env.Styles.Warn.Render(wrap(
+			"Files not created by yarm are left in place unless overwrite is on.", env.Width-1)))
+		opts.WriteString("\n")
+	}
+
+	missing := s.missing()
+	section(b, "To download")
+	if len(missing) == 0 {
+		b.WriteString(env.Styles.Faint.Render("  nothing — everything is already cached"))
 		b.WriteString("\n")
 	}
-	b.WriteString(env.Styles.Faint.Render("  space toggles"))
-	b.WriteString("\n\n")
-
-	if !s.overwrite() {
-		b.WriteString(env.Styles.Warn.Render(
-			"Files not created by yarm are left in place unless overwrite is on."))
-		b.WriteString("\n\n")
+	// -2 for this section's own header and the blank line before Options.
+	room := height - countLines(opts.String()) - 2
+	if room < 2 {
+		room = 2
 	}
-
-	verb := "install"
-	if s.existing != nil {
-		verb = "update"
-	}
-	b.WriteString(env.Styles.Accent.Render("enter to " + verb))
+	writeWindow(b, env, len(missing), 0, room, "  ", func(i int) {
+		b.WriteString(clipTail("  "+missing[i], env.Width))
+		b.WriteString("\n")
+	})
+	b.WriteString("\n")
+	b.WriteString(opts.String())
 }
 
 // addonsForDownload returns the selected add-on ids, or none when the
-// flavor does not support add-ons at all.
+// build does not support add-ons at all.
 func addonsForDownload(flavor install.Flavor, addons multiSelect) []string {
 	if !flavor.Addon() {
 		return nil

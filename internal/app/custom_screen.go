@@ -170,32 +170,43 @@ func (s *CustomScreen) View(env Env) string {
 		return env.Styles.Faint.Render("scanning cache/custom…")
 	}
 
+	// A header costs three lines and an entry with a description two, so
+	// reserve room for the busiest case rather than assuming one line each;
+	// the footer below takes two more.
+	const perRow = 2
+	const footer = 2
+	visible := (env.Height - footer) / perRow
+	if visible < 3 {
+		visible = 3
+	}
+
 	var b strings.Builder
-	for i, row := range s.rows {
+	writeWindow(&b, env, len(s.rows), s.cursor, visible, "", func(i int) {
+		row := s.rows[i]
 		switch {
 		case row.header:
 			b.WriteString("\n")
 			b.WriteString(env.Styles.Subtitle.Render(row.title))
 			b.WriteString("\n")
-			b.WriteString(env.Styles.Faint.Render(row.detail))
+			b.WriteString(env.Styles.Faint.Render(clipTail(row.detail, env.Width)))
 			b.WriteString("\n")
 		default:
 			marker := "  "
 			if i == s.cursor {
 				marker = "▸ "
 			}
-			line := marker + row.title
+			line := clipTail(marker+row.title, env.Width)
 			if i == s.cursor {
 				line = env.Styles.Selected.Render(line)
 			}
 			b.WriteString(line)
 			b.WriteString("\n")
 			if row.detail != "" {
-				b.WriteString(env.Styles.Faint.Render("    " + row.detail))
+				b.WriteString(env.Styles.Faint.Render(clipTail("    "+row.detail, env.Width)))
 				b.WriteString("\n")
 			}
 		}
-	}
+	})
 
 	if len(s.shaders) == 0 && len(s.addons) == 0 {
 		b.WriteString("\n")

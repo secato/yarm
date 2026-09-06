@@ -342,20 +342,29 @@ func (s *SettingsScreen) viewManualGames(env Env) string {
 		b.WriteString(env.Styles.Faint.Render("none yet — press a to add a folder"))
 		b.WriteString("\n")
 	}
-	for i, g := range s.pending.ManualGames {
+	// Two lines per folder (name, then path), with the title above and the
+	// key hints below — this list is as long as the user has made it, so it
+	// scrolls around the cursor rather than running off the bottom.
+	const perRow = 2
+	visible := (env.Height - 5) / perRow
+	if visible < 3 {
+		visible = 3
+	}
+	writeWindow(&b, env, len(s.pending.ManualGames), s.cursor, visible, "", func(i int) {
+		g := s.pending.ManualGames[i]
 		marker := "  "
 		if i == s.cursor {
 			marker = "▸ "
 		}
-		line := fmt.Sprintf("%s%s", marker, g.Name)
+		line := clipTail(marker+g.Name, env.Width)
 		if i == s.cursor {
 			line = env.Styles.Selected.Render(line)
 		}
 		b.WriteString(line)
 		b.WriteString("\n")
-		b.WriteString(env.Styles.Faint.Render("    " + g.Path))
+		b.WriteString(env.Styles.Faint.Render(clipTail("    "+g.Path, env.Width)))
 		b.WriteString("\n")
-	}
+	})
 
 	b.WriteString("\n")
 	b.WriteString(env.Styles.Faint.Render("a add folder · d remove · esc back"))

@@ -387,10 +387,13 @@ func (s *GamesScreen) View(env Env) string {
 	if panelHeight < 3 {
 		panelHeight = 3
 	}
+	// lipgloss.Height sets a minimum, not a maximum: a game with several
+	// folders full of executables would otherwise push the panel's own
+	// border off the bottom of the window.
 	panel := env.Styles.Panel.
 		Width(s.detailWidth - 2).
 		Height(panelHeight).
-		Render(detail)
+		Render(clipLines(detail, panelHeight))
 
 	return banner + lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", panel)
 }

@@ -175,3 +175,35 @@ func TestMultiSelectAllHeaders(t *testing.T) {
 		t.Error("nothing should be selectable in an all-header list")
 	}
 }
+
+// setItems is how the wizard swaps between its curated shortlist and the
+// full catalog: the rows change, the selections do not, and the cursor
+// stays on the row it was on when that row is still there.
+func TestSetItemsKeepsSelectionsAndFollowsTheCursor(t *testing.T) {
+	full := []selectItem{
+		{ID: "a", Name: "A"},
+		{ID: "b", Name: "B"},
+		{ID: "c", Name: "C"},
+	}
+	m := newMultiSelect(full)
+	m.down() // b
+	m.toggle()
+	m.down() // c
+	m.toggle()
+
+	m.setItems([]selectItem{full[0], full[2]}) // b hidden, cursor was on c
+	if m.items[m.cursor].ID != "c" {
+		t.Errorf("cursor on %q, want c — the row it was on is still shown", m.items[m.cursor].ID)
+	}
+	if !m.selected["b"] {
+		t.Error("hiding a row must not unselect it")
+	}
+
+	m.setItems([]selectItem{full[0]}) // the cursor's own row is gone now
+	if m.items[m.cursor].ID != "a" {
+		t.Errorf("cursor on %q, want a — the first row it can rest on", m.items[m.cursor].ID)
+	}
+	if got := m.selectedIDs(); len(got) != 0 {
+		t.Errorf("selectedIDs() = %v; only visible rows are reported", got)
+	}
+}

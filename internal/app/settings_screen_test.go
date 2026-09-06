@@ -1,8 +1,10 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -251,5 +253,31 @@ func TestSettingsScreenBackAtRowsDefers(t *testing.T) {
 	_, _, handled := s.HandleBack()
 	if handled {
 		t.Error("HandleBack() at the row list should defer to the shell")
+	}
+}
+
+// The manual-games list is as long as the user has made it, so it must
+// scroll around the cursor rather than printing past the window.
+func TestSettingsManualGamesListScrolls(t *testing.T) {
+	cfg := config.Default()
+	for i := 0; i < 40; i++ {
+		cfg.ManualGames = append(cfg.ManualGames, config.ManualGame{
+			Name: fmt.Sprintf("Game %02d", i), Path: fmt.Sprintf("/games/g%02d", i),
+		})
+	}
+	s := NewSettingsScreen(t.TempDir(), cfg)
+	s.mode = modeManualGames
+	s.cursor = 30
+
+	env := Env{Styles: NewStyles(true), Width: 80, Height: 21}
+	body := s.View(env)
+	if got := countLines(body); got > env.Height {
+		t.Errorf("manual games rendered %d lines into a height of %d:\n%s", got, env.Height, body)
+	}
+	if !strings.Contains(body, "more above") || !strings.Contains(body, "more below") {
+		t.Errorf("a scrolled list should say how many rows are hidden at each end:\n%s", body)
+	}
+	if !strings.Contains(body, "Game 30") {
+		t.Errorf("the row under the cursor must stay visible:\n%s", body)
 	}
 }

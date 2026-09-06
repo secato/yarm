@@ -95,7 +95,7 @@ func (c confirmOverlay) view(env Env) string {
 	}
 	b.WriteString("\n\n")
 	b.WriteString(env.Styles.Good.Render("y") + env.Styles.Faint.Render(" yes") + "    " +
-		env.Styles.Bad.Render("n") + env.Styles.Faint.Render(" no"))
+		env.Styles.Bad.Render("n/esc/enter") + env.Styles.Faint.Render(" no"))
 	return b.String()
 }
 
