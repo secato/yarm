@@ -38,12 +38,17 @@ type FolderGroup struct {
 	// either something is already tracked, or there is nothing
 	// ReShade-shaped here at all.
 	Unmanaged *install.AdoptCandidate
+	// Runtime is what ReShade itself recorded about this folder — its own
+	// version log, active preset, and effect files — gathered regardless
+	// of whether yarm is tracking anything here yet.
+	Runtime install.RuntimeInfo
 }
 
-// primaryExe is the executable an adopted (or newly recorded) install
-// should be tied to: the first one not flagged as an installer, crash
-// handler or similar, falling back to the first executable at all if
-// every one of them was.
+// primaryExe is the executable an install should be tied to: the first
+// one not flagged as an installer, crash handler or similar, falling back
+// to the first executable at all if every one of them was. Used both for
+// a freshly adopted install and to decide which executable a fresh
+// install/update targets by default.
 func (g FolderGroup) primaryExe() Executable {
 	for _, e := range g.Exes {
 		if !e.Skipped {
@@ -51,6 +56,24 @@ func (g FolderGroup) primaryExe() Executable {
 		}
 	}
 	return g.Exes[0]
+}
+
+// installedExe returns the executable Installed was actually recorded
+// against, if it can still be found in this group — the one whose path
+// yarm's install.Request named at install time, not necessarily the one
+// currently highlighted in a table (ReShade applies to the whole folder,
+// so any of its executables might be highlighted when the user asks to
+// update or uninstall it).
+func (g FolderGroup) installedExe() (Executable, bool) {
+	if g.Installed == nil {
+		return Executable{}, false
+	}
+	for _, e := range g.Exes {
+		if e.Path == g.Installed.Exe {
+			return e, true
+		}
+	}
+	return Executable{}, false
 }
 
 // groupByFolder groups exes sharing a directory, in order of first
@@ -78,13 +101,14 @@ func groupByFolder(root string, exes []Executable) []FolderGroup {
 	}
 
 	for i := range groups {
-		if groups[i].Installed != nil {
-			continue
+		exe := groups[i].primaryExe()
+		if groups[i].Installed == nil {
+			if candidate, ok := install.ScanUnmanaged(root, exe.Executable); ok {
+				c := candidate
+				groups[i].Unmanaged = &c
+			}
 		}
-		if candidate, ok := install.ScanUnmanaged(root, groups[i].primaryExe().Executable); ok {
-			c := candidate
-			groups[i].Unmanaged = &c
-		}
+		groups[i].Runtime = install.InspectRuntime(root, exe.Path)
 	}
 	return groups
 }
@@ -100,25 +124,73 @@ func writeReShadeStatus(b *strings.Builder, grp FolderGroup, env Env, hint strin
 	case grp.Installed != nil:
 		in := grp.Installed
 		b.WriteString(env.Styles.Good.Render(
-			fmt.Sprintf("✓ %s (%s) — %s", in.ReShade.Version, in.ReShade.Flavor, in.ReShade.DLL)))
+			fmt.Sprintf("✓ %s (%s) — %s", in.ReShade.Version, in.ReShade.Flavor, dllWithCoverage(in.ReShade.DLL))))
 		b.WriteString("\n")
-		if len(in.Packages) > 0 {
-			b.WriteString(env.Styles.Faint.Render("packages: " + strings.Join(in.Packages, ", ")))
+		if in.ReShade.Version == install.AdoptedVersion && grp.Runtime.Version != "" {
+			b.WriteString(env.Styles.Faint.Render("last seen running: " + grp.Runtime.Version))
 			b.WriteString("\n")
 		}
-		if len(in.Addons) > 0 {
-			b.WriteString(env.Styles.Faint.Render("add-ons: " + strings.Join(in.Addons, ", ")))
-			b.WriteString("\n")
-		}
+		writeIndentedList(b, env, "packages", in.Packages)
+		writeIndentedList(b, env, "add-ons", in.Addons)
 	case grp.Unmanaged != nil:
-		b.WriteString(env.Styles.Warn.Render("⚠ found, untracked (" + grp.Unmanaged.DLLName + ")"))
+		b.WriteString(env.Styles.Warn.Render("⚠ found, untracked (" + dllWithCoverage(grp.Unmanaged.DLLName) + ")"))
 		b.WriteString("\n")
-		if hint != "" {
-			b.WriteString(env.Styles.Faint.Render(hint))
+		if grp.Runtime.Version != "" {
+			b.WriteString(env.Styles.Faint.Render("last seen running: " + grp.Runtime.Version))
 			b.WriteString("\n")
 		}
 	default:
 		b.WriteString(env.Styles.Faint.Render("not installed"))
+		b.WriteString("\n")
+	}
+
+	writeIndentedList(b, env, "enabled", grp.Runtime.ActiveTechniques)
+	if n := len(grp.Runtime.AvailableEffects); n > 0 {
+		b.WriteString(env.Styles.Faint.Render(fmt.Sprintf("available: %d effect file(s)", n)))
+		b.WriteString("\n")
+	}
+
+	if grp.Unmanaged != nil && hint != "" {
+		b.WriteString(env.Styles.Faint.Render(hint))
+		b.WriteString("\n")
+	}
+}
+
+// dllWithCoverage appends which graphics APIs a proxy DLL name covers
+// ("dxgi.dll (D3D10 / D3D11 / D3D12)"), reusing the wizard's own dllOptions
+// descriptions so the two never drift apart. Returns name unchanged when
+// it is not one of ReShade's own proxy names.
+func dllWithCoverage(name string) string {
+	for _, o := range dllOptions {
+		if o.Name == name {
+			return name + " (" + strings.TrimSuffix(o.For, " (recommended)") + ")"
+		}
+	}
+	return name
+}
+
+// writeIndentedList writes a labeled, indented list, one item per line,
+// capped so a large preset or package selection cannot blow out the
+// panel — the remainder is summarized as "+N more" instead of listed.
+// Writes nothing when items is empty.
+func writeIndentedList(b *strings.Builder, env Env, label string, items []string) {
+	if len(items) == 0 {
+		return
+	}
+	const max = 8
+
+	b.WriteString(env.Styles.Faint.Render(label + ":"))
+	b.WriteString("\n")
+	shown := items
+	if len(items) > max {
+		shown = items[:max]
+	}
+	for _, it := range shown {
+		b.WriteString(env.Styles.Faint.Render("  " + it))
+		b.WriteString("\n")
+	}
+	if more := len(items) - len(shown); more > 0 {
+		b.WriteString(env.Styles.Faint.Render(fmt.Sprintf("  +%d more", more)))
 		b.WriteString("\n")
 	}
 }

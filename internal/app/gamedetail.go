@@ -63,11 +63,19 @@ func (s *GameDetailScreen) Title() string { return "game — " + s.entry.Name }
 func (s *GameDetailScreen) KeyBindings() []key.Binding {
 	bindings := []key.Binding{showAllBinding, s.keys.Back}
 	if len(s.visibleExes()) > 0 {
-		install := s.keys.Install
-		if exe, ok := s.selected(); ok && exe.Installed != nil {
-			install = key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "update ReShade"))
+		installBinding := s.keys.Install
+		// ReShade applies to the whole folder, not to whichever
+		// executable happens to be highlighted, so this checks the
+		// group's install rather than exe.Installed: Control.exe,
+		// Control_DX11.exe and Control_DX12.exe share one folder and one
+		// install, and any of them should offer "update", not just
+		// whichever one the install happened to be recorded against.
+		if exe, ok := s.selected(); ok {
+			if grp, ok := s.entry.GroupFor(exe.Path); ok && grp.Installed != nil {
+				installBinding = key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "update ReShade"))
+			}
 		}
-		bindings = append([]key.Binding{install, s.keys.Uninstall}, bindings...)
+		bindings = append([]key.Binding{installBinding, s.keys.Uninstall}, bindings...)
 	}
 	if exe, ok := s.selected(); ok {
 		if grp, ok := s.entry.GroupFor(exe.Path); ok && grp.Unmanaged != nil {
@@ -120,18 +128,30 @@ func (s *GameDetailScreen) selected() (Executable, bool) {
 	return exes[i], true
 }
 
-// startInstall opens the wizard on the highlighted executable.
+// startInstall opens the wizard on the highlighted executable — or, when
+// its folder already has an install, on whichever executable that install
+// is actually recorded against, regardless of which one is highlighted.
+// ReShade applies to the whole folder: re-running the wizard against a
+// sibling executable would leave the original install.json entry in
+// place while writing a second one over the same files, so this always
+// edits the one install a folder can have rather than risking a second.
 func (s *GameDetailScreen) startInstall() (Screen, tea.Cmd) {
 	exe, ok := s.selected()
 	if !ok {
 		return s, nil
+	}
+	target := exe
+	if grp, ok := s.entry.GroupFor(exe.Path); ok {
+		if installed, ok := grp.installedExe(); ok {
+			target = installed
+		}
 	}
 	// The wizard's own exe step starts from PlayableExes(), so the
 	// preselection has to be an index into that list, not into whatever
 	// this screen's "show all" toggle currently displays.
 	preselected := 0
 	for i, e := range s.entry.PlayableExes() {
-		if e.Path == exe.Path {
+		if e.Path == target.Path {
 			preselected = i
 			break
 		}
@@ -139,15 +159,25 @@ func (s *GameDetailScreen) startInstall() (Screen, tea.Cmd) {
 	return s, PushScreen(NewWizardScreen(s.entry, preselected, s.deps))
 }
 
-// startUninstall confirms, then removes, the install on the highlighted
-// executable.
+// startUninstall confirms, then removes, the install covering the
+// highlighted executable's folder — resolved the same way startInstall
+// resolves its target, since the install may be recorded against a
+// sibling executable in the same folder rather than the highlighted one.
 func (s *GameDetailScreen) startUninstall() (Screen, tea.Cmd) {
 	exe, ok := s.selected()
-	if !ok || exe.Installed == nil || s.deps.Uninstaller == nil {
+	if !ok || s.deps.Uninstaller == nil {
+		return s, nil
+	}
+	grp, ok := s.entry.GroupFor(exe.Path)
+	if !ok || grp.Installed == nil {
+		return s, nil
+	}
+	target, ok := grp.installedExe()
+	if !ok {
 		return s, nil
 	}
 
-	exePath := exe.Path
+	exePath := target.Path
 	action := Async(context.Background(),
 		func(ctx context.Context) (install.UninstallResult, error) {
 			return s.deps.Uninstaller.Uninstall(install.UninstallRequest{
@@ -241,9 +271,22 @@ func (s *GameDetailScreen) resize(env Env) {
 
 	rows := make([]table.Row, 0, len(s.entry.Exes))
 	for _, e := range s.visibleExes() {
-		name := e.Path
+		// The status marker reflects the executable's folder, not the
+		// executable itself: every executable sharing an installed
+		// folder is covered by the same install, so all of them show the
+		// same ✓ rather than only the one literally recorded against.
+		marker := ""
+		if grp, ok := s.entry.GroupFor(e.Path); ok {
+			switch {
+			case grp.Installed != nil:
+				marker = "✓ "
+			case grp.Unmanaged != nil:
+				marker = "⚠ "
+			}
+		}
+		name := marker + e.Path
 		if e.Skipped {
-			name = "· " + name
+			name = marker + "· " + e.Path
 		}
 		rows = append(rows, table.Row{name, string(e.Arch), apiLabel(e.API)})
 	}

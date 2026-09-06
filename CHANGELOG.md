@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- ReShade's own runtime files are now read for information yarm never
+  wrote itself, verified against ReShade's own source
+  (github.com/crosire/reshade): `internal/install/inspect.go`'s
+  `InspectRuntime` reads the DLL's own log (`ReShade.log`, truncated fresh
+  on every launch — confirmed via `dll_log.cpp`'s `CREATE_ALWAYS`) for a
+  best-effort "last seen running" version when the recorded one is the
+  `unknown (adopted)` placeholder; follows `ReShade.ini`'s
+  `[GENERAL]/PresetPath` to the active preset and reads its `Techniques`
+  list (a small dedicated ini reader, since ReShade's preset dialect keeps
+  that list in an unnamed section before any `[EffectFile.fx]` header, and
+  escapes a literal comma as two in a row — both of which the existing
+  `internal/catalog` ini parser does not handle) to show which effects are
+  actually enabled; and lists available `reshade-shaders/Shaders/*.fx`
+  files. All three degrade to nothing when the underlying file does not
+  exist yet (no log until the game has run once, no preset until the
+  in-game overlay has saved one).
+  - The "ReShade" section (games list side panel and `GameDetailScreen`)
+    now shows all of this: the proxy DLL alongside which graphics APIs it
+    covers (`dxgi.dll (D3D10 / D3D11 / D3D12)`, reusing the wizard's own
+    `dllOptions` descriptions), packages and add-ons as an indented list
+    (one per line, capped with "+N more") instead of a single comma-joined
+    line, enabled effects the same way, and an available-effects count.
+
+- ReShade status and actions are now resolved per folder, not per
+  executable — fixing a real correctness gap, not just a display one.
+  ReShade intercepts by directory: Control's `Control.exe`,
+  `Control_DX11.exe` and `Control_DX12.exe` share one folder and can only
+  ever have one install between them, but `GameDetailScreen` was deciding
+  "install" vs. "update" and resolving `u`/`i`'s target from whichever
+  executable was highlighted — selecting a sibling executable and
+  installing would have written a second `installs.json` entry over the
+  same on-disk files, leaving both entries claiming files only one of them
+  could safely own.
+  - `FolderGroup.installedExe()` finds the executable an install is
+    actually recorded against; `startInstall`/`startUninstall` resolve
+    through it regardless of which executable is highlighted, and the
+    executables table marks every executable in an installed (or
+    unmanaged) folder with the same ✓/⚠, not just the one literally named
+    in `installs.json`.
+
 - Adopt an unmanaged ReShade install: when a game folder already has a
   known proxy DLL (`dxgi.dll` and friends) plus `ReShade.ini` next to an
   executable yarm did not put there itself — installed by hand, or by

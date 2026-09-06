@@ -19,6 +19,13 @@ import (
 // to the executable if it is running ReShade at all.
 var knownDLLNames = []string{"dxgi.dll", "d3d11.dll", "d3d10.dll", "d3d12.dll", "d3d9.dll", "opengl32.dll"}
 
+// AdoptedVersion is what Adopt records as an install's ReShade version,
+// since the real one cannot be recovered from the files alone. Exported
+// so callers can recognize it (e.g. to fall back to InspectRuntime's
+// best-effort version instead) rather than comparing against a repeated
+// literal string.
+const AdoptedVersion = "unknown (adopted)"
+
 // AdoptCandidate is what a scan of an executable's directory found that
 // looks like a ReShade install yarm did not create.
 type AdoptCandidate struct {
@@ -177,7 +184,7 @@ func Adopt(stateDir string, g game.Game, exe game.Executable, candidate AdoptCan
 		Exe:         filepath.ToSlash(exe.Path),
 		InstalledAt: time.Now().UTC(),
 		ReShade: state.ReShadeInfo{
-			Version: "unknown (adopted)",
+			Version: AdoptedVersion,
 			Flavor:  string(flavor),
 			Arch:    string(exe.Arch),
 			API:     string(exe.API),
