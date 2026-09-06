@@ -84,6 +84,7 @@ func newRootCmd() *cobra.Command {
 					CacheStatus: c,
 					Defaults:    cfg.Defaults,
 					Cache:       c,
+					StateDir:    dirs.Data,
 					CustomDir:   customDir,
 					Config:      cfg,
 					ConfigDir:   dirs.Config,

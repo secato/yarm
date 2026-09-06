@@ -1,0 +1,669 @@
+package app
+
+import (
+	"context"
+	"fmt"
+	"slices"
+	"strings"
+	"time"
+
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+
+	"github.com/secato/yarm/internal/cache"
+	"github.com/secato/yarm/internal/catalog"
+	"github.com/secato/yarm/internal/fsutil"
+	"github.com/secato/yarm/internal/game"
+	"github.com/secato/yarm/internal/state"
+)
+
+// resourcePane indexes ResourcesScreen's three panes.
+type resourcePane int
+
+const (
+	paneReShade resourcePane = iota
+	panePackages
+	paneAddons
+	paneCount
+)
+
+func (p resourcePane) label() string {
+	switch p {
+	case paneReShade:
+		return "ReShade"
+	case panePackages:
+		return "Shaders"
+	case paneAddons:
+		return "Add-ons"
+	default:
+		return "?"
+	}
+}
+
+// resourceRow is one browsable item: a ReShade version+flavor, an effect
+// package, or an add-on — catalog-sourced, custom-provided, or left over
+// in the cache from something the catalog no longer offers.
+type resourceRow struct {
+	ID     string
+	Name   string
+	Custom bool
+	// Downloadable is false for custom content (already on disk — there
+	// is nothing to fetch) and a manual-only add-on.
+	Downloadable bool
+	Cached       bool
+	Size         int64
+	DownloadedAt time.Time
+	// InUse reports whether any recorded install, for any game, actually
+	// references this exact item.
+	InUse bool
+
+	// Exactly one of these is meaningful, matching which pane the row
+	// belongs to — carried along so the download/refresh actions have
+	// what they need without re-deriving it from the ID.
+	reshadeVersion string
+	reshadeAddon   bool
+	pkg            catalog.Package
+	addon          catalog.Addon
+}
+
+// resourcesLoadedMsg carries a full (re)load of every pane, success or
+// not. Built as a plain tea.Cmd rather than through Async, so a failure
+// still reaches this screen's own Update instead of leaving "loading…" (or
+// "downloading…") showing forever once the shell's error dialog closed.
+type resourcesLoadedMsg struct {
+	panes   [paneCount][]resourceRow
+	total   int64
+	free    int64
+	freeErr error
+	err     error
+}
+
+// resourceActionMsg reports a download, delete or refresh failure — a
+// success re-loads everything instead (a resourcesLoadedMsg), since it is
+// simplest to just recompute what changed rather than patch one row.
+type resourceActionMsg struct{ err error }
+
+// loadResources gathers everything the screen shows, off the UI
+// goroutine: the catalog/custom-content listing, the cache's own index,
+// disk totals, and every recorded install (to know what is "in use").
+func loadResources(deps Deps) resourcesLoadedMsg {
+	data, err := deps.WizardData.LoadWizardData(context.Background())
+	if err != nil && len(data.Versions) == 0 && len(data.Packages) == 0 && len(data.Addons) == 0 {
+		return resourcesLoadedMsg{err: err}
+	}
+
+	entries, err := deps.Cache.List(cache.SortByName, false)
+	if err != nil {
+		return resourcesLoadedMsg{err: err}
+	}
+	total, err := deps.Cache.Total()
+	if err != nil {
+		return resourcesLoadedMsg{err: err}
+	}
+	free, freeErr := fsutil.FreeSpace(deps.Cache.Root)
+
+	reg, err := state.Load(deps.StateDir)
+	if err != nil {
+		return resourcesLoadedMsg{err: err}
+	}
+	installs := reg.Installs()
+
+	var msg resourcesLoadedMsg
+	msg.panes[paneReShade] = buildReShadeRows(data, deps.Cache, entries, installs)
+	msg.panes[panePackages] = buildPackageRows(data, deps.Cache, entries, installs)
+	msg.panes[paneAddons] = buildAddonRows(data, deps.Cache, entries, installs)
+	msg.total, msg.free, msg.freeErr = total, free, freeErr
+	return msg
+}
+
+func buildReShadeRows(data WizardData, c *cache.Cache, entries []cache.Entry, installs []state.GameInstall) []resourceRow {
+	const shown = 3
+	versions := make([]string, 0, shown)
+	seen := map[string]bool{}
+	top := data.Versions
+	if len(top) > shown {
+		top = top[:shown]
+	}
+	for _, v := range top {
+		versions = append(versions, v.Version)
+		seen[v.Version] = true
+	}
+	// A version outside the top 3 but still cached must stay visible and
+	// manageable too — otherwise deleting it would require leaving this
+	// screen entirely.
+	for _, e := range entries {
+		if e.Kind != cache.KindReShade {
+			continue
+		}
+		parts := strings.SplitN(e.ID, ":", 3)
+		if len(parts) != 3 || seen[parts[1]] {
+			continue
+		}
+		seen[parts[1]] = true
+		versions = append(versions, parts[1])
+	}
+
+	rows := make([]resourceRow, 0, len(versions)*2)
+	for _, version := range versions {
+		for _, addon := range []bool{false, true} {
+			flavor := "normal"
+			if addon {
+				flavor = "addon"
+			}
+			id := "reshade:" + version + ":" + flavor
+			row := resourceRow{
+				ID:             id,
+				Name:           version + " (" + flavor + ")",
+				Downloadable:   true,
+				Cached:         c.HasReShade(version, addon),
+				InUse:          inUseReShade(installs, version, addon),
+				reshadeVersion: version,
+				reshadeAddon:   addon,
+			}
+			for _, e := range entries {
+				if e.ID == id {
+					row.Size, row.DownloadedAt = e.Size, e.DownloadedAt
+					break
+				}
+			}
+			rows = append(rows, row)
+		}
+	}
+	return rows
+}
+
+func buildPackageRows(data WizardData, c *cache.Cache, entries []cache.Entry, installs []state.GameInstall) []resourceRow {
+	rows := make([]resourceRow, 0, len(data.Packages)+len(data.CustomShaders))
+	for _, p := range data.Packages {
+		matches := entriesForPrefix(entries, "package:"+p.ID+":")
+		rows = append(rows, resourceRow{
+			ID:           p.ID,
+			Name:         p.Name,
+			Downloadable: true,
+			Cached:       c.HasPackage(p.ID),
+			Size:         sumSize(matches),
+			DownloadedAt: latestDownload(matches),
+			InUse:        inUseID(installs, p.ID),
+			pkg:          p,
+		})
+	}
+	for _, cst := range data.CustomShaders {
+		rows = append(rows, resourceRow{
+			ID: cst.ID, Name: cst.Name,
+			Custom: true, Cached: true,
+			InUse: inUseID(installs, cst.ID),
+		})
+	}
+	return rows
+}
+
+func buildAddonRows(data WizardData, c *cache.Cache, entries []cache.Entry, installs []state.GameInstall) []resourceRow {
+	rows := make([]resourceRow, 0, len(data.Addons)+len(data.CustomAddons))
+	for _, a := range data.Addons {
+		matches := entriesForPrefix(entries, "addon:"+a.ID+":")
+		rows = append(rows, resourceRow{
+			ID:           a.ID,
+			Name:         a.Name,
+			Downloadable: a.Installable(),
+			Cached:       c.HasAddon(a.ID),
+			Size:         sumSize(matches),
+			DownloadedAt: latestDownload(matches),
+			InUse:        inUseID(installs, a.ID),
+			addon:        a,
+		})
+	}
+	for _, cst := range data.CustomAddons {
+		rows = append(rows, resourceRow{
+			ID: cst.ID, Name: cst.Name,
+			Custom: true, Cached: true,
+			InUse: inUseID(installs, cst.ID),
+		})
+	}
+	return rows
+}
+
+func inUseReShade(installs []state.GameInstall, version string, addon bool) bool {
+	flavor := "normal"
+	if addon {
+		flavor = "addon"
+	}
+	for _, gi := range installs {
+		if gi.Install.ReShade.Version == version && gi.Install.ReShade.Flavor == flavor {
+			return true
+		}
+	}
+	return false
+}
+
+// inUseID reports whether any recorded install references id. Custom
+// content shares a package/add-on's own selection list in the wizard, so
+// its id can land in either field; Custom is checked too for whatever
+// records it.
+func inUseID(installs []state.GameInstall, id string) bool {
+	for _, gi := range installs {
+		if slices.Contains(gi.Install.Packages, id) ||
+			slices.Contains(gi.Install.Addons, id) ||
+			slices.Contains(gi.Install.Custom, id) {
+			return true
+		}
+	}
+	return false
+}
+
+func entriesForPrefix(entries []cache.Entry, prefix string) []cache.Entry {
+	var out []cache.Entry
+	for _, e := range entries {
+		if strings.HasPrefix(e.ID, prefix) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func sumSize(entries []cache.Entry) int64 {
+	var total int64
+	for _, e := range entries {
+		total += e.Size
+	}
+	return total
+}
+
+func latestDownload(entries []cache.Entry) time.Time {
+	var latest time.Time
+	for _, e := range entries {
+		if e.DownloadedAt.After(latest) {
+			latest = e.DownloadedAt
+		}
+	}
+	return latest
+}
+
+// ResourcesScreen browses everything ReShade needs — versions, effect
+// packages and add-ons, including anything supplied as custom content —
+// and shows which are already cached, their size, and whether any
+// recorded install anywhere actually uses them. Replaces the plain cache
+// list: browsing and managing what is cached are the same view now, since
+// "is it cached" is just one property of "what's available", not a
+// separate list to cross-reference by hand.
+type ResourcesScreen struct {
+	keys KeyMap
+	deps Deps
+
+	loading     bool
+	loadErr     string
+	downloading bool
+	refreshing  bool
+
+	panes   [paneCount][]resourceRow
+	cursors [paneCount]cursorList
+	focus   resourcePane
+
+	total   int64
+	free    int64
+	freeErr error
+}
+
+// NewResourcesScreen returns the resources browser, which loads on Init.
+func NewResourcesScreen(deps Deps) *ResourcesScreen {
+	return &ResourcesScreen{keys: DefaultKeyMap(), deps: deps, loading: true}
+}
+
+// Init implements Screen.
+func (s *ResourcesScreen) Init() tea.Cmd { return s.load() }
+
+func (s *ResourcesScreen) load() tea.Cmd {
+	deps := s.deps
+	return func() tea.Msg { return loadResources(deps) }
+}
+
+// Title implements Screen.
+func (s *ResourcesScreen) Title() string {
+	if s.loading {
+		return "resources — loading…"
+	}
+	return "resources — " + humanSize(s.total)
+}
+
+var (
+	resourceDownloadBinding = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "download"))
+	resourceDeleteBinding   = key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "delete"))
+	resourceRefreshBinding  = key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh package"))
+	resourcePaneLeft        = key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "prev pane"))
+	resourcePaneRight       = key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "next pane"))
+)
+
+// KeyBindings implements Screen.
+func (s *ResourcesScreen) KeyBindings() []key.Binding {
+	return []key.Binding{
+		s.keys.Up, s.keys.Down, resourcePaneLeft, resourcePaneRight,
+		resourceDownloadBinding, resourceDeleteBinding, resourceRefreshBinding,
+		s.keys.Back,
+	}
+}
+
+// HandleBack implements backHandler only so this screen can be reached
+// from Games and returned from with the ordinary pop; it always defers.
+func (s *ResourcesScreen) HandleBack() (Screen, tea.Cmd, bool) { return s, nil, false }
+
+// Update implements Screen.
+func (s *ResourcesScreen) Update(msg tea.Msg, env Env) (Screen, tea.Cmd) {
+	switch msg := msg.(type) {
+	case resourcesLoadedMsg:
+		s.loading = false
+		s.downloading = false
+		s.refreshing = false
+		if msg.err != nil {
+			s.loadErr = msg.err.Error()
+			return s, ReportError(msg.err)
+		}
+		s.loadErr = ""
+		s.panes = msg.panes
+		for p := resourcePane(0); p < paneCount; p++ {
+			s.cursors[p].setCount(len(s.panes[p]))
+		}
+		s.total, s.free, s.freeErr = msg.total, msg.free, msg.freeErr
+		return s, nil
+
+	case resourceActionMsg:
+		s.downloading = false
+		s.refreshing = false
+		return s, ReportError(msg.err)
+
+	case tea.KeyPressMsg:
+		return s.handleKey(msg, env)
+	}
+	return s, nil
+}
+
+func (s *ResourcesScreen) handleKey(msg tea.KeyPressMsg, env Env) (Screen, tea.Cmd) {
+	switch {
+	case key.Matches(msg, resourcePaneLeft):
+		s.focus = (s.focus - 1 + paneCount) % paneCount
+	case key.Matches(msg, resourcePaneRight):
+		s.focus = (s.focus + 1) % paneCount
+	case key.Matches(msg, s.keys.Up):
+		s.cursors[s.focus].up()
+	case key.Matches(msg, s.keys.Down):
+		s.cursors[s.focus].down()
+	case key.Matches(msg, resourceDownloadBinding):
+		return s.startDownload()
+	case key.Matches(msg, resourceDeleteBinding):
+		return s.confirmDelete()
+	case key.Matches(msg, resourceRefreshBinding):
+		return s.startRefresh()
+	}
+	return s, nil
+}
+
+func (s *ResourcesScreen) selectedRow() (resourceRow, bool) {
+	rows := s.panes[s.focus]
+	i := s.cursors[s.focus].Cursor()
+	if i < 0 || i >= len(rows) {
+		return resourceRow{}, false
+	}
+	return rows[i], true
+}
+
+// startDownload fetches the highlighted item ahead of any install. A
+// no-op when it is already cached, is custom content (nothing to fetch),
+// or has nothing installable (a manual-only add-on).
+func (s *ResourcesScreen) startDownload() (Screen, tea.Cmd) {
+	row, ok := s.selectedRow()
+	if !ok || row.Cached || row.Custom || !row.Downloadable || s.downloading {
+		return s, nil
+	}
+	s.downloading = true
+	pane := s.focus
+	deps := s.deps
+
+	return s, func() tea.Msg {
+		var err error
+		switch pane {
+		case paneReShade:
+			_, err = deps.Cache.EnsureReShade(context.Background(), row.reshadeVersion, row.reshadeAddon, nil)
+		case panePackages:
+			_, err = deps.Cache.EnsurePackage(context.Background(), row.pkg, nil)
+		case paneAddons:
+			err = ensureAddonAllArches(deps.Cache, row.addon)
+		}
+		if err != nil {
+			return resourceActionMsg{err: err}
+		}
+		return loadResources(deps)
+	}
+}
+
+// ensureAddonAllArches downloads whichever architectures an add-on
+// actually publishes, so it is ready for either kind of game regardless of
+// which one is later installed into. An add-on that only ships one
+// architecture-neutral build is fetched once, not duplicated per arch.
+func ensureAddonAllArches(c *cache.Cache, a catalog.Addon) error {
+	arches := []game.Arch{game.ArchX64}
+	if a.ArchSpecific() {
+		arches = append(arches, game.ArchX86)
+	}
+	tried := 0
+	var lastErr error
+	for _, arch := range arches {
+		if _, ok := a.SourceFor(arch); !ok {
+			continue
+		}
+		tried++
+		if _, err := c.EnsureAddon(context.Background(), a, arch, nil); err != nil {
+			lastErr = err
+		}
+	}
+	if tried == 0 {
+		return fmt.Errorf("add-on %s publishes nothing installable", a.ID)
+	}
+	return lastErr
+}
+
+// confirmDelete removes every cached entry for the highlighted item —
+// there can be more than one for a package or add-on (§4.2: package cache
+// keys carry a download date and content hash, so re-fetching an updated
+// branch keeps the old one around until it is cleaned up).
+func (s *ResourcesScreen) confirmDelete() (Screen, tea.Cmd) {
+	row, ok := s.selectedRow()
+	if !ok || !row.Cached || row.Custom {
+		return s, nil
+	}
+	pane := s.focus
+	deps := s.deps
+
+	detail := "Removes it from disk. It will be downloaded again if something needs it."
+	if row.InUse {
+		detail = "⚠ At least one recorded install still uses this — deleting it will not touch that install, " +
+			"but yarm would need to re-download it to update or reinstall from it later. " + detail
+	}
+
+	action := func() tea.Msg {
+		var prefix string
+		switch pane {
+		case paneReShade:
+			prefix = row.ID
+		case panePackages:
+			prefix = "package:" + row.ID + ":"
+		case paneAddons:
+			prefix = "addon:" + row.ID + ":"
+		}
+		entries, err := deps.Cache.List(cache.SortByName, false)
+		if err != nil {
+			return resourceActionMsg{err: err}
+		}
+		for _, e := range entries {
+			if e.ID != prefix && !strings.HasPrefix(e.ID, prefix) {
+				continue
+			}
+			if err := deps.Cache.Delete(e.ID); err != nil {
+				return resourceActionMsg{err: err}
+			}
+		}
+		return loadResources(deps)
+	}
+
+	return s, Confirm("Delete "+row.Name+"?", detail, action)
+}
+
+// startRefresh re-fetches a cached package, picking up any upstream
+// change even within the same day — only packages carry enough of their
+// own metadata (package.json) to do this without the live catalog.
+func (s *ResourcesScreen) startRefresh() (Screen, tea.Cmd) {
+	if s.focus != panePackages || s.refreshing {
+		return s, nil
+	}
+	row, ok := s.selectedRow()
+	if !ok || row.Custom || !row.Cached {
+		return s, nil
+	}
+	s.refreshing = true
+	deps := s.deps
+	pkg := row.pkg
+
+	return s, func() tea.Msg {
+		if _, err := deps.Cache.EnsurePackage(context.Background(), pkg, nil); err != nil {
+			return resourceActionMsg{err: fmt.Errorf("refresh %s: %w", pkg.Name, err)}
+		}
+		return loadResources(deps)
+	}
+}
+
+// View implements Screen.
+func (s *ResourcesScreen) View(env Env) string {
+	if s.loading {
+		return env.Styles.Faint.Render("loading catalog and cache data…")
+	}
+	if s.loadErr != "" && s.total == 0 {
+		return env.Styles.Bad.Render(s.loadErr)
+	}
+
+	header := "total: " + humanSize(s.total)
+	if s.freeErr == nil {
+		header += "   free: " + humanSize(s.free)
+	}
+	if s.downloading {
+		header += "   downloading…"
+	}
+	if s.refreshing {
+		header += "   refreshing…"
+	}
+
+	paneWidth := env.Width/int(paneCount) - 2
+	if paneWidth < 20 {
+		paneWidth = 20
+	}
+	height := env.Height - 5
+	if height < 5 {
+		height = 5
+	}
+
+	cols := make([]string, 0, paneCount)
+	for p := resourcePane(0); p < paneCount; p++ {
+		cols = append(cols, s.renderPane(p, paneWidth, height, env))
+	}
+
+	return env.Styles.Faint.Render(header) + "\n\n" + lipgloss.JoinHorizontal(lipgloss.Top, cols...)
+}
+
+func (s *ResourcesScreen) renderPane(p resourcePane, width, height int, env Env) string {
+	var b strings.Builder
+	if p == s.focus {
+		b.WriteString(env.Styles.Selected.Render("▸ " + p.label()))
+	} else {
+		b.WriteString(env.Styles.Subtitle.Render("  " + p.label()))
+	}
+	b.WriteString("\n")
+
+	rows := s.panes[p]
+	if len(rows) == 0 {
+		b.WriteString(env.Styles.Faint.Render("  (none)"))
+	}
+
+	cursor := s.cursors[p].Cursor()
+	visible := height - 1
+	start, end := scrollWindow(len(rows), cursor, visible)
+	for i := start; i < end; i++ {
+		b.WriteString(s.renderRow(rows[i], i == cursor && p == s.focus, width, env))
+		b.WriteString("\n")
+	}
+
+	return env.Styles.Panel.Width(width).Height(height).Render(b.String())
+}
+
+func (s *ResourcesScreen) renderRow(r resourceRow, selected bool, width int, env Env) string {
+	marker := "  "
+	switch {
+	case r.Custom:
+		marker = "★ "
+	case r.Cached:
+		marker = "✓ "
+	}
+
+	tags := make([]string, 0, 2)
+	switch {
+	case r.Custom:
+		tags = append(tags, "custom")
+	case r.Cached:
+		tags = append(tags, humanSize(r.Size))
+	default:
+		tags = append(tags, "not downloaded")
+	}
+	if r.InUse {
+		tags = append(tags, "in use")
+	}
+
+	tagsText := "  (" + strings.Join(tags, ", ") + ")"
+	nameWidth := width - 2 - lipgloss.Width(tagsText)
+	if nameWidth < 6 {
+		nameWidth = 6
+	}
+	line := marker + truncate(r.Name, nameWidth) + tagsText
+
+	switch {
+	case selected:
+		return env.Styles.Selected.Render(line)
+	case r.Custom:
+		return env.Styles.Accent.Render(line)
+	case r.Cached:
+		return env.Styles.Good.Render(line)
+	default:
+		return env.Styles.Faint.Render(line)
+	}
+}
+
+// humanSize formats a byte count for display.
+func humanSize(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+// scrollWindow returns the [start, end) slice of a height-sized list that
+// keeps cursor visible, centering it when the full list does not fit.
+func scrollWindow(count, cursor, height int) (start, end int) {
+	if height <= 0 {
+		return 0, 0
+	}
+	if count <= height {
+		return 0, count
+	}
+	if cursor < 0 {
+		cursor = 0
+	}
+	start = cursor - height/2
+	if start < 0 {
+		start = 0
+	}
+	if start+height > count {
+		start = count - height
+	}
+	return start, start + height
+}

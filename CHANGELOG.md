@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The cache manager (`c`) is replaced by a resources browser: three panes
+  (ReShade versions, effect packages/shaders, add-ons) that answer
+  "what's available", not just "what's cached" — the two used to be
+  separate questions (browse the catalog in the wizard vs. manage what's
+  on disk in the cache screen), and now they are one screen.
+  - The ReShade pane shows the 3 most recent catalog versions in both
+    flavors (6 rows), plus anything else still cached from outside that
+    window so it stays deletable rather than becoming invisible. Shaders
+    and add-ons show every catalog entry plus any custom-provided content
+    from `cache/custom`, each row marked cached (✓, green), custom (★, a
+    distinct color) or not yet downloaded (dim), with its size once
+    cached, and "in use" when any recorded install (any game) actually
+    references it — cross-referenced against `installs.json` directly, so
+    deleting something still in use asks for confirmation with an explicit
+    warning rather than doing it quietly.
+  - `←`/`→` (or `h`/`l`) move between panes, `↑`/`↓` within one, `d`
+    downloads the highlighted item ahead of any install (reusing the same
+    `cache.Ensure*` machinery the wizard already uses — an add-on
+    downloads whichever architectures it actually publishes, not a
+    duplicate fetch for an architecture-neutral one), `x` deletes it (with
+    confirmation), and `R` refreshes a cached package the same way the old
+    cache screen's "refresh" did.
+
 - `GameDetailScreen` now selects by folder, not by executable: ReShade's
   unit is the folder, so pressing `i`/`u`/`a` (renamed from `m`, see
   below) always acts on the current folder's one install, and there is

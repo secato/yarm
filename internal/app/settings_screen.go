@@ -101,7 +101,10 @@ func (s *SettingsScreen) dirty() bool {
 // settingsSaveBinding writes the working copy to config.yaml. Safe to
 // reuse "s" here: which screen is active decides what "s" means, and
 // while this screen is active it can only mean "save".
-var settingsSaveBinding = key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "save"))
+var (
+	settingsSaveBinding   = key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "save"))
+	settingsDeleteBinding = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete"))
+)
 
 // KeyBindings implements Screen.
 func (s *SettingsScreen) KeyBindings() []key.Binding {
@@ -109,7 +112,7 @@ func (s *SettingsScreen) KeyBindings() []key.Binding {
 	case modeEditText:
 		return []key.Binding{s.keys.Enter, s.keys.Back}
 	case modeManualGames:
-		return []key.Binding{s.keys.AddGame, cacheDeleteBinding, s.keys.Back}
+		return []key.Binding{s.keys.AddGame, settingsDeleteBinding, s.keys.Back}
 	default:
 		return []key.Binding{s.keys.Up, s.keys.Down, s.keys.Enter, settingsSaveBinding, s.keys.Back}
 	}
@@ -238,7 +241,7 @@ func (s *SettingsScreen) updateManualGames(km tea.KeyPressMsg) (Screen, tea.Cmd)
 		}
 	case key.Matches(km, s.keys.AddGame):
 		return s.startAddManualGame()
-	case key.Matches(km, cacheDeleteBinding):
+	case key.Matches(km, settingsDeleteBinding):
 		if s.cursor >= 0 && s.cursor < len(games) {
 			s.pending.ManualGames = append(games[:s.cursor:s.cursor], games[s.cursor+1:]...)
 			if s.cursor >= len(s.pending.ManualGames) {

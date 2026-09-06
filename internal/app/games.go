@@ -197,7 +197,7 @@ func (s *GamesScreen) handleKey(msg tea.KeyPressMsg, env Env) (Screen, tea.Cmd) 
 		return s, PushScreen(NewAddFolderScreen())
 
 	case key.Matches(msg, s.keys.Cache):
-		return s, PushScreen(NewCacheScreen(s.deps.Cache))
+		return s, PushScreen(NewResourcesScreen(s.deps))
 
 	case key.Matches(msg, s.keys.Custom):
 		return s, PushScreen(NewCustomScreen(s.deps.CustomDir))

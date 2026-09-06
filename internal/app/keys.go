@@ -40,7 +40,7 @@ func DefaultKeyMap() KeyMap {
 		Filter:  key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 		Rescan:  key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "rescan")),
 		AddGame: key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "add folder")),
-		Cache:   key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "cache")),
+		Cache:   key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "resources")),
 		Custom:  key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "custom")),
 		Setting: key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "settings")),
 		Help:    key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
