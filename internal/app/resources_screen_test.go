@@ -84,12 +84,12 @@ func TestResourcesScreenLoadsPanesFromCatalogAndCache(t *testing.T) {
 	if s.loading {
 		t.Fatal("loading should be false once everything has arrived")
 	}
-	// Only the top 3 versions, one row per flavor pane.
-	if got := len(s.panes[paneReShadeNormal]); got != 3 {
-		t.Errorf("ReShade (normal) rows = %d, want 3", got)
+	// The fixture's whole 4-version catalog fits under the top-10 cap.
+	if got := len(s.panes[paneReShadeNormal]); got != 4 {
+		t.Errorf("ReShade (normal) rows = %d, want 4", got)
 	}
-	if got := len(s.panes[paneReShadeAddon]); got != 3 {
-		t.Errorf("ReShade (addon) rows = %d, want 3", got)
+	if got := len(s.panes[paneReShadeAddon]); got != 4 {
+		t.Errorf("ReShade (addon) rows = %d, want 4", got)
 	}
 	if got := len(s.panes[panePackages]); got != 1 {
 		t.Fatalf("package rows = %d, want 1", got)

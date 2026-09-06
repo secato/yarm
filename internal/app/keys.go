@@ -27,7 +27,6 @@ type KeyMap struct {
 	Adopt     key.Binding // a: adopt an unmanaged install found on disk
 	Toggle    key.Binding // space: multi-select toggle
 	Flavor    key.Binding // tab: normal/addon flavor toggle
-	Overwrite key.Binding // o: allow replacing foreign files
 }
 
 // DefaultKeyMap returns the standard bindings.
@@ -53,7 +52,6 @@ func DefaultKeyMap() KeyMap {
 		Adopt:     key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "adopt ReShade")),
 		Toggle:    key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "toggle")),
 		Flavor:    key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "toggle flavor")),
-		Overwrite: key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "toggle overwrite")),
 	}
 }
 

@@ -396,8 +396,8 @@ func TestGamesScreenEditDirectlyFromList(t *testing.T) {
 	if !ok {
 		t.Fatalf("screen after 'e' from the list = %T, want *WizardScreen", m.Screen())
 	}
-	if got, ok := wiz.selectedExe(); !ok || got.Path != "Game/eldenring.exe" {
-		t.Errorf("wizard preselected %+v, want the actually-installed exe", got)
+	if got := wiz.exe.Path; got != "Game/eldenring.exe" {
+		t.Errorf("wizard targets %q, want the actually-installed exe", got)
 	}
 }
 

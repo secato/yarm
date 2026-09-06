@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The install wizard is restructured, cutting a 6-step flow down to what
+  the common case actually needs:
+  - The "Exe" step is gone — which executable (and folder) to target is
+    already resolved by whichever screen opened the wizard, so there was
+    nothing left to ask.
+  - The "API" (DLL) step is now conditional: skipped whenever the target
+    executable's guessed graphics API resolves a proxy DLL with
+    confidence (the common case), shown only when it can't (an unknown or
+    unsupported API) — the same way "Add-ons" was already skipped for the
+    normal flavor.
+  - "Packages" is renamed "Shaders", matching how the ReShade community
+    actually refers to them; the "cached" badge on each row is gone (the
+    user found it redundant) — a plain checklist of name and description.
+  - The version list is capped to the 10 most recent (was unbounded, ~40
+    entries) — editing an install whose recorded version has since aged
+    out of that window still finds it rather than silently jumping to
+    latest. The resources browser's ReShade panes are capped the same
+    way (was top 3).
+  - The version step now shows the resolved DLL inline (`DLL: dxgi.dll
+    (D3D10 / D3D11 / D3D12)`), so it is not a mystery even when its own
+    step gets skipped.
+  - Review is redesigned into clearly labeled sections (Folder, ReShade,
+    Shaders, Add-ons, To download, Options) instead of one
+    undifferentiated block, and "overwrite existing files" is now an
+    Options checklist entry toggled with space (up/down to reach it) —
+    the same interaction packages/add-ons already use — rather than its
+    own dedicated `o` key, a foundation for more options later. The
+    "files not created by yarm are left in place" disclaimer is now
+    styled as a warning (yellow) instead of plain faint gray.
+
 - The resources browser (`c`) is refined:
   - The ReShade pane is split into two — "ReShade (normal)" and "ReShade
     (addon)" — since the two flavors are separate downloads with

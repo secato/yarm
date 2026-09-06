@@ -237,8 +237,8 @@ func TestFolderLevelInstallTargetsTheActuallyInstalledExe(t *testing.T) {
 	if !ok {
 		t.Fatalf("pushed screen = %T, want *WizardScreen", push.screen)
 	}
-	if got, ok := wiz.selectedExe(); !ok || got.Path != "Control.exe" {
-		t.Errorf("wizard preselected %+v, want Control.exe (the one actually installed)", got)
+	if got := wiz.exe.Path; got != "Control.exe" {
+		t.Errorf("wizard targets %q, want Control.exe (the one actually installed)", got)
 	}
 }
 

@@ -2,12 +2,14 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/secato/yarm/internal/artifacts"
+	"github.com/secato/yarm/internal/catalog"
 	"github.com/secato/yarm/internal/game"
 	"github.com/secato/yarm/internal/install"
 	"github.com/secato/yarm/internal/state"
@@ -55,10 +57,12 @@ func pressSpecial(t *testing.T, s *WizardScreen, code rune) *WizardScreen {
 // loadWizard drives a freshly constructed wizard through Init so its
 // catalog-derived state (packages, addons, version/dll cursors) is
 // populated, exactly as the real Bubble Tea loop would before the user
-// can press anything.
+// can press anything. preselected indexes entry.PlayableExes(), matching
+// how a caller resolves a target executable before ever opening the
+// wizard — the wizard itself has no exe-picking step of its own.
 func loadWizard(t *testing.T, entry GameEntry, preselected int, deps Deps) *WizardScreen {
 	t.Helper()
-	s := NewWizardScreen(entry, preselected, deps)
+	s := NewWizardScreen(entry, entry.PlayableExes()[preselected], deps)
 	cmd := s.Init()
 	if cmd == nil {
 		t.Fatal("Init() returned a nil command; nothing would ever load")
@@ -136,32 +140,28 @@ func TestWizardEditingAdoptedInstallFallsBackToLatestVersion(t *testing.T) {
 	}
 }
 
-// The full forward path: Exe -> Version -> DLL -> Packages -> Addons ->
-// Review, ending with a Request that reflects every selection made along
-// the way.
+// The full forward path: Version -> DLL -> Shaders -> Add-ons -> Review,
+// ending with a Request that reflects every selection made along the way.
+// There is no Exe step: the target executable is fixed at construction.
 func TestWizardFullForwardFlowBuildsRequest(t *testing.T) {
 	s := loadWizard(t, sampleGameEntry(), 0, fakeDeps())
 
-	if s.step != stepExe {
-		t.Fatalf("step = %v, want stepExe", s.step)
+	if s.step != stepVersion {
+		t.Fatalf("step = %v, want stepVersion (no Exe step any more)", s.step)
 	}
 	s = press(t, s, 'k') // no-op, just exercise Up at the top
-	s = pressSpecial(t, s, tea.KeyEnter)
-	if s.step != stepVersion {
-		t.Fatalf("step = %v, want stepVersion", s.step)
-	}
 
-	s = pressSpecial(t, s, tea.KeyEnter) // accept the preselected (latest) version
-	if s.step != stepDLL {
-		t.Fatalf("step = %v, want stepDLL", s.step)
+	// D3D12 resolves to dxgi.dll with confidence, so the DLL step is
+	// skipped entirely — straight from Version to Shaders.
+	if !s.dllResolved() {
+		t.Fatal("setup: a D3D12 exe should resolve its DLL with confidence")
 	}
 	if got := s.selectedDLL(); got != "dxgi.dll" {
 		t.Fatalf("recommended DLL = %q, want dxgi.dll for a D3D12 exe", got)
 	}
-
-	s = pressSpecial(t, s, tea.KeyEnter)
+	s = pressSpecial(t, s, tea.KeyEnter) // accept the preselected (latest) version
 	if s.step != stepPackages {
-		t.Fatalf("step = %v, want stepPackages", s.step)
+		t.Fatalf("step = %v, want stepPackages (DLL skipped)", s.step)
 	}
 
 	// Select the second package (SweetFX) in addition to the preselected
@@ -240,8 +240,7 @@ func TestWizardNormalFlavorSkipsAddonsStep(t *testing.T) {
 		t.Fatalf("flavor = %q after tab, want normal", s.flavor)
 	}
 
-	s = pressSpecial(t, s, tea.KeyEnter) // -> DLL
-	s = pressSpecial(t, s, tea.KeyEnter) // -> Packages
+	s = pressSpecial(t, s, tea.KeyEnter) // -> Packages (DLL skipped: D3D12 resolves with confidence)
 	s = pressSpecial(t, s, tea.KeyEnter) // should skip Addons -> Review
 	if s.step != stepReview {
 		t.Fatalf("step = %v, want stepReview (Addons skipped)", s.step)
@@ -268,11 +267,12 @@ func TestWizardSwitchingToNormalDropsAddonsFromRequest(t *testing.T) {
 
 	// Step back to Version and switch to normal. The flavor is still
 	// addon while stepping back, so the immediate previous step is Addons
-	// itself, not Packages.
-	s, _ = pressEsc(t, s) // Review  -> Addons
-	s, _ = pressEsc(t, s) // Addons  -> Packages
-	s, _ = pressEsc(t, s) // Packages -> DLL
-	s, _ = pressEsc(t, s) // DLL     -> Version
+	// itself, not Packages. DLL is skipped in both directions here (a
+	// D3D12 exe resolves it with confidence), so Packages steps straight
+	// back to Version.
+	s, _ = pressEsc(t, s) // Review   -> Addons
+	s, _ = pressEsc(t, s) // Addons   -> Packages
+	s, _ = pressEsc(t, s) // Packages -> Version (DLL skipped)
 	if s.step != stepVersion {
 		t.Fatalf("step = %v, want stepVersion", s.step)
 	}
@@ -309,24 +309,30 @@ func TestWizardVersionStepWarnsAboutAddonAntiCheatRisk(t *testing.T) {
 	}
 }
 
-// HandleBack at the very first step must defer to the shell (pop back to
-// the game detail screen), not try to step further back.
+// HandleBack at the very first step (Version — there is no Exe step any
+// more) must defer to the shell (pop back to the game detail screen), not
+// try to step further back.
 func TestWizardBackAtFirstStepDefers(t *testing.T) {
 	s := loadWizard(t, sampleGameEntry(), 0, fakeDeps())
 	_, _, handled := s.HandleBack()
 	if handled {
-		t.Error("HandleBack() at stepExe should return handled=false")
+		t.Error("HandleBack() at stepVersion should return handled=false")
 	}
 }
 
-// The DLL step's recommendation follows the selected exe: an unsupported
-// API (Vulkan here) gets no safe recommendation and must fall back to
-// dxgi.dll while still letting the user pick freely.
+// The DLL step's recommendation follows the target exe: an unsupported
+// API (Vulkan here) gets no safe recommendation, so — unlike the D3D12
+// case — the step is not skipped; it falls back to dxgi.dll while still
+// letting the user pick freely.
 func TestWizardUnsupportedAPIStillOffersADLLChoice(t *testing.T) {
 	s := loadWizard(t, sampleGameEntry(), 1, fakeDeps()) // the Vulkan/x86 exe
-	s.step = stepExe
-	s = pressSpecial(t, s, tea.KeyEnter) // -> Version
-	s = pressSpecial(t, s, tea.KeyEnter) // -> DLL
+	if s.dllResolved() {
+		t.Fatal("setup: an unsupported API should not resolve a DLL with confidence")
+	}
+	s = pressSpecial(t, s, tea.KeyEnter) // -> DLL (not skipped)
+	if s.step != stepDLL {
+		t.Fatalf("step = %v, want stepDLL", s.step)
+	}
 
 	if got := s.selectedDLL(); got != "dxgi.dll" {
 		t.Errorf("fallback DLL = %q, want dxgi.dll", got)
@@ -337,12 +343,11 @@ func TestWizardUnsupportedAPIStillOffersADLLChoice(t *testing.T) {
 	}
 }
 
-// A user's manual DLL pick must survive a trip back to the exe step and
+// A user's manual DLL pick must survive a trip back to Version and
 // forward again, rather than being silently recomputed.
 func TestWizardManualDLLChoiceSurvivesRevisit(t *testing.T) {
-	s := loadWizard(t, sampleGameEntry(), 0, fakeDeps())
-	s = pressSpecial(t, s, tea.KeyEnter) // -> Version
-	s = pressSpecial(t, s, tea.KeyEnter) // -> DLL
+	s := loadWizard(t, sampleGameEntry(), 1, fakeDeps()) // Vulkan: DLL step is not skipped
+	s = pressSpecial(t, s, tea.KeyEnter)                 // -> DLL
 
 	s = press(t, s, 'j') // move off the recommendation
 	if got := s.selectedDLL(); got == "dxgi.dll" {
@@ -351,8 +356,6 @@ func TestWizardManualDLLChoiceSurvivesRevisit(t *testing.T) {
 	picked := s.selectedDLL()
 
 	s, _ = pressEsc(t, s)                // -> Version
-	s, _ = pressEsc(t, s)                // -> Exe
-	s = pressSpecial(t, s, tea.KeyEnter) // -> Version
 	s = pressSpecial(t, s, tea.KeyEnter) // -> DLL
 
 	if got := s.selectedDLL(); got != picked {
@@ -360,19 +363,21 @@ func TestWizardManualDLLChoiceSurvivesRevisit(t *testing.T) {
 	}
 }
 
+// The review's "overwrite" option is a checklist entry now, navigated
+// like shaders/add-ons (up/down, space) — not its own dedicated 'o' key.
 func TestWizardReviewOverwriteToggle(t *testing.T) {
 	s := loadWizard(t, sampleGameEntry(), 0, fakeDeps())
 	s.step = stepReview
-	if s.overwrite {
+	if s.overwrite() {
 		t.Fatal("overwrite should start off")
 	}
-	s = press(t, s, 'o')
-	if !s.overwrite {
-		t.Error("'o' should toggle overwrite on")
+	s = pressSpecial(t, s, ' ')
+	if !s.overwrite() {
+		t.Error("space should toggle overwrite on")
 	}
-	s = press(t, s, 'o')
-	if s.overwrite {
-		t.Error("'o' should toggle overwrite back off")
+	s = pressSpecial(t, s, ' ')
+	if s.overwrite() {
+		t.Error("space should toggle overwrite back off")
 	}
 }
 
@@ -410,11 +415,12 @@ func TestWizardReportsEmptyCatalog(t *testing.T) {
 
 // A catalog load failure should not crash the wizard; Async routes it
 // through the shell's error overlay instead, and the wizard's own state
-// stays sane (still on the exe step) so the user is not stuck.
+// stays sane (still on the version step) so the user is not stuck.
 func TestWizardCatalogLoadErrorDoesNotBreakWizard(t *testing.T) {
 	deps := fakeDeps()
 	deps.WizardData = fakeWizardData{err: errors.New("network unreachable")}
-	s := NewWizardScreen(sampleGameEntry(), 0, deps)
+	entry := sampleGameEntry()
+	s := NewWizardScreen(entry, entry.PlayableExes()[0], deps)
 
 	cmd := s.Init()
 	msg := cmd()
@@ -434,12 +440,12 @@ func TestWizardCatalogLoadErrorDoesNotBreakWizard(t *testing.T) {
 		t.Error("the follow-up command should report the error to the shell")
 	}
 	// ...but the wizard itself must not get stuck loading forever, and
-	// must remain usable (still on the exe step, not stranded).
+	// must remain usable (still on the version step, not stranded).
 	if s.loading {
 		t.Error("loading should be false once the (failed) load has been handled")
 	}
-	if s.step != stepExe {
-		t.Errorf("step = %v, want stepExe (still usable) after a load error", s.step)
+	if s.step != stepVersion {
+		t.Errorf("step = %v, want stepVersion (still usable) after a load error", s.step)
 	}
 }
 
@@ -491,5 +497,100 @@ func TestDescribeMissingNilCache(t *testing.T) {
 	want := []string{"ReShade 6.8.0 (addon)", "package standard-effects", "d3dcompiler_47.dll (~40 MB, once)"}
 	if len(got) != len(want) {
 		t.Fatalf("describeMissing(nil cache) = %v, want %v", got, want)
+	}
+}
+
+// The shaders step is labeled "Shaders" in the breadcrumb, matching how
+// the ReShade community refers to them — not "Packages".
+func TestWizardBreadcrumbLabelsShadersNotPackages(t *testing.T) {
+	s := loadWizard(t, sampleGameEntry(), 0, fakeDeps())
+	s.step = stepPackages
+	body := s.View(wizardEnv())
+	if !strings.Contains(body, "Shaders") {
+		t.Errorf("breadcrumb should say \"Shaders\":\n%s", body)
+	}
+	if strings.Contains(body, "Packages") {
+		t.Errorf("breadcrumb should not say \"Packages\":\n%s", body)
+	}
+}
+
+// A package/add-on row no longer shows a "cached" badge — the user found
+// it redundant. It should still show the item's name and description.
+func TestWizardMultiSelectOmitsCachedBadge(t *testing.T) {
+	s := loadWizard(t, sampleGameEntry(), 0, fakeDeps())
+	s.step = stepPackages
+	body := s.View(wizardEnv())
+	if strings.Contains(body, "cached") {
+		t.Errorf("the shaders list should not show a \"cached\" badge:\n%s", body)
+	}
+}
+
+// Version list is capped to the most recent 10; editing an install whose
+// recorded version has since aged out of that window must still be able
+// to find it, rather than silently defaulting to latest.
+func TestCapVersionsLimitsToTenAndKeepsEditedVersionVisible(t *testing.T) {
+	versions := make([]catalog.Version, 0, 15)
+	for i := 0; i < 15; i++ {
+		versions = append(versions, catalog.Version{Version: fmt.Sprintf("6.%d.0", 15-i)})
+	}
+
+	capped := capVersions(versions, "")
+	if len(capped) != 10 {
+		t.Fatalf("len(capped) = %d, want 10", len(capped))
+	}
+
+	// "6.1.0" (index 14) is well outside the top 10 by recency.
+	capped = capVersions(versions, "6.1.0")
+	found := false
+	for _, v := range capped {
+		if v.Version == "6.1.0" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("an edited install's version outside the top 10 should still be listed")
+	}
+	if len(capped) != 11 {
+		t.Errorf("len(capped) = %d, want 11 (10 + the appended existing version)", len(capped))
+	}
+}
+
+// The DLL step is skipped when the target exe's API resolves a proxy DLL
+// with confidence (D3D12 here), and shown when it does not (Vulkan).
+func TestWizardDLLResolvedSkipsStepWhenConfident(t *testing.T) {
+	confident := loadWizard(t, sampleGameEntry(), 0, fakeDeps()) // D3D12
+	if !confident.dllResolved() {
+		t.Error("a D3D12 exe should resolve its DLL with confidence")
+	}
+
+	unresolved := loadWizard(t, sampleGameEntry(), 1, fakeDeps()) // Vulkan
+	if unresolved.dllResolved() {
+		t.Error("an unsupported API should not resolve a DLL with confidence")
+	}
+}
+
+// The review screen shows well-distinct, labeled sections rather than one
+// undifferentiated block, and the "files not created by yarm" disclaimer
+// is styled as a warning (yellow), not the plain faint gray everything
+// else uses.
+func TestWizardReviewShowsDistinctSectionsAndYellowDisclaimer(t *testing.T) {
+	s := loadWizard(t, sampleGameEntry(), 0, fakeDeps())
+	s.step = stepReview
+	env := wizardEnv()
+	body := s.View(env)
+
+	for _, want := range []string{"Folder", "ReShade", "Shaders", "Add-ons", "Options"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("review should show a %q section:\n%s", want, body)
+		}
+	}
+
+	if s.overwrite() {
+		t.Fatal("setup: overwrite should start off")
+	}
+	const disclaimer = "Files not created by yarm are left in place unless overwrite is on."
+	wantStyled := env.Styles.Warn.Render(disclaimer)
+	if !strings.Contains(body, wantStyled) {
+		t.Errorf("the disclaimer should be styled as a warning (yellow), not plain faint text:\ngot:\n%s\nwant substring:\n%s", body, wantStyled)
 	}
 }

@@ -151,12 +151,12 @@ func buildReShadeRows(data WizardData, c *cache.Cache, entries []cache.Entry, in
 	return normal, addon
 }
 
-// reshadeVersionsToShow lists the top 3 catalog versions plus anything
+// reshadeVersionsToShow lists the top 10 catalog versions plus anything
 // else still cached outside that window — otherwise an older cached
 // version would become invisible and undeletable through this screen just
 // because a newer one shipped.
 func reshadeVersionsToShow(data WizardData, entries []cache.Entry) []string {
-	const shown = 3
+	const shown = 10
 	versions := make([]string, 0, shown)
 	seen := map[string]bool{}
 	top := data.Versions

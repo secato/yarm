@@ -174,16 +174,7 @@ func startInstallForGroup(entry GameEntry, grp FolderGroup, deps Deps) tea.Cmd {
 	if installed, ok := grp.installedExe(); ok {
 		target = installed
 	}
-	// The wizard's own exe step starts from PlayableExes(), so the
-	// preselection has to be an index into that list.
-	preselected := 0
-	for i, e := range entry.PlayableExes() {
-		if e.Path == target.Path {
-			preselected = i
-			break
-		}
-	}
-	return PushScreen(NewWizardScreen(entry, preselected, deps))
+	return PushScreen(NewWizardScreen(entry, target, deps))
 }
 
 // startUninstallForGroup confirms, then removes, the install covering
