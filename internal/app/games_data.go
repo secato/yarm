@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/secato/yarm/internal/game"
 	"github.com/secato/yarm/internal/install"
 	"github.com/secato/yarm/internal/platform"
@@ -135,6 +137,20 @@ func groupByFolder(root string, exes []Executable) []FolderGroup {
 // standing notice rather than one more fact among several.
 const anticheatWarning = "⚠ add-ons can trigger anti-cheat detection — avoid them in online or competitive games unless you know the game allows it"
 
+// writeAnticheatWarning renders the warning as its own block: a blank line
+// above and below, wrapped to width. Packed against the lines around it —
+// a list of executables above, a row of key hints below — a red sentence
+// reads as one more fact in the same block. The space is what makes it a
+// notice.
+func writeAnticheatWarning(b *strings.Builder, env Env, width int) {
+	if width < 20 {
+		width = 20
+	}
+	b.WriteString("\n")
+	b.WriteString(env.Styles.Bad.Render(wrap(anticheatWarning, width)))
+	b.WriteString("\n\n")
+}
+
 // groupIsAddon reports whether grp's install (or, if unmanaged, what was
 // found) is the add-on build — the condition for showing anticheatWarning.
 func groupIsAddon(grp FolderGroup) bool {
@@ -155,48 +171,45 @@ func groupIsAddon(grp FolderGroup) bool {
 // games list side panel says to open the detail screen first, the detail
 // screen itself just says to press the key. Shared so the wording (and
 // styling) of "what's installed" matches wherever it is shown.
-func reshadeStatusText(grp FolderGroup, env Env, hint string) string {
+func reshadeStatusText(grp FolderGroup, env Env, hint string, width int) string {
+	// Every line is clipped before it is styled, because the block is
+	// rendered inside a panel that wraps whatever does not fit — and a
+	// wrapped line reads as a second, half-empty fact.
+	line := func(style lipgloss.Style, text string) string {
+		return style.Render(clipTail(text, width)) + "\n"
+	}
+
 	var b strings.Builder
 	writeSectionHeader(&b, env, "ReShade", 0)
 
 	switch {
 	case grp.Installed != nil:
 		in := grp.Installed
-		b.WriteString(env.Styles.Good.Render(
-			fmt.Sprintf("  ✓ %s (%s)", in.ReShade.Version, in.ReShade.Flavor)))
-		b.WriteString("\n")
-		b.WriteString(env.Styles.Faint.Render("  " + dllWithCoverage(in.ReShade.DLL)))
-		b.WriteString("\n")
+		b.WriteString(line(env.Styles.Good, fmt.Sprintf("  ✓ %s (%s)", in.ReShade.Version, in.ReShade.Flavor)))
+		b.WriteString(line(env.Styles.Faint, "  "+dllWithCoverage(in.ReShade.DLL)))
 		if in.ReShade.Version == install.AdoptedVersion && grp.Runtime.Version != "" {
-			b.WriteString(env.Styles.Faint.Render("  last seen running: " + grp.Runtime.Version))
-			b.WriteString("\n")
+			b.WriteString(line(env.Styles.Faint, "  last seen running: "+grp.Runtime.Version))
 		}
 	case grp.Unmanaged != nil:
-		b.WriteString(env.Styles.Warn.Render("  ⚠ found, untracked"))
-		b.WriteString("\n")
-		b.WriteString(env.Styles.Faint.Render("  " + dllWithCoverage(grp.Unmanaged.DLLName)))
-		b.WriteString("\n")
+		b.WriteString(line(env.Styles.Warn, "  ⚠ found, untracked"))
+		b.WriteString(line(env.Styles.Faint, "  "+dllWithCoverage(grp.Unmanaged.DLLName)))
 		if grp.Runtime.Version != "" {
-			b.WriteString(env.Styles.Faint.Render("  last seen running: " + grp.Runtime.Version))
-			b.WriteString("\n")
+			b.WriteString(line(env.Styles.Faint, "  last seen running: "+grp.Runtime.Version))
 		}
 		if hint != "" {
-			b.WriteString(env.Styles.Accent.Render("  " + hint))
-			b.WriteString("\n")
+			b.WriteString(line(env.Styles.Accent, "  "+hint))
 		}
 	default:
-		b.WriteString(env.Styles.Faint.Render("  not installed"))
-		b.WriteString("\n")
+		b.WriteString(line(env.Styles.Faint, "  not installed"))
 	}
 
 	if grp.Installed != nil {
-		writeIndentedList(&b, env, "Shaders", grp.Installed.Packages)
-		writeIndentedList(&b, env, "Add-ons", grp.Installed.Addons)
+		writeIndentedList(&b, env, "Shaders", grp.Installed.Packages, width)
+		writeIndentedList(&b, env, "Add-ons", grp.Installed.Addons, width)
 	}
-	writeIndentedList(&b, env, "Enabled effects", grp.Runtime.ActiveTechniques)
+	writeIndentedList(&b, env, "Enabled effects", grp.Runtime.ActiveTechniques, width)
 	if n := len(grp.Runtime.AvailableEffects); n > 0 {
-		b.WriteString(env.Styles.Faint.Render(fmt.Sprintf("  %d effect file(s) available", n)))
-		b.WriteString("\n")
+		b.WriteString(line(env.Styles.Faint, fmt.Sprintf("  %d effect file(s) available", n)))
 	}
 
 	// The first section starts the block, so it does not get the blank
@@ -221,7 +234,7 @@ func dllWithCoverage(name string) string {
 // capped so a large preset or package selection cannot blow out the
 // panel — the remainder is summarized as "+N more" instead of listed.
 // Writes nothing when items is empty.
-func writeIndentedList(b *strings.Builder, env Env, label string, items []string) {
+func writeIndentedList(b *strings.Builder, env Env, label string, items []string, width int) {
 	if len(items) == 0 {
 		return
 	}
@@ -233,7 +246,7 @@ func writeIndentedList(b *strings.Builder, env Env, label string, items []string
 		shown = items[:max]
 	}
 	for _, it := range shown {
-		b.WriteString(env.Styles.Faint.Render("  " + it))
+		b.WriteString(env.Styles.Faint.Render(clipTail("  "+it, width)))
 		b.WriteString("\n")
 	}
 	if more := len(items) - len(shown); more > 0 {

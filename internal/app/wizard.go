@@ -960,9 +960,9 @@ func countSummary(m multiSelect, noun string) string {
 // it applies, and the keys.
 func (s *WizardScreen) viewFooter(env Env) string {
 	var b strings.Builder
-	b.WriteString("\n")
 	if s.flavor.Addon() {
-		b.WriteString(env.Styles.Bad.Render(wrap(anticheatWarning, env.Width-1)))
+		writeAnticheatWarning(&b, env, env.Width-1)
+	} else {
 		b.WriteString("\n")
 	}
 

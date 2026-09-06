@@ -166,7 +166,7 @@ func TestWriteReShadeStatusShowsRuntimeInfoAndListsPackages(t *testing.T) {
 		t.Fatalf("groups = %d, want 1", len(groups))
 	}
 
-	body := reshadeStatusText(groups[0], Env{Styles: NewStyles(true), Width: 100, Height: 30}, "hint")
+	body := reshadeStatusText(groups[0], Env{Styles: NewStyles(true), Width: 100, Height: 30}, "hint", 100)
 
 	if !strings.Contains(body, "last seen running: 6.8.0") {
 		t.Errorf("body should show the runtime-detected version:\n%s", body)
@@ -407,7 +407,7 @@ func TestReShadeStatusSeparatesItsSections(t *testing.T) {
 		Runtime: install.RuntimeInfo{ActiveTechniques: []string{"LumaSharpen"}},
 	}
 
-	body := reshadeStatusText(grp, Env{Styles: NewStyles(true), Width: 60}, "")
+	body := reshadeStatusText(grp, Env{Styles: NewStyles(true), Width: 60}, "", 60)
 	for _, want := range []string{"ReShade", "Shaders (2)", "Add-ons (1)", "Enabled effects (1)"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing section heading %q:\n%s", want, body)
@@ -424,5 +424,24 @@ func TestReShadeStatusSeparatesItsSections(t *testing.T) {
 	plain := NewStyles(true)
 	if strings.Contains(body, plain.Faint.Render("Shaders (2)")) {
 		t.Error("a section heading styled like its own items is not a heading")
+	}
+}
+
+// The add-on warning is a notice, not one more fact in the block above it:
+// it gets a blank line on either side wherever it appears.
+func TestAnticheatWarningIsItsOwnBlock(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("something above\n")
+	writeAnticheatWarning(&b, Env{Styles: NewStyles(true), Width: 80}, 79)
+
+	got := b.String()
+	if !strings.Contains(got, "above\n\n") {
+		t.Errorf("the warning needs a blank line above it:\n%q", got)
+	}
+	if !strings.HasSuffix(got, "\n\n") {
+		t.Errorf("the warning needs a blank line below it:\n%q", got)
+	}
+	if !strings.Contains(got, "anti-cheat detection") {
+		t.Errorf("wrapping lost the warning's point:\n%s", got)
 	}
 }

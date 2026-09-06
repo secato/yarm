@@ -390,9 +390,9 @@ func (s *GamesScreen) View(env Env) string {
 		return banner + left
 	}
 
-	detail := ""
+	detail, warned := "", false
 	if entry, ok := s.selected(); ok {
-		detail = s.renderDetail(entry, env)
+		detail, warned = s.renderDetail(entry, env)
 	}
 	// Match the table's height so the panel border frames the body rather
 	// than stopping wherever its text happens to end.
@@ -400,13 +400,21 @@ func (s *GamesScreen) View(env Env) string {
 	if panelHeight < 3 {
 		panelHeight = 3
 	}
+
+	// The add-on warning is appended after the body has been cut to fit,
+	// so it is the executables and effect lists that give way rather than
+	// the one line here that is about safety.
+	var warning strings.Builder
+	if warned {
+		writeAnticheatWarning(&warning, env, s.detailWidth-6)
+	}
 	// lipgloss.Height sets a minimum, not a maximum: a game with several
 	// folders full of executables would otherwise push the panel's own
 	// border off the bottom of the window.
 	panel := env.Styles.Panel.
 		Width(s.detailWidth - 2).
 		Height(panelHeight).
-		Render(clipLines(detail, panelHeight))
+		Render(clipLines(detail, panelHeight-countLines(warning.String())) + warning.String())
 
 	return banner + lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", panel)
 }
@@ -442,7 +450,7 @@ func (s *GamesScreen) welcomeBanner(env Env) string {
 	return b.String()
 }
 
-func (s *GamesScreen) renderDetail(e GameEntry, env Env) string {
+func (s *GamesScreen) renderDetail(e GameEntry, env Env) (body string, warned bool) {
 	var b strings.Builder
 	b.WriteString(env.Styles.Subtitle.Render(e.Name))
 	b.WriteString("\n")
@@ -479,7 +487,7 @@ func (s *GamesScreen) renderDetail(e GameEntry, env Env) string {
 				b.WriteString("\n")
 				indent = "  "
 			}
-			b.WriteString(indentLines(reshadeStatusText(grp, env, "press enter, then a to adopt it"), indent))
+			b.WriteString(indentLines(reshadeStatusText(grp, env, "press enter, then a to adopt it", s.detailWidth-6-len(indent)), indent))
 			var exes strings.Builder
 			writeSectionHeader(&exes, env, "Executables", grp.playableCount())
 			b.WriteString(indentLines(exes.String(), indent))
@@ -514,13 +522,17 @@ func (s *GamesScreen) renderDetail(e GameEntry, env Env) string {
 			// Last, below everything else in this folder's block: a real
 			// safety warning belongs at the bottom of the pane, not
 			// sandwiched between the ReShade status and the executables.
+			// The warning is returned separately rather than written
+			// here: the panel has a fixed height, and whatever is at the
+			// bottom of a too-long block is what gets clipped away. A
+			// safety notice must not be the part that gives way.
 			if groupIsAddon(grp) {
-				b.WriteString(indent + env.Styles.Bad.Render(anticheatWarning) + "\n")
+				warned = true
 			}
 		}
 	}
 
-	return b.String()
+	return b.String(), warned
 }
 
 // truncate shortens a string to width, marking the cut with an ellipsis.

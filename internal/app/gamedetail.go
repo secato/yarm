@@ -322,7 +322,7 @@ func (s *GameDetailScreen) writeGroup(b *strings.Builder, grp FolderGroup, i int
 		indent = "  "
 	}
 
-	b.WriteString(indentLines(reshadeStatusText(grp, env, "press a to adopt it"), indent))
+	b.WriteString(indentLines(reshadeStatusText(grp, env, "press a to adopt it", env.Width-1-len(indent)), indent))
 
 	stripPrefix := ""
 	if grp.Dir != "" {
@@ -358,7 +358,9 @@ func (s *GameDetailScreen) writeGroup(b *strings.Builder, grp FolderGroup, i int
 	// warning belongs at the bottom of the pane, not sandwiched between
 	// the ReShade status and the executables list.
 	if groupIsAddon(grp) {
-		b.WriteString(indent + env.Styles.Bad.Render(anticheatWarning) + "\n")
+		var warn strings.Builder
+		writeAnticheatWarning(&warn, env, env.Width-1-len(indent))
+		b.WriteString(indentLines(warn.String(), indent))
 	}
 }
 
