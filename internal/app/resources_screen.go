@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,11 +19,15 @@ import (
 	"github.com/secato/yarm/internal/state"
 )
 
-// resourcePane indexes ResourcesScreen's three panes.
+// resourcePane indexes ResourcesScreen's four panes. ReShade is split into
+// two — normal and add-on are separate downloads, so a version's cached
+// state differs per flavor — rather than one pane repeating "(normal)"/
+// "(addon)" on every row.
 type resourcePane int
 
 const (
-	paneReShade resourcePane = iota
+	paneReShadeNormal resourcePane = iota
+	paneReShadeAddon
 	panePackages
 	paneAddons
 	paneCount
@@ -30,8 +35,10 @@ const (
 
 func (p resourcePane) label() string {
 	switch p {
-	case paneReShade:
-		return "ReShade"
+	case paneReShadeNormal:
+		return "ReShade (normal)"
+	case paneReShadeAddon:
+		return "ReShade (addon)"
 	case panePackages:
 		return "Shaders"
 	case paneAddons:
@@ -110,14 +117,45 @@ func loadResources(deps Deps) resourcesLoadedMsg {
 	installs := reg.Installs()
 
 	var msg resourcesLoadedMsg
-	msg.panes[paneReShade] = buildReShadeRows(data, deps.Cache, entries, installs)
+	msg.panes[paneReShadeNormal], msg.panes[paneReShadeAddon] = buildReShadeRows(data, deps.Cache, entries, installs)
 	msg.panes[panePackages] = buildPackageRows(data, deps.Cache, entries, installs)
 	msg.panes[paneAddons] = buildAddonRows(data, deps.Cache, entries, installs)
+	for p := range msg.panes {
+		sortCachedFirst(msg.panes[p])
+	}
 	msg.total, msg.free, msg.freeErr = total, free, freeErr
 	return msg
 }
 
-func buildReShadeRows(data WizardData, c *cache.Cache, entries []cache.Entry, installs []state.GameInstall) []resourceRow {
+// sortCachedFirst orders rows so anything already on disk (cached or
+// custom — custom content is always Cached) comes before what still
+// needs downloading, preserving each group's original relative order.
+func sortCachedFirst(rows []resourceRow) {
+	sort.SliceStable(rows, func(i, j int) bool {
+		return rows[i].Cached && !rows[j].Cached
+	})
+}
+
+// buildReShadeRows returns one row per shown version for each flavor —
+// normal and add-on are separate downloads with independent cached state,
+// so they are two parallel lists (one per pane) rather than one list with
+// twice the rows.
+func buildReShadeRows(data WizardData, c *cache.Cache, entries []cache.Entry, installs []state.GameInstall) (normal, addon []resourceRow) {
+	versions := reshadeVersionsToShow(data, entries)
+	normal = make([]resourceRow, 0, len(versions))
+	addon = make([]resourceRow, 0, len(versions))
+	for _, version := range versions {
+		normal = append(normal, reshadeRow(version, false, c, entries, installs))
+		addon = append(addon, reshadeRow(version, true, c, entries, installs))
+	}
+	return normal, addon
+}
+
+// reshadeVersionsToShow lists the top 3 catalog versions plus anything
+// else still cached outside that window — otherwise an older cached
+// version would become invisible and undeletable through this screen just
+// because a newer one shipped.
+func reshadeVersionsToShow(data WizardData, entries []cache.Entry) []string {
 	const shown = 3
 	versions := make([]string, 0, shown)
 	seen := map[string]bool{}
@@ -129,9 +167,6 @@ func buildReShadeRows(data WizardData, c *cache.Cache, entries []cache.Entry, in
 		versions = append(versions, v.Version)
 		seen[v.Version] = true
 	}
-	// A version outside the top 3 but still cached must stay visible and
-	// manageable too — otherwise deleting it would require leaving this
-	// screen entirely.
 	for _, e := range entries {
 		if e.Kind != cache.KindReShade {
 			continue
@@ -143,34 +178,31 @@ func buildReShadeRows(data WizardData, c *cache.Cache, entries []cache.Entry, in
 		seen[parts[1]] = true
 		versions = append(versions, parts[1])
 	}
+	return versions
+}
 
-	rows := make([]resourceRow, 0, len(versions)*2)
-	for _, version := range versions {
-		for _, addon := range []bool{false, true} {
-			flavor := "normal"
-			if addon {
-				flavor = "addon"
-			}
-			id := "reshade:" + version + ":" + flavor
-			row := resourceRow{
-				ID:             id,
-				Name:           version + " (" + flavor + ")",
-				Downloadable:   true,
-				Cached:         c.HasReShade(version, addon),
-				InUse:          inUseReShade(installs, version, addon),
-				reshadeVersion: version,
-				reshadeAddon:   addon,
-			}
-			for _, e := range entries {
-				if e.ID == id {
-					row.Size, row.DownloadedAt = e.Size, e.DownloadedAt
-					break
-				}
-			}
-			rows = append(rows, row)
+func reshadeRow(version string, addon bool, c *cache.Cache, entries []cache.Entry, installs []state.GameInstall) resourceRow {
+	flavor := "normal"
+	if addon {
+		flavor = "addon"
+	}
+	id := "reshade:" + version + ":" + flavor
+	row := resourceRow{
+		ID:             id,
+		Name:           version,
+		Downloadable:   true,
+		Cached:         c.HasReShade(version, addon),
+		InUse:          inUseReShade(installs, version, addon),
+		reshadeVersion: version,
+		reshadeAddon:   addon,
+	}
+	for _, e := range entries {
+		if e.ID == id {
+			row.Size, row.DownloadedAt = e.Size, e.DownloadedAt
+			break
 		}
 	}
-	return rows
+	return row
 }
 
 func buildPackageRows(data WizardData, c *cache.Cache, entries []cache.Entry, installs []state.GameInstall) []resourceRow {
@@ -420,7 +452,7 @@ func (s *ResourcesScreen) startDownload() (Screen, tea.Cmd) {
 	return s, func() tea.Msg {
 		var err error
 		switch pane {
-		case paneReShade:
+		case paneReShadeNormal, paneReShadeAddon:
 			_, err = deps.Cache.EnsureReShade(context.Background(), row.reshadeVersion, row.reshadeAddon, nil)
 		case panePackages:
 			_, err = deps.Cache.EnsurePackage(context.Background(), row.pkg, nil)
@@ -481,7 +513,7 @@ func (s *ResourcesScreen) confirmDelete() (Screen, tea.Cmd) {
 	action := func() tea.Msg {
 		var prefix string
 		switch pane {
-		case paneReShade:
+		case paneReShadeNormal, paneReShadeAddon:
 			prefix = row.ID
 		case panePackages:
 			prefix = "package:" + row.ID + ":"
@@ -600,20 +632,25 @@ func (s *ResourcesScreen) renderRow(r resourceRow, selected bool, width int, env
 		marker = "✓ "
 	}
 
-	tags := make([]string, 0, 2)
+	// The marker and color already say cached/custom/not-yet — "not
+	// downloaded" text on every unfetched row was just repeating what the
+	// dimmed color already conveys. Only facts the color can't carry
+	// (size, custom, in use) get a tag.
+	var tags []string
 	switch {
 	case r.Custom:
 		tags = append(tags, "custom")
 	case r.Cached:
 		tags = append(tags, humanSize(r.Size))
-	default:
-		tags = append(tags, "not downloaded")
 	}
 	if r.InUse {
 		tags = append(tags, "in use")
 	}
 
-	tagsText := "  (" + strings.Join(tags, ", ") + ")"
+	tagsText := ""
+	if len(tags) > 0 {
+		tagsText = "  (" + strings.Join(tags, ", ") + ")"
+	}
 	nameWidth := width - 2 - lipgloss.Width(tagsText)
 	if nameWidth < 6 {
 		nameWidth = 6

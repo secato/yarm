@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The resources browser (`c`) is refined:
+  - The ReShade pane is split into two — "ReShade (normal)" and "ReShade
+    (addon)" — since the two flavors are separate downloads with
+    independent cached state; each now lists just the bare version number
+    instead of repeating "(normal)"/"(addon)" on every row.
+  - A row that has not been downloaded no longer prints a redundant "(not
+    downloaded)" tag — the dimmed color already says so. Cached, custom
+    and in-use rows still get their tag (size, "custom", "in use"), since
+    those are facts the color alone can't carry.
+  - Every pane now sorts cached (and custom) items first, so what's
+    already on disk doesn't get lost below a long list of what isn't.
+
 - The anti-cheat warning for the add-on build now shows once, at the very
   bottom of a folder's whole block (games list side panel and
   `GameDetailScreen` alike) — after its executables, not sandwiched

@@ -84,9 +84,12 @@ func TestResourcesScreenLoadsPanesFromCatalogAndCache(t *testing.T) {
 	if s.loading {
 		t.Fatal("loading should be false once everything has arrived")
 	}
-	// Only the top 3 versions, times 2 flavors each.
-	if got := len(s.panes[paneReShade]); got != 6 {
-		t.Errorf("ReShade rows = %d, want 6 (3 versions x 2 flavors)", got)
+	// Only the top 3 versions, one row per flavor pane.
+	if got := len(s.panes[paneReShadeNormal]); got != 3 {
+		t.Errorf("ReShade (normal) rows = %d, want 3", got)
+	}
+	if got := len(s.panes[paneReShadeAddon]); got != 3 {
+		t.Errorf("ReShade (addon) rows = %d, want 3", got)
 	}
 	if got := len(s.panes[panePackages]); got != 1 {
 		t.Fatalf("package rows = %d, want 1", got)
@@ -133,8 +136,8 @@ func TestResourcesScreenKeepsOlderCachedVersionVisible(t *testing.T) {
 	s := loadResourcesScreen(t, deps)
 
 	found := false
-	for _, r := range s.panes[paneReShade] {
-		if r.reshadeVersion == "6.5.0" && !r.reshadeAddon {
+	for _, r := range s.panes[paneReShadeNormal] {
+		if r.reshadeVersion == "6.5.0" {
 			found = true
 			if !r.Cached {
 				t.Error("6.5.0 (normal) should show as cached")
@@ -212,8 +215,8 @@ func TestResourcesScreenDeleteRemovesEntry(t *testing.T) {
 		t.Fatalf("EnsureReShade: %v", err)
 	}
 	s := loadResourcesScreen(t, deps)
-	s.focus = paneReShade
-	s.cursors[paneReShade].setCursor(0) // 6.8.0 (normal), the first row
+	s.focus = paneReShadeNormal
+	s.cursors[paneReShadeNormal].setCursor(0) // 6.8.0, the only cached (so sorted-first) row
 
 	_, cmd := s.Update(tea.KeyPressMsg{Code: 'x', Text: "x"}, wizardEnv())
 	if cmd == nil {
@@ -235,8 +238,8 @@ func TestResourcesScreenDeleteRemovesEntry(t *testing.T) {
 	next, _ := s.Update(result, wizardEnv())
 	s = next.(*ResourcesScreen)
 
-	for _, r := range s.panes[paneReShade] {
-		if r.reshadeVersion == "6.8.0" && !r.reshadeAddon && r.Cached {
+	for _, r := range s.panes[paneReShadeNormal] {
+		if r.reshadeVersion == "6.8.0" && r.Cached {
 			t.Error("6.8.0 (normal) should no longer show as cached")
 		}
 	}
@@ -246,7 +249,7 @@ func TestResourcesScreenDeleteRemovesEntry(t *testing.T) {
 func TestResourcesScreenRefreshOnlyForPackages(t *testing.T) {
 	deps, _ := resourcesTestDeps(t)
 	s := loadResourcesScreen(t, deps)
-	s.focus = paneReShade
+	s.focus = paneReShadeNormal
 
 	_, cmd := s.startRefresh()
 	if cmd != nil {
@@ -302,8 +305,8 @@ func TestResourcesScreenDetectsInUse(t *testing.T) {
 	s := loadResourcesScreen(t, deps)
 
 	foundReShade := false
-	for _, r := range s.panes[paneReShade] {
-		if r.reshadeVersion == "6.8.0" && !r.reshadeAddon {
+	for _, r := range s.panes[paneReShadeNormal] {
+		if r.reshadeVersion == "6.8.0" {
 			foundReShade = true
 			if !r.InUse {
 				t.Error("6.8.0 (normal) should show as in use")
@@ -323,15 +326,15 @@ func TestResourcesScreenPaneFocusWraps(t *testing.T) {
 	deps, _ := resourcesTestDeps(t)
 	s := loadResourcesScreen(t, deps)
 
-	if s.focus != paneReShade {
-		t.Fatalf("initial focus = %v, want paneReShade", s.focus)
+	if s.focus != paneReShadeNormal {
+		t.Fatalf("initial focus = %v, want paneReShadeNormal", s.focus)
 	}
 	s.Update(tea.KeyPressMsg{Code: 'h', Text: "h"}, wizardEnv())
 	if s.focus != paneAddons {
 		t.Errorf("left from the first pane should wrap to the last, got %v", s.focus)
 	}
 	s.Update(tea.KeyPressMsg{Code: 'l', Text: "l"}, wizardEnv())
-	if s.focus != paneReShade {
+	if s.focus != paneReShadeNormal {
 		t.Errorf("right from the last pane should wrap to the first, got %v", s.focus)
 	}
 }
@@ -360,5 +363,67 @@ func TestResourcesScreenRendersHeaderAndPanes(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q:\n%s", want, body)
 		}
+	}
+}
+
+// A row that has not been downloaded gets no status tag at all — the
+// dimmed color already says "not downloaded"; repeating it in text was
+// just noise. A cached, custom or in-use row still gets a tag, since
+// those facts are not something the color alone conveys.
+func TestRenderRowOmitsRedundantNotDownloadedTag(t *testing.T) {
+	env := Env{Styles: NewStyles(true), Width: 100, Height: 30}
+
+	notCached := resourceRow{Name: "SomePackage"}
+	line := (&ResourcesScreen{}).renderRow(notCached, false, 40, env)
+	if strings.Contains(line, "not downloaded") {
+		t.Errorf("an uncached row should not print a redundant tag:\n%s", line)
+	}
+
+	cached := resourceRow{Name: "SomePackage", Cached: true, Size: 1024}
+	line = (&ResourcesScreen{}).renderRow(cached, false, 40, env)
+	if !strings.Contains(line, "1.0 KiB") {
+		t.Errorf("a cached row should still show its size:\n%s", line)
+	}
+}
+
+func TestSortCachedFirstPreservesOrderWithinGroups(t *testing.T) {
+	rows := []resourceRow{
+		{ID: "a", Cached: false},
+		{ID: "b", Cached: true},
+		{ID: "c", Cached: false},
+		{ID: "d", Cached: true},
+	}
+	sortCachedFirst(rows)
+
+	want := []string{"b", "d", "a", "c"}
+	for i, id := range want {
+		if rows[i].ID != id {
+			t.Errorf("rows[%d].ID = %q, want %q (order = %v)", i, rows[i].ID, id, rowIDs(rows))
+		}
+	}
+}
+
+func rowIDs(rows []resourceRow) []string {
+	ids := make([]string, len(rows))
+	for i, r := range rows {
+		ids[i] = r.ID
+	}
+	return ids
+}
+
+// Loading must put cached (and custom) rows first in every pane.
+func TestResourcesScreenSortsCachedItemsFirst(t *testing.T) {
+	deps, _ := resourcesTestDeps(t)
+	if _, err := deps.Cache.EnsureReShade(context.Background(), "6.7.2", true, nil); err != nil {
+		t.Fatalf("EnsureReShade: %v", err)
+	}
+	s := loadResourcesScreen(t, deps)
+
+	rows := s.panes[paneReShadeAddon]
+	if !rows[0].Cached {
+		t.Errorf("the first ReShade (addon) row should be the cached one, got %+v", rows[0])
+	}
+	if rows[0].reshadeVersion != "6.7.2" {
+		t.Errorf("expected 6.7.2 first, got %s", rows[0].reshadeVersion)
 	}
 }
