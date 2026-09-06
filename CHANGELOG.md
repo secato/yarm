@@ -46,6 +46,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The edit summary is a dashboard: each section is a pane listing what is
+  actually in it (every selected shader and add-on by name, the version and
+  build, the DLL and what it covers), with the changed sections marked and
+  an Apply line stating the diff. It also surfaces two things only this
+  screen is placed to notice: that a newer ReShade exists, and that a
+  recorded package is no longer in the catalog — which applying would
+  otherwise silently drop.
+- The games list's detail panel separates its sections: a blank line and a
+  real heading with a count (`Shaders (3)`) before each, instead of a faint
+  label butted against the previous list in the same gray as its own items.
+  The ReShade status is a section like the rest, and the panel lists four
+  executables before summarizing the remainder, so the anti-cheat warning
+  is not what a short panel clips.
+
 - Editing an existing install (`e`) opens a summary of what is installed —
   ReShade, API, Shaders, Add-ons, each with its current value — instead of
   re-walking the five-step wizard. Enter opens one section; enter or esc
@@ -140,6 +154,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `space` rather than its own `o` key.
 
 ### Fixed
+
+- Panel boxes are sized from measured lipgloss behavior rather than
+  assumption: `Width(w)` renders a box exactly `w` columns wide with `w-4`
+  of text, and `Height(h)` makes it exactly `h` rows tall. The wizard's
+  version panes were four columns narrower than intended and clipped their
+  rows two columns too late, so a long row wrapped and broke the box open.
 
 - Resources browser panes no longer break their own boxes open: rows were
   clipped to the pane's outer width, ignoring the four columns its border

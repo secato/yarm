@@ -64,6 +64,19 @@ func (g FolderGroup) primaryExe() Executable {
 // currently highlighted in a table (ReShade applies to the whole folder,
 // so any of its executables might be highlighted when the user asks to
 // update or uninstall it).
+// playableCount is how many of a folder's executables are actually
+// offered — the skipped ones (uninstallers, redistributables) are not
+// something ReShade would ever attach to.
+func (g FolderGroup) playableCount() int {
+	n := 0
+	for _, e := range g.Exes {
+		if !e.Skipped {
+			n++
+		}
+	}
+	return n
+}
+
 func (g FolderGroup) installedExe() (Executable, bool) {
 	if g.Installed == nil {
 		return Executable{}, false
@@ -144,45 +157,51 @@ func groupIsAddon(grp FolderGroup) bool {
 // styling) of "what's installed" matches wherever it is shown.
 func reshadeStatusText(grp FolderGroup, env Env, hint string) string {
 	var b strings.Builder
+	writeSectionHeader(&b, env, "ReShade", 0)
 
 	switch {
 	case grp.Installed != nil:
 		in := grp.Installed
-		b.WriteString("ReShade - ")
 		b.WriteString(env.Styles.Good.Render(
-			fmt.Sprintf("✓ %s (%s) — %s", in.ReShade.Version, in.ReShade.Flavor, dllWithCoverage(in.ReShade.DLL))))
+			fmt.Sprintf("  ✓ %s (%s)", in.ReShade.Version, in.ReShade.Flavor)))
+		b.WriteString("\n")
+		b.WriteString(env.Styles.Faint.Render("  " + dllWithCoverage(in.ReShade.DLL)))
 		b.WriteString("\n")
 		if in.ReShade.Version == install.AdoptedVersion && grp.Runtime.Version != "" {
-			b.WriteString(env.Styles.Faint.Render("last seen running: " + grp.Runtime.Version))
+			b.WriteString(env.Styles.Faint.Render("  last seen running: " + grp.Runtime.Version))
 			b.WriteString("\n")
 		}
-		writeIndentedList(&b, env, "packages", in.Packages)
-		writeIndentedList(&b, env, "add-ons", in.Addons)
 	case grp.Unmanaged != nil:
-		b.WriteString("ReShade - ")
-		b.WriteString(env.Styles.Warn.Render("⚠ found, untracked (" + dllWithCoverage(grp.Unmanaged.DLLName) + ")"))
+		b.WriteString(env.Styles.Warn.Render("  ⚠ found, untracked"))
+		b.WriteString("\n")
+		b.WriteString(env.Styles.Faint.Render("  " + dllWithCoverage(grp.Unmanaged.DLLName)))
 		b.WriteString("\n")
 		if grp.Runtime.Version != "" {
-			b.WriteString(env.Styles.Faint.Render("last seen running: " + grp.Runtime.Version))
+			b.WriteString(env.Styles.Faint.Render("  last seen running: " + grp.Runtime.Version))
+			b.WriteString("\n")
+		}
+		if hint != "" {
+			b.WriteString(env.Styles.Accent.Render("  " + hint))
 			b.WriteString("\n")
 		}
 	default:
-		b.WriteString("ReShade - ")
-		b.WriteString(env.Styles.Faint.Render("not installed"))
+		b.WriteString(env.Styles.Faint.Render("  not installed"))
 		b.WriteString("\n")
 	}
 
-	writeIndentedList(&b, env, "enabled", grp.Runtime.ActiveTechniques)
+	if grp.Installed != nil {
+		writeIndentedList(&b, env, "Shaders", grp.Installed.Packages)
+		writeIndentedList(&b, env, "Add-ons", grp.Installed.Addons)
+	}
+	writeIndentedList(&b, env, "Enabled effects", grp.Runtime.ActiveTechniques)
 	if n := len(grp.Runtime.AvailableEffects); n > 0 {
-		b.WriteString(env.Styles.Faint.Render(fmt.Sprintf("available: %d effect file(s)", n)))
+		b.WriteString(env.Styles.Faint.Render(fmt.Sprintf("  %d effect file(s) available", n)))
 		b.WriteString("\n")
 	}
 
-	if grp.Unmanaged != nil && hint != "" {
-		b.WriteString(env.Styles.Faint.Render(hint))
-		b.WriteString("\n")
-	}
-	return b.String()
+	// The first section starts the block, so it does not get the blank
+	// line that separates one section from the last.
+	return strings.TrimPrefix(b.String(), "\n")
 }
 
 // dllWithCoverage appends which graphics APIs a proxy DLL name covers
@@ -208,8 +227,7 @@ func writeIndentedList(b *strings.Builder, env Env, label string, items []string
 	}
 	const max = 8
 
-	b.WriteString(env.Styles.Faint.Render(label + ":"))
-	b.WriteString("\n")
+	writeSectionHeader(b, env, label, len(items))
 	shown := items
 	if len(items) > max {
 		shown = items[:max]
@@ -222,6 +240,20 @@ func writeIndentedList(b *strings.Builder, env Env, label string, items []string
 		b.WriteString(env.Styles.Faint.Render(fmt.Sprintf("  +%d more", more)))
 		b.WriteString("\n")
 	}
+}
+
+// writeSectionHeader starts a section of the "what is in this folder"
+// block: a blank line, then the title in the heading style with its count.
+// Before this, every section title was the same faint gray as its own
+// items and butted straight up against the previous section, so the block
+// read as one long list of facts rather than as four groups of them.
+func writeSectionHeader(b *strings.Builder, env Env, title string, count int) {
+	b.WriteString("\n")
+	if count > 0 {
+		title = fmt.Sprintf("%s (%d)", title, count)
+	}
+	b.WriteString(env.Styles.Subtitle.Render(title))
+	b.WriteString("\n")
 }
 
 // apiLabel renders a guessed graphics API as the friendlier label shown in

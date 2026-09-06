@@ -1109,7 +1109,7 @@ func (s *WizardScreen) versionPane(flavor install.Flavor, width, height int, env
 	// Styles.Panel spends four columns on border and padding, and lipgloss
 	// wraps what does not fit rather than clipping it, which would break
 	// the box open.
-	panel := env.Styles.Panel.Width(width - 4)
+	panel := env.Styles.Panel.Width(width)
 	if !focused {
 		panel = panel.BorderForeground(env.Styles.Faint.GetForeground())
 	}
@@ -1403,40 +1403,278 @@ func (s *WizardScreen) conflictAdvice(blocking bool) string {
 	}
 }
 
-// viewHub is the edit-mode summary: every section, what is in it now, and
-// what changing it would change. It exists because editing an install is
-// not the same shape as making one — adding a single shader should not
-// mean re-confirming four answers that are already right.
+// viewHub is the edit-mode summary. Editing is the one screen where
+// everything about an install is already known, so it shows it: each
+// section as a pane listing what is actually in it, rather than a column
+// of labels with a truncated value beside each. The panes are also the
+// navigation — ←/→ or ↑/↓ moves between them, enter opens one.
 func (s *WizardScreen) viewHub(b *strings.Builder, env Env, height int) {
 	rows := s.hubSections()
+	// The last row is Apply, which is a line under the panes rather than a
+	// pane of its own: it is an action, not a thing with contents.
+	panes := rows[:len(rows)-1]
+	applyFocused := s.hubCursor.Cursor() == len(rows)-1
+
+	apply := s.applyLine(env, applyFocused)
+
+	const gutter = 2
+	const minPaneWidth = 22
+	if env.Width < len(panes)*(minPaneWidth+gutter) {
+		s.viewHubCompact(b, env, height-countLines(apply), rows)
+		b.WriteString(apply)
+		return
+	}
+
+	paneWidth := env.Width/len(panes) - gutter
+
+	// Boxes are as tall as their contents, not as tall as the window: an
+	// install with three shaders should not draw twenty empty rows to
+	// prove there is room for more. The tallest pane sets the height so
+	// the row of boxes still lines up.
+	content := 0
+	for _, step := range panes {
+		if n := len(s.hubLines(step, env, paneWidth-4)); n > content {
+			content = n
+		}
+	}
+	// Measured: Panel.Height(h) makes a box exactly h rows tall in total,
+	// so the content budget is h minus the two border rows.
+	paneHeight := content + 1 + 2 // content + the pane's header + borders
+	if max := height - countLines(apply) - 1; paneHeight > max {
+		paneHeight = max
+	}
+	if paneHeight < 5 {
+		paneHeight = 5
+	}
+
+	cols := make([]string, 0, len(panes)*2)
+	for i, step := range panes {
+		if i > 0 {
+			cols = append(cols, strings.Repeat(" ", gutter))
+		}
+		cols = append(cols, s.hubPane(step, paneWidth, paneHeight, env, i == s.hubCursor.Cursor()))
+	}
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, cols...))
+	b.WriteString("\n\n")
+	b.WriteString(apply)
+}
+
+// hubPane draws one section as a box listing what is in it.
+func (s *WizardScreen) hubPane(step wizardStep, width, height int, env Env, focused bool) string {
+	inner := width - 4
+	if inner < 8 {
+		inner = 8
+	}
+
+	var b strings.Builder
+	header := step.label()
+	if s.sectionChanged(step) {
+		// A dot rather than the word "changed": the Apply line already
+		// spells out what changed, and this only has to say where.
+		header += " •"
+	}
+	if focused {
+		b.WriteString(env.Styles.Selected.Render(clipTail("▸ "+header, inner)))
+	} else {
+		b.WriteString(env.Styles.Subtitle.Render(clipTail("  "+header, inner)))
+	}
+	b.WriteString("\n")
+
+	lines := s.hubLines(step, env, inner)
+	// -2 for the border rows, -1 for the header; one more goes when
+	// something has to say what was cut.
+	room := height - 3
+	if len(lines) > room {
+		room--
+		lines = append(lines[:room], env.Styles.Faint.Render(
+			fmt.Sprintf("  +%d more", len(lines)-room)))
+	}
+	for _, line := range lines {
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+
+	// Measured, not assumed: Styles.Panel.Width(w) renders a box exactly w
+	// columns wide, of which w-4 is text — two for the border, two for the
+	// padding.
+	panel := env.Styles.Panel.Width(width).Height(height)
+	if !focused {
+		panel = panel.BorderForeground(env.Styles.Faint.GetForeground())
+	}
+	return panel.Render(strings.TrimSuffix(b.String(), "\n"))
+}
+
+// hubLines is what one section's pane lists: the state of the install, in
+// that section's own terms.
+func (s *WizardScreen) hubLines(step wizardStep, env Env, width int) []string {
+	// Each line is clipped before it is styled: a pane that wraps is a
+	// pane whose border no longer closes.
+	plain := func(text string) string { return clipTail("  "+text, width) }
+	faint := func(text string) string { return env.Styles.Faint.Render(plain(text)) }
+
+	switch step {
+	case stepReShade:
+		v, _ := s.selectedVersion()
+		lines := []string{plain(v.Version), faint(string(s.flavor) + " build")}
+		// An update the user has not noticed is exactly the thing a
+		// summary of an existing install should surface.
+		if latest, ok := s.latestVersion(); ok && latest != v.Version {
+			lines = append(lines, env.Styles.Accent.Render(plain(latest+" available")))
+		}
+		return lines
+
+	case stepAPI:
+		lines := []string{plain(s.selectedDLL())}
+		if i := s.dllCursor.Cursor(); i >= 0 && i < len(dllOptions) {
+			lines = append(lines, faint(dllOptions[i].For))
+		}
+		if s.exe.API.Supported() {
+			lines = append(lines, faint("detected "+apiLabel(s.exe.API)))
+		}
+		return lines
+
+	case stepShaders:
+		lines := s.hubSelectionLines(s.packages, env, "no shaders selected", width)
+		return append(lines, s.hubOrphanLines(s.existingPackages(), s.packages, env, width)...)
+
+	case stepAddons:
+		lines := s.hubSelectionLines(s.addons, env, "no add-ons selected", width)
+		return append(lines, s.hubOrphanLines(s.existingAddons(), s.addons, env, width)...)
+	}
+	return nil
+}
+
+// hubSelectionLines lists what is checked in one of the multi-selects,
+// which is the whole point of showing panes rather than a count.
+func (s *WizardScreen) hubSelectionLines(m multiSelect, env Env, empty string, width int) []string {
+	var lines []string
+	for _, it := range m.items {
+		if !it.Header && m.selected[it.ID] {
+			lines = append(lines, clipTail("  "+it.Name, width))
+		}
+	}
+	if len(lines) == 0 {
+		return []string{env.Styles.Faint.Render(clipTail("  "+empty, width))}
+	}
+	return lines
+}
+
+// hubOrphanLines names anything the recorded install uses that the loaded
+// catalog has no entry for — upstream dropped it, renamed it, or the
+// catalog is a partial offline copy. Without this the row simply is not
+// there, and applying would quietly remove a package the user still has,
+// with only a "-1 shader" on the Apply line to hint at it.
+func (s *WizardScreen) hubOrphanLines(recorded []string, m multiSelect, env Env, width int) []string {
+	known := make(map[string]bool, len(m.items))
+	for _, it := range m.items {
+		known[it.ID] = true
+	}
+
+	var out []string
+	for _, id := range recorded {
+		if !known[id] {
+			out = append(out, env.Styles.Warn.Render(clipTail("  "+id+" — not in catalog", width)))
+		}
+	}
+	return out
+}
+
+// existingPackages and existingAddons are what the recorded install used,
+// or nothing when this is a fresh install.
+func (s *WizardScreen) existingPackages() []string {
+	if s.existing == nil {
+		return nil
+	}
+	return s.existing.Packages
+}
+
+func (s *WizardScreen) existingAddons() []string {
+	if s.existing == nil {
+		return nil
+	}
+	return s.existing.Addons
+}
+
+// applyLine is the action under the panes: what applying would change, or
+// that it would change nothing.
+func (s *WizardScreen) applyLine(env Env, focused bool) string {
 	changes := s.changes()
+	text := "Apply — no changes yet; this would reinstall the same files"
+	if len(changes) > 0 {
+		text = "Apply — " + strings.Join(changes, ", ")
+	}
 
-	// The label column is fixed so the values line up into a column of
-	// their own; that is what makes the summary scannable rather than a
-	// list of sentences.
+	marker := "  "
+	if focused {
+		marker = "▸ "
+	}
+	line := clipTail(marker+text, env.Width)
+	switch {
+	case focused:
+		line = env.Styles.Selected.Render(line)
+	case len(changes) == 0:
+		line = env.Styles.Faint.Render(line)
+	default:
+		line = env.Styles.Accent.Render(line)
+	}
+	return line + "\n"
+}
+
+// viewHubCompact is the narrow fallback: one line per section, the same
+// content the panes carry with the listing dropped to a count.
+func (s *WizardScreen) viewHubCompact(b *strings.Builder, env Env, height int, rows []wizardStep) {
 	const labelWidth = 10
+	sections := rows[:len(rows)-1]
 
-	writeWindow(b, env, len(rows), s.hubCursor.Cursor(), height, "", func(i int) {
-		step := rows[i]
+	writeWindow(b, env, len(sections), s.hubCursor.Cursor(), height, "", func(i int) {
+		step := sections[i]
 		marker := "  "
 		if i == s.hubCursor.Cursor() {
 			marker = "▸ "
 		}
-
-		label, value := step.label(), s.hubValue(step, changes)
-		if step == stepReview {
-			label = "Apply"
+		label := step.label()
+		if s.sectionChanged(step) {
+			label += " •"
 		}
-		line := fmt.Sprintf("%s%-*s %s", marker, labelWidth, label, value)
-		line = clipTail(line, env.Width)
+		line := clipTail(fmt.Sprintf("%s%-*s %s", marker, labelWidth, label, s.hubValue(step, nil)), env.Width)
 		if i == s.hubCursor.Cursor() {
 			line = env.Styles.Selected.Render(line)
-		} else if step == stepReview && len(changes) == 0 {
-			line = env.Styles.Faint.Render(line)
 		}
 		b.WriteString(line)
 		b.WriteString("\n")
 	})
+	b.WriteString("\n")
+}
+
+// latestVersion returns the version the catalog marks as latest.
+func (s *WizardScreen) latestVersion() (string, bool) {
+	for _, v := range s.data.Versions {
+		if v.Latest {
+			return v.Version, true
+		}
+	}
+	return "", false
+}
+
+// sectionChanged reports whether one section differs from the install
+// already recorded, so its pane can say where a change is without the
+// reader having to compare the Apply line against four panes.
+func (s *WizardScreen) sectionChanged(step wizardStep) bool {
+	if s.existing == nil {
+		return false
+	}
+	switch step {
+	case stepReShade:
+		v, ok := s.selectedVersion()
+		return (ok && v.Version != s.existing.ReShade.Version) || string(s.flavor) != s.existing.ReShade.Flavor
+	case stepAPI:
+		return s.selectedDLL() != s.existing.ReShade.DLL
+	case stepShaders:
+		return countDiff(s.existing.Packages, s.packages.selectedIDs()) != ""
+	case stepAddons:
+		return countDiff(s.existing.Addons, addonsForDownload(s.flavor, s.addons)) != ""
+	}
+	return false
 }
 
 // hubValue is what one summary row shows to the right of its label.

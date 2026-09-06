@@ -332,7 +332,9 @@ func (s *GameDetailScreen) writeGroup(b *strings.Builder, grp FolderGroup, i int
 	// whole folder either way — so a folder with a dozen of them lists the
 	// first few and counts the rest rather than filling the window.
 	const maxExes = 6
-	b.WriteString(indent + "Executables\n")
+	var head strings.Builder
+	writeSectionHeader(&head, env, "Executables", grp.playableCount())
+	b.WriteString(indentLines(head.String(), indent))
 	shown := 0
 	hidden := 0
 	for _, e := range grp.Exes {
@@ -370,7 +372,11 @@ func indentLines(s, prefix string) string {
 	}
 	lines := strings.Split(strings.TrimSuffix(s, "\n"), "\n")
 	for i, line := range lines {
-		lines[i] = prefix + line
+		// A blank line stays blank: indenting it would leave trailing
+		// spaces that show up as a stripe under a highlighted row.
+		if line != "" {
+			lines[i] = prefix + line
+		}
 	}
 	return strings.Join(lines, "\n") + "\n"
 }

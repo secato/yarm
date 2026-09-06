@@ -480,19 +480,36 @@ func (s *GamesScreen) renderDetail(e GameEntry, env Env) string {
 				indent = "  "
 			}
 			b.WriteString(indentLines(reshadeStatusText(grp, env, "press enter, then a to adopt it"), indent))
-			b.WriteString(indent + "Executables\n")
+			var exes strings.Builder
+			writeSectionHeader(&exes, env, "Executables", grp.playableCount())
+			b.WriteString(indentLines(exes.String(), indent))
 			stripPrefix := ""
 			if grp.Dir != "" {
 				stripPrefix = grp.Dir + "/"
 			}
+			// Executables are context — ReShade covers the whole folder
+			// either way — and they are what the panel's clip would eat
+			// the anti-cheat warning to make room for. A few, then a
+			// count, the way the detail screen already does it.
+			const maxExes = 4
+			shown, hidden := 0, 0
 			for _, ex := range grp.Exes {
 				if ex.Skipped {
 					continue
 				}
+				if shown >= maxExes {
+					hidden++
+					continue
+				}
+				shown++
 				name := strings.TrimPrefix(ex.Path, stripPrefix)
 				b.WriteString(indent + "  " + truncate(name, s.detailWidth-8) + "\n")
 				b.WriteString(env.Styles.Faint.Render(
 					indent+fmt.Sprintf("    %s · %s", ex.Arch, apiLabel(ex.API))) + "\n")
+			}
+			if hidden > 0 {
+				b.WriteString(env.Styles.Faint.Render(
+					indent+fmt.Sprintf("  +%d more", hidden)) + "\n")
 			}
 			// Last, below everything else in this folder's block: a real
 			// safety warning belongs at the bottom of the pane, not

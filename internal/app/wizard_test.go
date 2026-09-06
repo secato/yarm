@@ -1333,8 +1333,13 @@ func TestEditingOpensOnASummaryOfWhatIsInstalled(t *testing.T) {
 	if s.step != stepHub {
 		t.Fatalf("step = %v, want the summary", s.step)
 	}
+	// Each section is a pane listing what is actually in it, not a label
+	// with a truncated value beside it.
 	body := s.View(wizardEnv())
-	for _, want := range []string{"Editing install", "ReShade", "6.7.3 (normal)", "dxgi.dll", "Standard effects"} {
+	for _, want := range []string{
+		"Editing install", "ReShade", "6.7.3", "normal build",
+		"API", "dxgi.dll", "Shaders", "Standard effects", "SweetFX by CeeJay.dk",
+	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the summary should show %q:\n%s", want, body)
 		}
@@ -1458,5 +1463,73 @@ func TestEditingFitsNarrowTerminals(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// The summary has a whole screen to work with, so it lists what is in
+// each section rather than counting it — and marks the sections that
+// differ from what is recorded, so a change is visible where it happened.
+func TestEditingSummaryListsSelectionsInPanes(t *testing.T) {
+	s := editWizard(t, "standard-effects", "sweetfx-by-ceejay-dk")
+
+	body := s.View(Env{Styles: NewStyles(true), Width: 100, Height: 26})
+	for _, want := range []string{"Standard effects", "SweetFX by CeeJay.dk"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the shaders pane should list %q rather than count it:\n%s", want, body)
+		}
+	}
+	if !strings.Contains(body, "╭") {
+		t.Errorf("sections should be drawn as panes:\n%s", body)
+	}
+
+	// A section that differs from the recorded install is marked.
+	if s.sectionChanged(stepShaders) {
+		t.Error("nothing has changed yet")
+	}
+	s = openSection(t, s, stepShaders)
+	s = pressSpecial(t, s, tea.KeyDown)
+	s = pressSpecial(t, s, tea.KeySpace)
+	s = pressSpecial(t, s, tea.KeyEnter)
+	if !s.sectionChanged(stepShaders) || s.sectionChanged(stepAPI) {
+		t.Error("only the section that changed should be marked")
+	}
+	if !strings.Contains(s.View(Env{Styles: NewStyles(true), Width: 100, Height: 26}), "Shaders •") {
+		t.Error("a changed section should be marked in its pane header")
+	}
+}
+
+// An install running an older build is the thing a summary of an existing
+// install is best placed to point out.
+func TestEditingSummarySurfacesAnAvailableUpdate(t *testing.T) {
+	s := editWizard(t) // recorded at 6.7.3; the catalog's latest is 6.8.0
+
+	if !strings.Contains(s.View(Env{Styles: NewStyles(true), Width: 100, Height: 26}), "6.8.0 available") {
+		t.Error("the ReShade pane should say a newer version exists")
+	}
+}
+
+// A recorded install can name a package the loaded catalog no longer has —
+// dropped upstream, renamed, or a partial offline copy. The row would
+// simply not exist, and applying would quietly remove it, so the summary
+// says so instead.
+func TestEditingSummaryNamesPackagesTheCatalogNoLongerHas(t *testing.T) {
+	s := editWizard(t, "standard-effects", "some-pack-that-vanished")
+
+	// Asserted on the pane's own lines: at 100 columns a pane is 25 wide,
+	// so the rendered row is clipped, and what matters is that the line
+	// exists at all.
+	var found bool
+	for _, line := range s.hubLines(stepShaders, wizardEnv(), 80) {
+		if strings.Contains(line, "some-pack-that-vanished") && strings.Contains(line, "not in catalog") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the shaders pane should name what it cannot account for: %v",
+			s.hubLines(stepShaders, wizardEnv(), 80))
+	}
+	// And applying would indeed drop it, which the Apply line must admit.
+	if got := s.changes(); len(got) != 1 || got[0] != "-1 shader" {
+		t.Errorf("changes() = %v, want the vanished package counted as a removal", got)
 	}
 }

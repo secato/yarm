@@ -177,7 +177,7 @@ func TestWriteReShadeStatusShowsRuntimeInfoAndListsPackages(t *testing.T) {
 	// Styled output interleaves ANSI codes between lines, so this checks
 	// each line landed rather than one exact multi-line substring, and
 	// that they were not comma-joined onto a single line instead.
-	for _, want := range []string{"packages:", "standard-effects", "sweetfx-by-ceejay-dk"} {
+	for _, want := range []string{"Shaders (2)", "standard-effects", "sweetfx-by-ceejay-dk"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q:\n%s", want, body)
 		}
@@ -390,5 +390,39 @@ func TestInstallKeyRedirectsToAdoptWhenUnmanaged(t *testing.T) {
 	confirm, ok := msg.overlay.(confirmOverlay)
 	if !ok || !strings.Contains(confirm.question, "Adopt") {
 		t.Errorf("overlay = %+v, want an \"Adopt\" confirm dialog", msg.overlay)
+	}
+}
+
+// The "what is in this folder" block is four groups of facts, not one long
+// list: each section gets a blank line before it and a heading in the
+// heading style, since a faint label above faint items reads as more items.
+func TestReShadeStatusSeparatesItsSections(t *testing.T) {
+	grp := FolderGroup{
+		Dir: "Game",
+		Installed: &state.Install{
+			ReShade:  state.ReShadeInfo{Version: "6.8.0", Flavor: "normal", DLL: "dxgi.dll"},
+			Packages: []string{"standard-effects", "sweetfx-by-ceejay-dk"},
+			Addons:   []string{"shadertoggler-by-otis-inf"},
+		},
+		Runtime: install.RuntimeInfo{ActiveTechniques: []string{"LumaSharpen"}},
+	}
+
+	body := reshadeStatusText(grp, Env{Styles: NewStyles(true), Width: 60}, "")
+	for _, want := range []string{"ReShade", "Shaders (2)", "Add-ons (1)", "Enabled effects (1)"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing section heading %q:\n%s", want, body)
+		}
+	}
+	// A blank line before each section but the first.
+	if got := strings.Count(body, "\n\n"); got != 3 {
+		t.Errorf("found %d section breaks, want 3 (one before each of the last three):\n%q", got, body)
+	}
+	if strings.HasPrefix(body, "\n") {
+		t.Errorf("the block should not open with a blank line:\n%q", body)
+	}
+	// Headings must not be the same faint style as the items under them.
+	plain := NewStyles(true)
+	if strings.Contains(body, plain.Faint.Render("Shaders (2)")) {
+		t.Error("a section heading styled like its own items is not a heading")
 	}
 }
