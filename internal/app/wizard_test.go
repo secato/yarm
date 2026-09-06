@@ -82,6 +82,9 @@ func loadWizard(t *testing.T, entry GameEntry, preselected int, deps Deps) *Wiza
 // rather than looping forever if the step is skipped for this build.
 func advance(t *testing.T, s *WizardScreen, step wizardStep) *WizardScreen {
 	t.Helper()
+	if s.editing {
+		return openSection(t, s, step)
+	}
 	for i := 0; i <= len(wizardSteps); i++ {
 		if s.step == step {
 			return s
@@ -89,6 +92,24 @@ func advance(t *testing.T, s *WizardScreen, step wizardStep) *WizardScreen {
 		s = pressSpecial(t, s, tea.KeyEnter)
 	}
 	t.Fatalf("step %v was never reached (stuck on %v)", step, s.step)
+	return s
+}
+
+// openSection opens one section from the edit-mode summary, which is how
+// every step is reached when an install already exists.
+func openSection(t *testing.T, s *WizardScreen, step wizardStep) *WizardScreen {
+	t.Helper()
+	if s.step != stepHub {
+		s, _ = pressEsc(t, s)
+	}
+	for i, row := range s.hubSections() {
+		if row != step {
+			continue
+		}
+		s.hubCursor.setCursor(i)
+		return pressSpecial(t, s, tea.KeyEnter)
+	}
+	t.Fatalf("section %v is not offered by this summary (%v)", step, s.hubSections())
 	return s
 }
 
@@ -174,8 +195,8 @@ func TestWizardEditingExistingInstallPreselectsWhatIsThere(t *testing.T) {
 	if !s.packages.selected["sweetfx-by-ceejay-dk"] {
 		t.Error("the existing install's package should be preselected")
 	}
-	if got := s.Title(); !strings.Contains(got, "update ReShade") {
-		t.Errorf("Title() = %q, want it to say \"update\" while editing an existing install", got)
+	if got := s.Title(); !strings.Contains(got, "edit install") {
+		t.Errorf("Title() = %q, want it to say it is editing an existing install", got)
 	}
 }
 
@@ -1285,5 +1306,157 @@ func TestWizardReShadeStepDrawsEachBuildInItsOwnBox(t *testing.T) {
 	}
 	if borders != 2 {
 		t.Errorf("expected two panel boxes on the ReShade step, found %d:\n%s", borders, body)
+	}
+}
+
+// editWizard loads a wizard over a folder that already has an install.
+func editWizard(t *testing.T, packages ...string) *WizardScreen {
+	t.Helper()
+	if packages == nil {
+		packages = []string{"standard-effects", "sweetfx-by-ceejay-dk"}
+	}
+	entry := sampleGameEntry()
+	entry.Exes[0].Installed = &state.Install{
+		Exe:      "Game/emberhollow.exe",
+		ReShade:  state.ReShadeInfo{Version: "6.7.3", Flavor: "normal", DLL: "dxgi.dll"},
+		Packages: packages,
+	}
+	return loadWizard(t, entry, 0, fakeDeps())
+}
+
+// Editing an install opens on a summary of what is installed, not on step
+// one of five: adding a shader should not mean re-confirming four answers
+// that are already right.
+func TestEditingOpensOnASummaryOfWhatIsInstalled(t *testing.T) {
+	s := editWizard(t)
+
+	if s.step != stepHub {
+		t.Fatalf("step = %v, want the summary", s.step)
+	}
+	body := s.View(wizardEnv())
+	for _, want := range []string{"Editing install", "ReShade", "6.7.3 (normal)", "dxgi.dll", "Standard effects"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the summary should show %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "1 ReShade › 2 API") {
+		t.Errorf("editing is not a numbered walk, so it has no breadcrumb:\n%s", body)
+	}
+}
+
+// Opening one section, changing it, and pressing enter comes back to the
+// summary rather than marching on through the remaining steps.
+func TestEditingASectionReturnsToTheSummary(t *testing.T) {
+	s := openSection(t, editWizard(t), stepShaders)
+	if s.step != stepShaders {
+		t.Fatalf("step = %v, want the shaders list", s.step)
+	}
+
+	s = pressSpecial(t, s, tea.KeyDown)
+	s = pressSpecial(t, s, tea.KeySpace)
+	s = pressSpecial(t, s, tea.KeyEnter)
+
+	if s.step != stepHub {
+		t.Fatalf("step after enter = %v, want back at the summary", s.step)
+	}
+	// And esc from a section does the same, rather than stepping to an
+	// earlier question in an order the user never walked.
+	s = openSection(t, s, stepAPI)
+	s, handled := pressEsc(t, s)
+	if !handled || s.step != stepHub {
+		t.Errorf("esc from a section: handled=%v step=%v, want back at the summary", handled, s.step)
+	}
+}
+
+// The summary says what applying would actually change, so "apply" is
+// never a blind commit.
+func TestEditingSummaryShowsWhatWouldChange(t *testing.T) {
+	s := editWizard(t)
+	if !strings.Contains(s.View(wizardEnv()), "no changes") {
+		t.Errorf("an untouched install has no changes to report:\n%s", s.View(wizardEnv()))
+	}
+
+	// Drop a shader.
+	s = openSection(t, s, stepShaders)
+	s = pressSpecial(t, s, tea.KeyDown)
+	s = pressSpecial(t, s, tea.KeySpace)
+	s = pressSpecial(t, s, tea.KeyEnter)
+	if got := s.changes(); len(got) != 1 || got[0] != "-1 shader" {
+		t.Errorf("changes() = %v, want one removed shader", got)
+	}
+
+	// And a different version, from the other build.
+	s = openSection(t, s, stepReShade)
+	s = pressSpecial(t, s, tea.KeyRight)
+	s = pressSpecial(t, s, tea.KeyUp)
+	s = pressSpecial(t, s, tea.KeyEnter)
+
+	body := s.View(wizardEnv())
+	for _, want := range []string{"6.7.3 → 6.8.0", "addon build", "-1 shader"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the summary should report %q:\n%s", want, body)
+		}
+	}
+}
+
+// Switching to the add-on build while editing makes the add-ons section
+// appear, since that build is the only one that can load them.
+func TestEditingSummaryGainsAddonsWithTheAddonBuild(t *testing.T) {
+	s := editWizard(t)
+	if slices.Contains(s.hubSections(), stepAddons) {
+		t.Fatal("the normal build cannot load add-ons, so the section should be absent")
+	}
+
+	s = openSection(t, s, stepReShade)
+	s = pressSpecial(t, s, tea.KeyRight)
+	s = pressSpecial(t, s, tea.KeyEnter)
+
+	if !slices.Contains(s.hubSections(), stepAddons) {
+		t.Errorf("sections = %v, want add-ons once the add-on build is chosen", s.hubSections())
+	}
+}
+
+// Esc at the summary leaves the wizard, the way esc at step one does when
+// installing.
+func TestEditingEscAtTheSummaryLeaves(t *testing.T) {
+	if _, handled := pressEsc(t, editWizard(t)); handled {
+		t.Error("esc at the summary should fall through and pop the screen")
+	}
+}
+
+// A fresh install is still the linear walk: there is nothing to summarize
+// and every answer has to be given once.
+func TestFreshInstallStillWalksTheSteps(t *testing.T) {
+	s := loadWizard(t, sampleGameEntry(), 0, fakeDeps())
+	if s.editing || s.step != stepReShade {
+		t.Fatalf("a fresh install starts at step %v (editing=%v), want the ReShade step", s.step, s.editing)
+	}
+	if s := pressSpecial(t, s, tea.KeyEnter); s.step != stepAPI {
+		t.Errorf("enter went to %v, want the next step", s.step)
+	}
+}
+
+// The summary is a list like any other and must not overflow a small
+// terminal, and neither must a section reached from it.
+func TestEditingFitsNarrowTerminals(t *testing.T) {
+	for _, size := range []struct{ width, height int }{{80, 21}, {60, 21}, {44, 21}} {
+		for _, step := range []wizardStep{stepHub, stepReShade, stepAPI, stepShaders, stepReview} {
+			s := editWizard(t)
+			if step != stepHub {
+				s = openSection(t, s, step)
+			}
+			env := Env{Styles: NewStyles(true), Width: size.width, Height: size.height}
+			body := s.View(env)
+			if got := countLines(body); got > env.Height {
+				t.Errorf("%dx%d, %v: rendered %d lines into %d:\n%s",
+					size.width, size.height, step, got, env.Height, body)
+			}
+			for _, line := range strings.Split(body, "\n") {
+				if lipgloss.Width(line) > size.width {
+					t.Errorf("%dx%d, %v: line is %d columns wide:\n%q",
+						size.width, size.height, step, lipgloss.Width(line), line)
+				}
+			}
+		}
 	}
 }

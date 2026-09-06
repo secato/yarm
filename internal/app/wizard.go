@@ -34,6 +34,11 @@ const (
 	stepShaders
 	stepAddons
 	stepReview
+	// stepHub is the edit-mode landing page: every section with what is
+	// currently installed in it, each openable on its own. Declared after
+	// the linear steps so their breadcrumb numbering is unaffected —
+	// editing does not use the breadcrumb at all.
+	stepHub
 )
 
 // wizardSteps is every step in order, for the breadcrumb.
@@ -52,6 +57,8 @@ func (s wizardStep) label() string {
 		return "Add-ons"
 	case stepReview:
 		return "Review"
+	case stepHub:
+		return "Summary"
 	default:
 		return "?"
 	}
@@ -124,7 +131,14 @@ type WizardScreen struct {
 	// switch build does not silently reset everything else.
 	existing *state.Install
 
-	step    wizardStep
+	step wizardStep
+	// editing turns the linear five-step walk into a hub: an install that
+	// already exists is usually being adjusted in one place, and making
+	// someone re-confirm four unchanged answers to add one shader is the
+	// wrong shape for that.
+	editing   bool
+	hubCursor cursorList
+
 	loading bool
 	loadErr string
 	data    WizardData
@@ -168,8 +182,15 @@ func NewWizardScreen(entry GameEntry, exe Executable, deps Deps) *WizardScreen {
 		flavor = install.FlavorAddon
 	}
 
+	step := stepReShade
+	if existing != nil {
+		step = stepHub
+	}
+
 	return &WizardScreen{
 		keys:     DefaultKeyMap(),
+		step:     step,
+		editing:  existing != nil,
 		entry:    entry,
 		exe:      exe,
 		deps:     deps,
@@ -221,6 +242,12 @@ func (s *WizardScreen) verb() string {
 
 // Title implements Screen.
 func (s *WizardScreen) Title() string {
+	if s.editing {
+		if s.step == stepHub {
+			return "edit install"
+		}
+		return "edit install — " + s.step.label()
+	}
 	return fmt.Sprintf("%s ReShade — %d %s", s.verb(), s.stepNumber(s.step), s.step.label())
 }
 
@@ -230,6 +257,8 @@ func (s *WizardScreen) stepNumber(step wizardStep) int { return int(step) + 1 }
 // KeyBindings implements Screen.
 func (s *WizardScreen) KeyBindings() []key.Binding {
 	switch s.step {
+	case stepHub:
+		return []key.Binding{s.keys.Up, s.keys.Down, s.keys.Enter, s.keys.Back}
 	case stepReShade:
 		return []key.Binding{s.keys.Up, s.keys.Down, wizardPaneLeft, wizardPaneRight, s.keys.Enter, s.keys.Back}
 	case stepShaders, stepAddons:
@@ -248,12 +277,46 @@ func (s *WizardScreen) KeyBindings() []key.Binding {
 // HandleBack implements backHandler: step back a page rather than leaving
 // the wizard outright, except from the first page.
 func (s *WizardScreen) HandleBack() (Screen, tea.Cmd, bool) {
+	if s.editing {
+		// Editing is random access, so back always means "back to the
+		// summary" — never a step backwards through an order the user
+		// never walked.
+		if s.step == stepHub {
+			return s, nil, false
+		}
+		s.step = stepHub
+		return s, nil, true
+	}
 	if s.step == stepReShade {
 		return s, nil, false
 	}
 	s.step = s.prevStep(s.step)
 	return s, nil, true
 }
+
+// afterStep is where enter goes from a section: the next question when
+// installing, and back to the summary when editing.
+func (s *WizardScreen) afterStep(from wizardStep) wizardStep {
+	if s.editing {
+		return stepHub
+	}
+	return s.nextStep(from)
+}
+
+// hubSections lists the summary's rows, in order. Add-ons only appear for
+// a build that can load them, and Review is last because it is the one row
+// that leaves the summary rather than returning to it.
+func (s *WizardScreen) hubSections() []wizardStep {
+	rows := []wizardStep{stepReShade, stepAPI, stepShaders}
+	if s.flavor.Addon() {
+		rows = append(rows, stepAddons)
+	}
+	return append(rows, stepReview)
+}
+
+// syncHub re-clamps the summary cursor after the row list can have
+// changed, which is any time the build changed.
+func (s *WizardScreen) syncHub() { s.hubCursor.setCount(len(s.hubSections())) }
 
 // prevStep steps backward, skipping Add-ons when the build cannot load
 // them.
@@ -309,6 +372,10 @@ func (s *WizardScreen) Update(msg tea.Msg, env Env) (Screen, tea.Cmd) {
 		s.refreshLists()
 		s.versionCursor = newCursorList(len(s.data.Versions), versionIndex)
 		s.dllCursor = newCursorList(len(dllOptions), s.recommendedDLLIndex())
+		// The summary's rows depend on the build, which is only settled
+		// once the recorded install (or the configured default) has been
+		// applied above.
+		s.syncHub()
 
 		switch {
 		case msg.err != nil:
@@ -574,6 +641,8 @@ func (s *WizardScreen) cached(version string, flavor install.Flavor) bool {
 
 func (s *WizardScreen) handleKey(msg tea.KeyPressMsg, env Env) (Screen, tea.Cmd) {
 	switch s.step {
+	case stepHub:
+		return s.handleHubKey(msg)
 	case stepReShade:
 		return s.handleReShadeKey(msg)
 	case stepAPI:
@@ -588,6 +657,21 @@ func (s *WizardScreen) handleKey(msg tea.KeyPressMsg, env Env) (Screen, tea.Cmd)
 	return s, nil
 }
 
+func (s *WizardScreen) handleHubKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
+	switch {
+	case key.Matches(msg, s.keys.Up):
+		s.hubCursor.up()
+	case key.Matches(msg, s.keys.Down):
+		s.hubCursor.down()
+	case key.Matches(msg, s.keys.Enter):
+		rows := s.hubSections()
+		if i := s.hubCursor.Cursor(); i >= 0 && i < len(rows) {
+			s.step = rows[i]
+		}
+	}
+	return s, nil
+}
+
 func (s *WizardScreen) handleReShadeKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 	switch {
 	case key.Matches(msg, s.keys.Up):
@@ -596,11 +680,13 @@ func (s *WizardScreen) handleReShadeKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		s.versionCursor.down()
 	case key.Matches(msg, wizardPaneLeft):
 		s.flavor = install.FlavorNormal
+		s.syncHub()
 	case key.Matches(msg, wizardPaneRight):
 		s.flavor = install.FlavorAddon
+		s.syncHub()
 	case key.Matches(msg, s.keys.Enter):
 		if _, ok := s.selectedVersion(); ok {
-			s.step = s.nextStep(s.step)
+			s.step = s.afterStep(s.step)
 		}
 	}
 	return s, nil
@@ -614,7 +700,7 @@ func (s *WizardScreen) handleAPIKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		s.dllCursor.down()
 	case key.Matches(msg, s.keys.Enter):
 		if s.selectedDLL() != "" {
-			s.step = s.nextStep(s.step)
+			s.step = s.afterStep(s.step)
 		}
 	}
 	return s, nil
@@ -643,7 +729,7 @@ func (s *WizardScreen) handleMultiSelectKey(msg tea.KeyPressMsg, m *multiSelect,
 		s.showAll = !s.showAll
 		s.refreshLists()
 	case key.Matches(msg, s.keys.Enter):
-		s.step = s.nextStep(current)
+		s.step = s.afterStep(current)
 	}
 	return s, nil
 }
@@ -739,6 +825,8 @@ func (s *WizardScreen) View(env Env) string {
 	var b strings.Builder
 	b.WriteString(head)
 	switch s.step {
+	case stepHub:
+		s.viewHub(&b, env, body)
 	case stepReShade:
 		s.viewReShade(&b, env, body)
 	case stepAPI:
@@ -759,6 +847,22 @@ func (s *WizardScreen) View(env Env) string {
 // being bearable — what the earlier steps already decided.
 func (s *WizardScreen) viewHeader(env Env) string {
 	var b strings.Builder
+	if s.editing {
+		// No breadcrumb: there is no numbered walk to be partway through.
+		// What matters is which section is open, and that closing it goes
+		// back to the summary rather than onwards.
+		// Clipped before styling: clipTail counts runes, and a styled
+		// string's runes are mostly escape sequences.
+		trail := "Editing install"
+		if s.step != stepHub {
+			trail += " › " + s.step.label()
+		}
+		b.WriteString(env.Styles.Accent.Render(clipTail(trail, env.Width)))
+		b.WriteString("\n")
+		b.WriteString(env.Styles.Faint.Render(truncate(s.folder(), env.Width-1)))
+		b.WriteString("\n\n")
+		return b.String()
+	}
 	b.WriteString(s.breadcrumb(env))
 	b.WriteString("\n")
 	b.WriteString(env.Styles.Faint.Render(truncate(s.folder(), env.Width-1)))
@@ -864,6 +968,9 @@ func (s *WizardScreen) viewFooter(env Env) string {
 
 	action, hint := "enter continues", ""
 	switch s.step {
+	case stepHub:
+		action = "enter opens"
+		hint = "↑↓ move · esc leaves"
 	case stepReShade:
 		hint = "↑↓ version · ←→ normal/addon"
 	case stepAPI:
@@ -874,7 +981,16 @@ func (s *WizardScreen) viewFooter(env Env) string {
 		action = "enter " + s.verb()
 		hint = "↑↓ move · space toggles"
 	}
-	if s.step > stepReShade {
+	switch {
+	case s.editing && s.step != stepHub:
+		// Both keys do the same thing here, and saying so is better than
+		// implying that one of them discards.
+		action = "enter done"
+		hint += " · esc back"
+		if s.step == stepReview {
+			action = "enter " + s.verb()
+		}
+	case !s.editing && s.step > stepReShade:
 		hint += " · esc back"
 	}
 
@@ -1285,4 +1401,152 @@ func (s *WizardScreen) conflictAdvice(blocking bool) string {
 	default:
 		return ""
 	}
+}
+
+// viewHub is the edit-mode summary: every section, what is in it now, and
+// what changing it would change. It exists because editing an install is
+// not the same shape as making one — adding a single shader should not
+// mean re-confirming four answers that are already right.
+func (s *WizardScreen) viewHub(b *strings.Builder, env Env, height int) {
+	rows := s.hubSections()
+	changes := s.changes()
+
+	// The label column is fixed so the values line up into a column of
+	// their own; that is what makes the summary scannable rather than a
+	// list of sentences.
+	const labelWidth = 10
+
+	writeWindow(b, env, len(rows), s.hubCursor.Cursor(), height, "", func(i int) {
+		step := rows[i]
+		marker := "  "
+		if i == s.hubCursor.Cursor() {
+			marker = "▸ "
+		}
+
+		label, value := step.label(), s.hubValue(step, changes)
+		if step == stepReview {
+			label = "Apply"
+		}
+		line := fmt.Sprintf("%s%-*s %s", marker, labelWidth, label, value)
+		line = clipTail(line, env.Width)
+		if i == s.hubCursor.Cursor() {
+			line = env.Styles.Selected.Render(line)
+		} else if step == stepReview && len(changes) == 0 {
+			line = env.Styles.Faint.Render(line)
+		}
+		b.WriteString(line)
+		b.WriteString("\n")
+	})
+}
+
+// hubValue is what one summary row shows to the right of its label.
+func (s *WizardScreen) hubValue(step wizardStep, changes []string) string {
+	switch step {
+	case stepReShade:
+		v, _ := s.selectedVersion()
+		return fmt.Sprintf("%s (%s)", v.Version, s.flavor)
+	case stepAPI:
+		return s.selectedDLL()
+	case stepShaders:
+		return namesOrCount(s.packages)
+	case stepAddons:
+		return namesOrCount(s.addons)
+	case stepReview:
+		if len(changes) == 0 {
+			return "no changes — reinstalls the same files"
+		}
+		return strings.Join(changes, ", ")
+	default:
+		return ""
+	}
+}
+
+// namesOrCount lists what is selected, falling back to a count once there
+// are too many to read at a glance.
+func namesOrCount(m multiSelect) string {
+	var names []string
+	for _, it := range m.items {
+		if !it.Header && m.selected[it.ID] {
+			names = append(names, it.Name)
+		}
+	}
+	switch {
+	case len(names) == 0:
+		return "none"
+	case len(names) <= 3:
+		return strings.Join(names, ", ")
+	default:
+		return fmt.Sprintf("%s, +%d more", strings.Join(names[:2], ", "), len(names)-2)
+	}
+}
+
+// changes describes how the current selection differs from the install
+// already recorded for this folder — the thing an edit is actually about,
+// and what Apply is going to do.
+func (s *WizardScreen) changes() []string {
+	if s.existing == nil {
+		return nil
+	}
+	var out []string
+
+	if v, ok := s.selectedVersion(); ok && v.Version != s.existing.ReShade.Version {
+		out = append(out, fmt.Sprintf("%s → %s", displayVersion(s.existing.ReShade.Version), v.Version))
+	}
+	if string(s.flavor) != s.existing.ReShade.Flavor {
+		out = append(out, "→ "+string(s.flavor)+" build")
+	}
+	if dll := s.selectedDLL(); dll != "" && dll != s.existing.ReShade.DLL {
+		out = append(out, s.existing.ReShade.DLL+" → "+dll)
+	}
+	if n := countDiff(s.existing.Packages, s.packages.selectedIDs()); n != "" {
+		out = append(out, n+" shader")
+	}
+	if n := countDiff(s.existing.Addons, addonsForDownload(s.flavor, s.addons)); n != "" {
+		out = append(out, n+" add-on")
+	}
+	return out
+}
+
+// displayVersion renders a recorded version for a change line. An adopted
+// install has no version worth printing verbatim.
+func displayVersion(v string) string {
+	if v == install.AdoptedVersion {
+		return "adopted"
+	}
+	return v
+}
+
+// countDiff summarizes an id-set change as "+2/-1", or "" when nothing
+// moved. The exact ids are one keypress away in the section itself; what
+// belongs on a summary line is whether anything changed at all.
+func countDiff(before, after []string) string {
+	had := make(map[string]bool, len(before))
+	for _, id := range before {
+		had[id] = true
+	}
+	has := make(map[string]bool, len(after))
+	for _, id := range after {
+		has[id] = true
+	}
+
+	added, removed := 0, 0
+	for id := range has {
+		if !had[id] {
+			added++
+		}
+	}
+	for id := range had {
+		if !has[id] {
+			removed++
+		}
+	}
+
+	var parts []string
+	if added > 0 {
+		parts = append(parts, fmt.Sprintf("+%d", added))
+	}
+	if removed > 0 {
+		parts = append(parts, fmt.Sprintf("-%d", removed))
+	}
+	return strings.Join(parts, "/")
 }

@@ -46,6 +46,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Editing an existing install (`e`) opens a summary of what is installed —
+  ReShade, API, Shaders, Add-ons, each with its current value — instead of
+  re-walking the five-step wizard. Enter opens one section; enter or esc
+  inside it returns to the summary. The Apply row states the diff against
+  what is recorded (`6.7.3 → 6.8.0`, `-1 shader`), and says so when there
+  is nothing to change. Installing into an empty folder is still the
+  linear walk, where every answer does have to be given once.
+
 - The resources browser applies the same curated shortlist as the wizard,
   with the same `a` to widen it, and each pane says how much it is hiding
   (`Shaders (13 of 43)`). Anything cached, in use by an install, or your
