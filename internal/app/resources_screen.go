@@ -64,6 +64,9 @@ type resourceRow struct {
 	// InUse reports whether any recorded install, for any game, actually
 	// references this exact item.
 	InUse bool
+	// Description is the catalog's own one-liner, shown for the focused
+	// row. Empty for rows the catalog says nothing about.
+	Description string
 
 	// Exactly one of these is meaningful, matching which pane the row
 	// belongs to — carried along so the download/refresh actions have
@@ -195,6 +198,7 @@ func reshadeRow(version string, addon bool, c *cache.Cache, entries []cache.Entr
 		InUse:          inUseReShade(installs, version, addon),
 		reshadeVersion: version,
 		reshadeAddon:   addon,
+		Description:    reshadeFlavorDescription(addon),
 	}
 	for _, e := range entries {
 		if e.ID == id {
@@ -217,6 +221,7 @@ func buildPackageRows(data WizardData, c *cache.Cache, entries []cache.Entry, in
 			Size:         sumSize(matches),
 			DownloadedAt: latestDownload(matches),
 			InUse:        inUseID(installs, p.ID),
+			Description:  p.Description,
 			pkg:          p,
 		})
 	}
@@ -224,7 +229,8 @@ func buildPackageRows(data WizardData, c *cache.Cache, entries []cache.Entry, in
 		rows = append(rows, resourceRow{
 			ID: cst.ID, Name: cst.Name,
 			Custom: true, Cached: true,
-			InUse: inUseID(installs, cst.ID),
+			InUse:       inUseID(installs, cst.ID),
+			Description: cst.Description,
 		})
 	}
 	return rows
@@ -242,6 +248,7 @@ func buildAddonRows(data WizardData, c *cache.Cache, entries []cache.Entry, inst
 			Size:         sumSize(matches),
 			DownloadedAt: latestDownload(matches),
 			InUse:        inUseID(installs, a.ID),
+			Description:  a.Description,
 			addon:        a,
 		})
 	}
@@ -249,10 +256,20 @@ func buildAddonRows(data WizardData, c *cache.Cache, entries []cache.Entry, inst
 		rows = append(rows, resourceRow{
 			ID: cst.ID, Name: cst.Name,
 			Custom: true, Cached: true,
-			InUse: inUseID(installs, cst.ID),
+			InUse:       inUseID(installs, cst.ID),
+			Description: cst.Description,
 		})
 	}
 	return rows
+}
+
+// reshadeFlavorDescription says what the two builds differ in, which is
+// the whole reason the browser splits them into two panes.
+func reshadeFlavorDescription(addon bool) string {
+	if addon {
+		return "add-on build: can load .addon32/.addon64 add-ons, and is detectable by anti-cheat"
+	}
+	return "standard build: effects only, no add-on support"
 }
 
 func inUseReShade(installs []state.GameInstall, version string, addon bool) bool {
@@ -327,9 +344,13 @@ type ResourcesScreen struct {
 	downloading bool
 	refreshing  bool
 
+	// panes holds every row the catalog and cache offer; visible() is what
+	// the current shortlist setting shows of it, so toggling the shortlist
+	// never needs a reload.
 	panes   [paneCount][]resourceRow
 	cursors [paneCount]cursorList
 	focus   resourcePane
+	showAll bool
 
 	total   int64
 	free    int64
@@ -363,6 +384,7 @@ var (
 	resourceRefreshBinding  = key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh package"))
 	resourcePaneLeft        = key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "prev pane"))
 	resourcePaneRight       = key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "next pane"))
+	resourceShowAllBinding  = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "show all"))
 )
 
 // KeyBindings implements Screen.
@@ -370,7 +392,7 @@ func (s *ResourcesScreen) KeyBindings() []key.Binding {
 	return []key.Binding{
 		s.keys.Up, s.keys.Down, resourcePaneLeft, resourcePaneRight,
 		resourceDownloadBinding, resourceDeleteBinding, resourceRefreshBinding,
-		s.keys.Back,
+		resourceShowAllBinding, s.keys.Back,
 	}
 }
 
@@ -391,9 +413,7 @@ func (s *ResourcesScreen) Update(msg tea.Msg, env Env) (Screen, tea.Cmd) {
 		}
 		s.loadErr = ""
 		s.panes = msg.panes
-		for p := resourcePane(0); p < paneCount; p++ {
-			s.cursors[p].setCount(len(s.panes[p]))
-		}
+		s.syncCursors()
 		s.total, s.free, s.freeErr = msg.total, msg.free, msg.freeErr
 		return s, nil
 
@@ -424,12 +444,46 @@ func (s *ResourcesScreen) handleKey(msg tea.KeyPressMsg, env Env) (Screen, tea.C
 		return s.confirmDelete()
 	case key.Matches(msg, resourceRefreshBinding):
 		return s.startRefresh()
+	case key.Matches(msg, resourceShowAllBinding):
+		s.showAll = !s.showAll
+		s.syncCursors()
 	}
 	return s, nil
 }
 
+// visible is what pane p currently shows: everything, or the curated
+// shortlist plus whatever the user has a relationship with already —
+// downloaded, in use, or their own custom content. The ReShade panes are
+// never filtered: their rows are versions, and there is no such thing as
+// an obscure one.
+func (s *ResourcesScreen) visible(p resourcePane) []resourceRow {
+	shortlist := curatedPackages
+	switch {
+	case s.showAll, p == paneReShadeNormal, p == paneReShadeAddon:
+		return s.panes[p]
+	case p == paneAddons:
+		shortlist = curatedAddons
+	}
+
+	out := make([]resourceRow, 0, len(s.panes[p]))
+	for _, r := range s.panes[p] {
+		if keepInShortlist(r.ID, shortlist, r.Cached || r.InUse || r.Custom) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// syncCursors re-clamps every pane's cursor to what that pane now shows,
+// after a load or a change of shortlist setting.
+func (s *ResourcesScreen) syncCursors() {
+	for p := resourcePane(0); p < paneCount; p++ {
+		s.cursors[p].setCount(len(s.visible(p)))
+	}
+}
+
 func (s *ResourcesScreen) selectedRow() (resourceRow, bool) {
-	rows := s.panes[s.focus]
+	rows := s.visible(s.focus)
 	i := s.cursors[s.focus].Cursor()
 	if i < 0 || i >= len(rows) {
 		return resourceRow{}, false
@@ -581,7 +635,12 @@ func (s *ResourcesScreen) View(env Env) string {
 		header += "   refreshing…"
 	}
 
-	height := env.Height - 5
+	// The focused row's own description, which the panes are far too
+	// narrow to carry: at four columns a pane has about twenty characters,
+	// which is a name and nothing else.
+	detail := s.renderDetail(env)
+
+	height := env.Height - 5 - countLines(detail)
 	if height < 5 {
 		height = 5
 	}
@@ -597,7 +656,7 @@ func (s *ResourcesScreen) View(env Env) string {
 	if env.Width < int(paneCount)*(minPaneWidth+minGutter) {
 		return env.Styles.Faint.Render(header) + "\n\n" +
 			s.renderTabStrip(env) + "\n" +
-			s.renderPane(s.focus, env.Width-2, height, env)
+			s.renderPane(s.focus, env.Width-2, height, env) + "\n" + detail
 	}
 
 	paneWidth := env.Width/int(paneCount) - minGutter
@@ -606,7 +665,53 @@ func (s *ResourcesScreen) View(env Env) string {
 		cols = append(cols, s.renderPane(p, paneWidth, height, env))
 	}
 
-	return env.Styles.Faint.Render(header) + "\n\n" + lipgloss.JoinHorizontal(lipgloss.Top, cols...)
+	return env.Styles.Faint.Render(header) + "\n\n" +
+		lipgloss.JoinHorizontal(lipgloss.Top, cols...) + "\n" + detail
+}
+
+// renderDetail is the block under the panes describing the focused row:
+// what it is, and anything about it the row itself could not fit. Empty
+// when there is no row to describe, so an empty pane costs no lines.
+func (s *ResourcesScreen) renderDetail(env Env) string {
+	r, ok := s.selectedRow()
+	if !ok {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString(env.Styles.Subtitle.Render(clipTail(r.Name, env.Width)))
+	b.WriteString("\n")
+	if r.Description != "" {
+		b.WriteString(env.Styles.Faint.Render(wrap(r.Description, env.Width-1)))
+		b.WriteString("\n")
+	}
+	if note := resourceSource(r); note != "" {
+		b.WriteString(env.Styles.Faint.Render(clipTail(note, env.Width)))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// resourceSource is the line under a description saying where the thing
+// comes from, or why yarm cannot fetch it.
+func resourceSource(r resourceRow) string {
+	switch {
+	case r.Custom:
+		return "your own content, from the custom folder"
+	case r.addon.ID != "" && !r.addon.Installable():
+		// The reason a row is greyed here is the same as in the wizard:
+		// upstream lists no download for it at all.
+		if r.addon.RepositoryURL != "" {
+			return "manual install only: " + r.addon.RepositoryURL
+		}
+		return "manual install only"
+	case r.addon.RepositoryURL != "":
+		return r.addon.RepositoryURL
+	case r.pkg.RepositoryURL != "":
+		return r.pkg.RepositoryURL
+	default:
+		return ""
+	}
 }
 
 // renderTabStrip lists every pane so the narrow, single-pane layout does
@@ -626,14 +731,29 @@ func (s *ResourcesScreen) renderTabStrip(env Env) string {
 
 func (s *ResourcesScreen) renderPane(p resourcePane, width, height int, env Env) string {
 	var b strings.Builder
+	rows := s.visible(p)
+
+	// Styles.Panel spends four columns on its own border and padding, and
+	// lipgloss wraps rather than clips what does not fit — which breaks
+	// the box open rather than shortening a name.
+	inner := width - 4
+	if inner < 8 {
+		inner = 8
+	}
+
+	// A pane showing less than it holds has to say so, or a missing pack
+	// reads as a broken catalog rather than a filtered list.
+	label := p.label()
+	if hidden := len(s.panes[p]) - len(rows); hidden > 0 {
+		label += fmt.Sprintf(" (%d of %d)", len(rows), len(s.panes[p]))
+	}
 	if p == s.focus {
-		b.WriteString(env.Styles.Selected.Render("▸ " + p.label()))
+		b.WriteString(env.Styles.Selected.Render(clipTail("▸ "+label, inner)))
 	} else {
-		b.WriteString(env.Styles.Subtitle.Render("  " + p.label()))
+		b.WriteString(env.Styles.Subtitle.Render(clipTail("  "+label, inner)))
 	}
 	b.WriteString("\n")
 
-	rows := s.panes[p]
 	if len(rows) == 0 {
 		b.WriteString(env.Styles.Faint.Render("  (none)"))
 	}
@@ -642,7 +762,7 @@ func (s *ResourcesScreen) renderPane(p resourcePane, width, height int, env Env)
 	visible := height - 1
 	start, end := scrollWindow(len(rows), cursor, visible)
 	for i := start; i < end; i++ {
-		b.WriteString(s.renderRow(rows[i], i == cursor && p == s.focus, width, env))
+		b.WriteString(s.renderRow(rows[i], i == cursor && p == s.focus, inner, env))
 		b.WriteString("\n")
 	}
 
@@ -681,7 +801,10 @@ func (s *ResourcesScreen) renderRow(r resourceRow, selected bool, width int, env
 	if nameWidth < 6 {
 		nameWidth = 6
 	}
-	line := marker + truncate(r.Name, nameWidth) + tagsText
+	// clipTail, not truncate: truncate keeps a string's tail, which is
+	// right for a path and wrong for a name — "…tFX by CeeJay.dk" hides
+	// the half that identifies it.
+	line := marker + clipTail(r.Name, nameWidth) + tagsText
 
 	switch {
 	case selected:

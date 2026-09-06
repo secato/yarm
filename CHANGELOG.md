@@ -46,6 +46,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The resources browser applies the same curated shortlist as the wizard,
+  with the same `a` to widen it, and each pane says how much it is hiding
+  (`Shaders (13 of 43)`). Anything cached, in use by an install, or your
+  own custom content stays listed whatever the shortlist says — otherwise
+  the browser could not show what is actually on disk.
+- The resources browser describes the focused row underneath the panes:
+  the catalog's own description, plus where it comes from (repository URL,
+  or "manual install only" for an add-on upstream publishes no download
+  for). A pane is about twenty columns wide, which is a name and nothing
+  else.
+- The wizard's ReShade step draws each build in its own bordered box
+  rather than as two bare columns, which read as one wrapped list.
+- The wizard starts on the **normal** build, and so does a fresh
+  `config.yaml`: the add-on build is the one anti-cheat can detect, so it
+  is opted into rather than defaulted into.
+- `i` on the games list now works for a game with several folders — it
+  opens the folder list, the same screen `enter` does. Previously the key
+  simply did not appear, which read as install being unavailable rather
+  than as needing one more step. `e` and `u` still require a single folder,
+  since they act on a specific install.
+
 - Tests and fixtures no longer use real game names. ELDEN RING, Control and
   Dota 2 are now the fictional Ember Hollow, Vantage Point and Ridgeline,
   with app ids in a reserved-looking 7001xx range. The plan documents and
@@ -111,6 +132,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `space` rather than its own `o` key.
 
 ### Fixed
+
+- Resources browser panes no longer break their own boxes open: rows were
+  clipped to the pane's outer width, ignoring the four columns its border
+  and padding take, and lipgloss wraps what does not fit. Row names are
+  also clipped head-first now (`SweetFX by CeeJa…`, not `…tFX by
+  CeeJay.dk`).
 
 - Backing up a displaced file no longer renames over an existing
   `.yarm-bak`. That file is an older original from an interrupted install

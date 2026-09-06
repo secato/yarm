@@ -157,12 +157,15 @@ type WizardScreen struct {
 func NewWizardScreen(entry GameEntry, exe Executable, deps Deps) *WizardScreen {
 	existing := exe.Installed
 
-	flavor := install.FlavorAddon
+	// The normal build unless something says otherwise: the add-on build
+	// is the one anti-cheat can detect, so it is opted into, never
+	// defaulted into.
+	flavor := install.FlavorNormal
 	switch {
 	case existing != nil:
 		flavor = install.Flavor(existing.ReShade.Flavor)
-	case deps.Defaults.ReshadeFlavor == string(install.FlavorNormal):
-		flavor = install.FlavorNormal
+	case deps.Defaults.ReshadeFlavor == string(install.FlavorAddon):
+		flavor = install.FlavorAddon
 	}
 
 	return &WizardScreen{
@@ -939,9 +942,15 @@ func (s *WizardScreen) flavorStrip(env Env) string {
 func (s *WizardScreen) versionPane(flavor install.Flavor, width, height int, env Env, showHeader bool) string {
 	focused := flavor == s.flavor
 
+	// What the box's border and padding leave for the rows themselves.
+	inner := width - 4
+	if inner < 8 {
+		inner = 8
+	}
+
 	var b strings.Builder
 	if showHeader {
-		header := "ReShade (" + string(flavor) + ")"
+		header := clipTail("ReShade ("+string(flavor)+")", inner)
 		if focused {
 			b.WriteString(env.Styles.Selected.Render(header))
 		} else {
@@ -964,7 +973,7 @@ func (s *WizardScreen) versionPane(flavor install.Flavor, width, height int, env
 		if s.cached(v.Version, flavor) {
 			line += "  cached"
 		}
-		line = clipTail(line, width)
+		line = clipTail(line, inner)
 		switch {
 		case focused && i == s.versionCursor.Cursor():
 			line = env.Styles.Selected.Render(line)
@@ -975,10 +984,20 @@ func (s *WizardScreen) versionPane(flavor install.Flavor, width, height int, env
 		b.WriteString("\n")
 	})
 
-	// A fixed width keeps the right-hand pane's column straight however
-	// long the left one's rows happen to be; the trailing newline would
-	// otherwise become an empty row once the panes are joined.
-	return lipgloss.NewStyle().Width(width).Render(strings.TrimSuffix(b.String(), "\n"))
+	// A bordered box rather than a bare column: two lists side by side
+	// read as one wrapped list until something draws the line between
+	// them. The border is what makes "these are two builds, pick one"
+	// visible, and it is the same panel the resources browser uses for the
+	// same split.
+	//
+	// Styles.Panel spends four columns on border and padding, and lipgloss
+	// wraps what does not fit rather than clipping it, which would break
+	// the box open.
+	panel := env.Styles.Panel.Width(width - 4)
+	if !focused {
+		panel = panel.BorderForeground(env.Styles.Faint.GetForeground())
+	}
+	return panel.Render(strings.TrimSuffix(b.String(), "\n"))
 }
 
 func (s *WizardScreen) viewAPI(b *strings.Builder, env Env, height int) {

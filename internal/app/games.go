@@ -137,6 +137,14 @@ func (s *GamesScreen) KeyBindings() []key.Binding {
 	// detail view (enter) is for.
 	entry, grp, ok := s.singleGroupSelection()
 	if !ok {
+		// More than one folder: there is no single target to install into
+		// from here, but the key still works — it opens the folder list,
+		// which is where the choice is made. Offering it inconsistently
+		// (present for one-folder games, absent otherwise) reads as the
+		// action being unavailable rather than as needing one more step.
+		if e, ok := s.selected(); ok && len(e.Groups) > 1 && len(e.PlayableExes()) > 0 {
+			bindings = append([]key.Binding{s.keys.Install}, bindings...)
+		}
 		return bindings
 	}
 	switch {
@@ -242,6 +250,11 @@ func (s *GamesScreen) handleKey(msg tea.KeyPressMsg, env Env) (Screen, tea.Cmd) 
 	case key.Matches(msg, s.keys.Install) || key.Matches(msg, editInstallBinding):
 		if entry, grp, ok := s.singleGroupSelection(); ok {
 			return s, startInstallForGroup(entry, grp, s.deps)
+		}
+		// With several folders, installing means picking one first — the
+		// same screen enter opens, rather than nothing happening.
+		if entry, ok := s.selected(); ok && len(entry.Groups) > 1 {
+			return s, PushScreen(NewGameDetailScreen(entry, s.deps))
 		}
 		return s, nil
 

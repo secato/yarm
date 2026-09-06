@@ -1247,3 +1247,43 @@ func TestWizardBackupOptionSaysItOnlyAppliesWhenOverwriting(t *testing.T) {
 		t.Errorf("with overwrite on, the caveat is wrong:\n%s", s.View(wizardEnv()))
 	}
 }
+
+// The add-on build is the one anti-cheat can detect, so it is opted into
+// rather than defaulted into: with nothing configured, the wizard starts
+// on the normal build.
+func TestWizardDefaultsToTheNormalBuild(t *testing.T) {
+	deps := fakeDeps()
+	deps.Defaults.ReshadeFlavor = "" // nothing configured
+	s := loadWizard(t, sampleGameEntry(), 0, deps)
+
+	if s.flavor != install.FlavorNormal {
+		t.Errorf("flavor = %q, want normal by default", s.flavor)
+	}
+	if strings.Contains(s.View(wizardEnv()), anticheatWarning) {
+		t.Error("the anti-cheat warning belongs to the add-on build, which is not selected")
+	}
+
+	// A configured preference still wins, and so does an existing install.
+	deps.Defaults.ReshadeFlavor = "addon"
+	if s := loadWizard(t, sampleGameEntry(), 0, deps); s.flavor != install.FlavorAddon {
+		t.Errorf("flavor = %q, want the configured addon default", s.flavor)
+	}
+}
+
+// Two lists side by side read as one wrapped list until something draws
+// the line between them.
+func TestWizardReShadeStepDrawsEachBuildInItsOwnBox(t *testing.T) {
+	s := loadWizard(t, sampleGameEntry(), 0, fakeDeps())
+	body := s.View(wizardEnv())
+
+	// Two boxes on the same row: the top border appears twice before the
+	// first version row does.
+	first := strings.SplitN(body, "\n", 5)
+	var borders int
+	for _, line := range first {
+		borders += strings.Count(line, "╭")
+	}
+	if borders != 2 {
+		t.Errorf("expected two panel boxes on the ReShade step, found %d:\n%s", borders, body)
+	}
+}

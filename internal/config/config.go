@@ -53,7 +53,9 @@ func Default() Config {
 			ExtraLibraryPaths: []string{},
 		},
 		Defaults: DefaultsConfig{
-			ReshadeFlavor: "addon",
+			// Normal, not addon: the add-on build is what anti-cheat
+			// detects, so it has to be something the user asked for.
+			ReshadeFlavor: "normal",
 			Packages:      []string{"standard"},
 		},
 		CatalogTTLHours: 24,
@@ -69,7 +71,7 @@ steam:
   enabled: true
   extra_library_paths: []     # if auto-detection misses a library
 defaults:
-  reshade_flavor: addon       # normal | addon
+  reshade_flavor: normal      # normal | addon (addon builds are detectable by anti-cheat)
   packages: ["standard"]      # package ids preselected in the wizard
 catalog_ttl_hours: 24         # how long EffectPackages.ini/Addons.ini/version list are trusted
 `

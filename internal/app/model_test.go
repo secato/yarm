@@ -443,10 +443,12 @@ func TestGamesScreenUninstallDirectlyFromList(t *testing.T) {
 	}
 }
 
-// A game with more than one folder has nothing unambiguous to act on from
-// the list itself — it must not offer i/e/u until the user has drilled in
-// and picked a folder.
-func TestGamesScreenNoDirectActionsForMultiFolderGame(t *testing.T) {
+// A game with more than one folder has no single folder to edit or
+// uninstall from the list — but install still works, by opening the folder
+// list first. Offering the key for one-folder games and silently dropping
+// it for the rest reads as the action being unavailable, not as needing one
+// more step.
+func TestGamesScreenMultiFolderGameOffersInstallButNotEditOrUninstall(t *testing.T) {
 	installed := state.Install{Exe: "Release/Game.exe", ReShade: state.ReShadeInfo{Version: "6.8.0", Flavor: "normal"}}
 	exes := []Executable{
 		{Executable: game.Executable{Path: "Release/Game.exe"}, Installed: &installed},
@@ -468,11 +470,23 @@ func TestGamesScreenNoDirectActionsForMultiFolderGame(t *testing.T) {
 	)
 
 	gs := m.Screen().(*GamesScreen)
+	offered := map[string]bool{}
 	for _, b := range gs.KeyBindings() {
-		desc := b.Help().Desc
-		if strings.Contains(desc, "install") || strings.Contains(desc, "edit") || strings.Contains(desc, "uninstall") {
-			t.Errorf("a multi-folder game should not offer %q from the list", desc)
+		offered[b.Help().Desc] = true
+	}
+	if !offered["install ReShade"] {
+		t.Errorf("install should be offered and drill in; bindings = %v", offered)
+	}
+	for _, unwanted := range []string{"edit install", "uninstall"} {
+		if offered[unwanted] {
+			t.Errorf("a multi-folder game has no single target to %q from the list", unwanted)
 		}
+	}
+
+	// And pressing it opens the folder list, exactly as enter does.
+	m = drive(t, m, tea.KeyPressMsg{Code: 'i', Text: "i"})
+	if _, ok := m.Screen().(*GameDetailScreen); !ok {
+		t.Fatalf("screen after i = %T, want *GameDetailScreen", m.Screen())
 	}
 }
 

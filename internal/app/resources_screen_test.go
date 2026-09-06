@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -450,4 +451,124 @@ func TestResourcesScreenSortsCachedItemsFirst(t *testing.T) {
 	if rows[0].reshadeVersion != "6.7.2" {
 		t.Errorf("expected 6.7.2 first, got %s", rows[0].reshadeVersion)
 	}
+}
+
+// withPackages returns deps whose catalog also holds the given packages.
+func withPackages(t *testing.T, deps Deps, pkgs ...catalog.Package) Deps {
+	t.Helper()
+	d := deps.WizardData.(fakeWizardData).data
+	d.Packages = append(d.Packages, pkgs...)
+	deps.WizardData = fakeWizardData{data: d}
+	return deps
+}
+
+// The browser shows the same curated shortlist the wizard does — 43
+// packages is a catalog, not a list anybody reads — with `a` widening it.
+func TestResourcesScreenShowsCuratedShortlistUntilShowAll(t *testing.T) {
+	deps, _ := resourcesTestDeps(t)
+	deps = withPackages(t, deps,
+		catalog.Package{ID: "sweetfx-by-ceejay-dk", Name: "SweetFX by CeeJay.dk"},
+		catalog.Package{ID: "crt-royale-reshade-by-akgunter", Name: "CRT-Royale-ReShade by akgunter"},
+	)
+	s := loadResourcesScreen(t, deps)
+
+	names := visibleNames(s, panePackages)
+	if slices.Contains(names, "CRT-Royale-ReShade by akgunter") {
+		t.Errorf("an off-shortlist package should be hidden until 'a': %v", names)
+	}
+	if !slices.Contains(names, "SweetFX by CeeJay.dk") {
+		t.Errorf("a shortlisted package should be shown: %v", names)
+	}
+
+	body := s.View(wizardEnv())
+	if !strings.Contains(body, "of 3") {
+		t.Errorf("a filtered pane should say how much it is hiding:\n%s", body)
+	}
+
+	next, _ := s.Update(tea.KeyPressMsg{Code: 'a', Text: "a"}, wizardEnv())
+	s = next.(*ResourcesScreen)
+	if !slices.Contains(visibleNames(s, panePackages), "CRT-Royale-ReShade by akgunter") {
+		t.Error("'a' should reveal the whole catalog")
+	}
+}
+
+// Something already downloaded must stay listed however obscure, or the
+// browser could not show — or delete — what is actually on disk.
+func TestResourcesScreenAlwaysShowsCachedAndInUseRows(t *testing.T) {
+	deps, _ := resourcesTestDeps(t)
+	deps = withPackages(t, deps,
+		catalog.Package{ID: "crt-royale-reshade-by-akgunter", Name: "CRT-Royale-ReShade by akgunter"},
+	)
+	s := loadResourcesScreen(t, deps)
+
+	// Fake the two reasons a row is sticky, one at a time.
+	for _, tc := range []struct {
+		name string
+		mark func(*resourceRow)
+	}{
+		{"cached", func(r *resourceRow) { r.Cached = true }},
+		{"in use", func(r *resourceRow) { r.InUse = true }},
+	} {
+		rows := slices.Clone(s.panes[panePackages])
+		for i := range rows {
+			if rows[i].ID == "crt-royale-reshade-by-akgunter" {
+				tc.mark(&rows[i])
+			}
+		}
+		s.panes[panePackages] = rows
+		if !slices.Contains(visibleNames(s, panePackages), "CRT-Royale-ReShade by akgunter") {
+			t.Errorf("a %s package must stay visible whatever the shortlist says", tc.name)
+		}
+	}
+}
+
+// The panes are ~20 columns wide, which is a name and nothing else, so
+// the catalog's description of the focused row goes under them.
+func TestResourcesScreenDescribesTheFocusedRow(t *testing.T) {
+	deps, _ := resourcesTestDeps(t)
+	deps = withPackages(t, deps, catalog.Package{
+		ID: "sweetfx-by-ceejay-dk", Name: "SweetFX by CeeJay.dk",
+		Description:   "The original SweetFX shader collection (LumaSharpen, SMAA, ...)",
+		RepositoryURL: "https://github.com/CeeJayDK/SweetFX",
+	})
+	s := loadResourcesScreen(t, deps)
+	s.focus = panePackages
+	s.cursors[panePackages].setCursor(1)
+
+	body := s.View(wizardEnv())
+	if !strings.Contains(body, "The original SweetFX shader collection") {
+		t.Errorf("the focused row's description should be shown:\n%s", body)
+	}
+	if !strings.Contains(body, "https://github.com/CeeJayDK/SweetFX") {
+		t.Errorf("the detail block should name where it comes from:\n%s", body)
+	}
+}
+
+// A manual-only add-on says why it cannot be downloaded here, the same way
+// the wizard does.
+func TestResourcesScreenExplainsAManualOnlyAddon(t *testing.T) {
+	deps, _ := resourcesTestDeps(t)
+	d := deps.WizardData.(fakeWizardData).data
+	d.Addons = append(d.Addons, catalog.Addon{
+		ID: "renodx-by-shortfuse", Name: "RenoDX by ShortFuse",
+		RepositoryURL: "https://github.com/clshortfuse/renodx",
+	})
+	deps.WizardData = fakeWizardData{data: d}
+	s := loadResourcesScreen(t, deps)
+	s.focus = paneAddons
+	s.cursors[paneAddons].setCursor(1)
+
+	body := s.View(wizardEnv())
+	if !strings.Contains(body, "manual install only: https://github.com/clshortfuse/renodx") {
+		t.Errorf("a manual-only add-on should say so and name its repository:\n%s", body)
+	}
+}
+
+// visibleNames lists what a pane currently shows.
+func visibleNames(s *ResourcesScreen, p resourcePane) []string {
+	var out []string
+	for _, r := range s.visible(p) {
+		out = append(out, r.Name)
+	}
+	return out
 }

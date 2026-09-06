@@ -87,12 +87,21 @@ func curate(items []selectItem, shortlist map[string]bool, all bool, selected ma
 	}
 	out := make([]selectItem, 0, len(items))
 	for _, it := range items {
-		switch {
-		case it.Header, it.Required, selected[it.ID], shortlist[it.ID], isCustomID(it.ID):
+		if it.Header || keepInShortlist(it.ID, shortlist, it.Required || selected[it.ID]) {
 			out = append(out, it)
 		}
 	}
 	return out
+}
+
+// keepInShortlist is the rule both the wizard and the resources browser
+// filter by: the shortlist names it, it is the user's own content, or the
+// row has a reason of its own to stay (sticky) — checked, required,
+// already downloaded, in use by an install. Demoting a row the user has
+// some relationship with would hide their own data, which is a different
+// thing from hiding catalog noise.
+func keepInShortlist(id string, shortlist map[string]bool, sticky bool) bool {
+	return sticky || isCustomID(id) || shortlist[id]
 }
 
 // isCustomID reports whether an id came from cache/custom rather than the
