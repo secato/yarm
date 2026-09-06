@@ -159,7 +159,16 @@ func (e *Executor) run(ctx context.Context, plan Plan, jr *journal, onProgress P
 		}
 		backupRel := f.Dest + BackupSuffix
 		backupAbs := abs + BackupSuffix
-		if err := os.Rename(abs, backupAbs); err != nil {
+		// An existing backup is an older original — from an install that
+		// was interrupted before uninstall could put it back. Renaming
+		// over it would destroy the only copy of the file the user
+		// actually started with, so the older one wins and the current
+		// file is simply replaced.
+		if _, err := os.Stat(backupAbs); err == nil {
+			if err := os.Remove(abs); err != nil {
+				return Result{}, fmt.Errorf("replace %s: %w", f.Dest, err)
+			}
+		} else if err := os.Rename(abs, backupAbs); err != nil {
 			return Result{}, fmt.Errorf("back up %s: %w", f.Dest, err)
 		}
 		jr.backups = append(jr.backups, state.Backup{Path: f.Dest, Backup: backupRel})

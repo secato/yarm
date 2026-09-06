@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The wizard's review page lists what is already in the target folder and
+  what will happen to it, before the install runs. A file yarm does not
+  own is kept unless Overwrite is on — which, for the proxy DLL, means the
+  install completes and ReShade never loads. That was previously only
+  visible on the result screen, after the decision had been made.
+
 - Release plumbing: `.goreleaser.yaml` (linux/windows/darwin archives,
   checksums, AUR `yarm-bin`) and a `Release` workflow that runs only for a
   pushed `v*` tag, and only after re-running build and tests on that tag.
@@ -91,6 +97,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `space` rather than its own `o` key.
 
 ### Fixed
+
+- Backing up a displaced file no longer renames over an existing
+  `.yarm-bak`. That file is an older original from an interrupted install
+  and may be the only copy of what the folder started with.
 
 - A list row's trailing note is no longer clipped independently of the
   row's own text, which could render a line wider than the terminal; and

@@ -156,6 +156,29 @@ func TestRunBacksUpForeignFile(t *testing.T) {
 	}
 }
 
+// A backup already sitting there is an older original — from an install
+// interrupted before uninstall could restore it. Renaming over it would
+// destroy the only copy of what the folder started with.
+func TestRunDoesNotOverwriteAnOlderBackup(t *testing.T) {
+	f := newFixture(t).WithReShade()
+	const oldest = "the file the folder actually started with"
+	f.GameFile("Game/dxgi.dll", "something installed later")
+	f.GameFile("Game/dxgi.dll"+BackupSuffix, oldest)
+
+	req := f.Request()
+	req.Overwrite = true
+
+	if _, err := planAndRun(t, f, req, state.Registry{}); err != nil {
+		t.Fatalf("Run(): %v", err)
+	}
+	if got := f.read("Game/dxgi.dll" + BackupSuffix); got != oldest {
+		t.Errorf("backup = %q, want the older original %q", got, oldest)
+	}
+	if got := f.read("Game/dxgi.dll"); got != "reshade 64-bit body" {
+		t.Errorf("dxgi.dll = %q, want the ReShade body", got)
+	}
+}
+
 // Without Overwrite, a foreign file is left exactly as it was.
 func TestRunKeepsForeignFileWithoutOverwrite(t *testing.T) {
 	f := newFixture(t).WithReShade()

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -1059,6 +1060,30 @@ func (s *WizardScreen) viewReview(b *strings.Builder, env Env, height int) {
 		into.WriteString("\n")
 	}
 
+	// What is already in the folder, and what will happen to it. This is
+	// the one thing on this page that can make the install run to
+	// completion and still leave ReShade not loading — and the one the
+	// Overwrite option below decides.
+	var files strings.Builder
+	conflicts := s.conflicts()
+	if len(conflicts) > 0 {
+		section(&files, "Already in this folder")
+		blocking := false
+		for _, c := range conflicts {
+			line, style := s.describeConflict(c, env)
+			files.WriteString(style.Render(clipTail(line, env.Width)))
+			files.WriteString("\n")
+			blocking = blocking || c.Blocking(s.overwrite())
+		}
+		// What to do about it is said once, under the rows, rather than
+		// repeated per row until it clips off the end of every line.
+		if note := s.conflictAdvice(blocking); note != "" {
+			files.WriteString(env.Styles.Faint.Render(wrap(note, env.Width-1)))
+			files.WriteString("\n")
+		}
+		files.WriteString("\n")
+	}
+
 	// The options block is fixed-size but its disclaimer wraps, so measure
 	// it rather than assuming a line count; the download list is the only
 	// part that can grow, so it is what gives way on a short terminal.
@@ -1080,7 +1105,10 @@ func (s *WizardScreen) viewReview(b *strings.Builder, env Env, height int) {
 		opts.WriteString(line)
 		opts.WriteString("\n")
 	}
-	if !s.overwrite() {
+	// The generic disclaimer only earns its lines when nothing concrete
+	// was found: with a conflicts block above, it repeats — less
+	// precisely — what that block already said about actual files.
+	if !s.overwrite() && len(conflicts) == 0 {
 		opts.WriteString("\n")
 		opts.WriteString(env.Styles.Warn.Render(wrap(
 			"Files not created by yarm are left in place unless overwrite is on.", env.Width-1)))
@@ -1105,6 +1133,7 @@ func (s *WizardScreen) viewReview(b *strings.Builder, env Env, height int) {
 	// wizard header: only this page's own content can be measured against
 	// the height it was given, and only it may be clipped to fit.
 	var page strings.Builder
+	page.WriteString(files.String())
 	page.WriteString(check.String())
 
 	missing := s.missing()
@@ -1115,7 +1144,7 @@ func (s *WizardScreen) viewReview(b *strings.Builder, env Env, height int) {
 	}
 	// -2 for this section's own header and the blank line before Options;
 	// whatever the Check block above already took comes off too.
-	room := height - countLines(opts.String()) - countLines(check.String()) - 2
+	room := height - countLines(opts.String()) - countLines(check.String()) - countLines(files.String()) - 2
 	if room < 1 {
 		room = 1
 	}
@@ -1140,4 +1169,53 @@ func addonsForDownload(flavor install.Flavor, addons multiSelect) []string {
 		return nil
 	}
 	return addons.selectedIDs()
+}
+
+// conflicts is what already sits where this install would write. Cheap
+// (a handful of stats), so it is recomputed each render rather than cached
+// and risking a stale answer after the user alt-tabs away and edits the
+// folder.
+func (s *WizardScreen) conflicts() []install.Conflict {
+	req, ok := s.buildRequest()
+	if !ok {
+		return nil
+	}
+	return install.Preflight(req, s.existing)
+}
+
+// describeConflict turns one conflict into its row: what is there, and
+// what will happen to it. Rows stay short enough to survive a 60-column
+// terminal — the part that must never clip is what happens to the file.
+func (s *WizardScreen) describeConflict(c install.Conflict, env Env) (string, lipgloss.Style) {
+	name := path.Base(c.Path)
+
+	switch {
+	case c.Kind == install.ConflictConfig:
+		return fmt.Sprintf("  %s — your settings, kept", name), env.Styles.Faint
+	case c.Kind == install.ConflictManaged:
+		return fmt.Sprintf("  %s — yours, replaced", name), env.Styles.Faint
+	case s.overwrite():
+		return fmt.Sprintf("  %s (%s) — replaced", name, humanSize(c.Size)), env.Styles.Warn
+	default:
+		// The size is here because it is often what identifies the file: a
+		// 24 MiB dxgi.dll is some other injector, not a stale ReShade.
+		return fmt.Sprintf("  ! %s (%s) — kept, so ReShade will not load",
+			name, humanSize(c.Size)), env.Styles.Bad
+	}
+}
+
+// conflictAdvice is the one line under the conflicts list saying what to
+// do, or what will be done. Empty when everything in the way is already
+// yarm's own and there is nothing to decide.
+func (s *WizardScreen) conflictAdvice(blocking bool) string {
+	switch {
+	case blocking:
+		return "Turn on Overwrite below to replace these. The originals are saved next to them as " +
+			install.BackupSuffix + " files and put back when you uninstall."
+	case s.overwrite():
+		return "Originals are saved as " + install.BackupSuffix +
+			" files and put back when you uninstall."
+	default:
+		return ""
+	}
 }

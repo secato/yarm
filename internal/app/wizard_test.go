@@ -3,6 +3,8 @@ package app
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -1065,6 +1067,106 @@ func TestWizardWithRequirementsFitsNarrowTerminals(t *testing.T) {
 				if lipgloss.Width(line) > size.width {
 					t.Errorf("%dx%d, step %v: line is %d columns wide:\n%q",
 						size.width, size.height, step, lipgloss.Width(line), line)
+				}
+			}
+		}
+	}
+}
+
+// gameWithExistingFiles returns an entry rooted at a temp dir holding the
+// named files beside the executable, so the wizard's preflight has
+// something real to stat.
+func gameWithExistingFiles(t *testing.T, files map[string]int) GameEntry {
+	t.Helper()
+	root := t.TempDir()
+	for name, size := range files {
+		abs := filepath.Join(root, "Game", name)
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(abs, make([]byte, size), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entry := sampleGameEntry()
+	entry.Root = root
+	return entry
+}
+
+// The review page has to say what is already in the folder before the user
+// commits, not after: installing into a folder whose dxgi.dll belongs to
+// another injector completes successfully and leaves ReShade not loading.
+func TestWizardReviewShowsWhatIsAlreadyInTheFolder(t *testing.T) {
+	entry := gameWithExistingFiles(t, map[string]int{"dxgi.dll": 25872384})
+	s := advance(t, loadWizard(t, entry, 0, fakeDeps()), stepReview)
+
+	body := s.View(wizardEnv())
+	if !strings.Contains(body, "Already in this folder") {
+		t.Fatalf("review should list existing files:\n%s", body)
+	}
+	if !strings.Contains(body, "dxgi.dll") || !strings.Contains(body, "kept, so ReShade will not load") {
+		t.Errorf("review should name the file and say what keeping it costs:\n%s", body)
+	}
+	if !strings.Contains(body, "Turn on Overwrite") {
+		t.Errorf("review should say how to fix it:\n%s", body)
+	}
+	if !strings.Contains(body, "24.7 MiB") {
+		t.Errorf("review should show the size, which is what identifies the file:\n%s", body)
+	}
+}
+
+// With overwrite on, the same file is reported as replaced-and-recoverable
+// — the backup is the reason overwriting is not a one-way door.
+func TestWizardReviewSaysForeignFilesAreBackedUpWhenOverwriting(t *testing.T) {
+	entry := gameWithExistingFiles(t, map[string]int{"dxgi.dll": 25872384})
+	s := advance(t, loadWizard(t, entry, 0, fakeDeps()), stepReview)
+	s = pressSpecial(t, s, tea.KeySpace) // the overwrite checkbox
+
+	body := s.View(wizardEnv())
+	if !strings.Contains(body, install.BackupSuffix) {
+		t.Errorf("review should name the backup file:\n%s", body)
+	}
+	if !strings.Contains(body, "put back when you uninstall") {
+		t.Errorf("review should say the backup is restored on uninstall:\n%s", body)
+	}
+	if strings.Contains(body, "will not load") {
+		t.Errorf("with overwrite on, nothing is kept:\n%s", body)
+	}
+}
+
+// A folder with nothing in the way says nothing at all — the section is
+// only worth its lines when there is a decision behind it.
+func TestWizardReviewOmitsTheSectionForACleanFolder(t *testing.T) {
+	entry := gameWithExistingFiles(t, nil)
+	s := advance(t, loadWizard(t, entry, 0, fakeDeps()), stepReview)
+
+	if body := s.View(wizardEnv()); strings.Contains(body, "Already in this folder") {
+		t.Errorf("a clean folder should not grow an empty section:\n%s", body)
+	}
+}
+
+// The conflicts block adds long lines (a path, a size, an explanation) to
+// the page that was already tightest.
+func TestWizardReviewWithConflictsFitsNarrowTerminals(t *testing.T) {
+	entry := gameWithExistingFiles(t, map[string]int{
+		"dxgi.dll": 25872384, "d3dcompiler_47.dll": 4493352, "ReShade.ini": 500,
+	})
+	for _, size := range []struct{ width, height int }{{80, 21}, {60, 21}, {44, 21}} {
+		for _, overwrite := range []bool{false, true} {
+			s := advance(t, loadWizard(t, entry, 0, fakeDeps()), stepReview)
+			if overwrite {
+				s = pressSpecial(t, s, tea.KeySpace)
+			}
+			env := Env{Styles: NewStyles(true), Width: size.width, Height: size.height}
+			body := s.View(env)
+			if got := countLines(body); got > env.Height {
+				t.Errorf("%dx%d (overwrite=%v): rendered %d lines into %d:\n%s",
+					size.width, size.height, overwrite, got, env.Height, body)
+			}
+			for _, line := range strings.Split(body, "\n") {
+				if lipgloss.Width(line) > size.width {
+					t.Errorf("%dx%d (overwrite=%v): line is %d columns wide:\n%q",
+						size.width, size.height, overwrite, lipgloss.Width(line), line)
 				}
 			}
 		}
