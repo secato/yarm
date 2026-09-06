@@ -3,6 +3,8 @@ package app
 import (
 	"fmt"
 	"strings"
+
+	"charm.land/lipgloss/v2"
 )
 
 // Small rendering helpers shared by more than one screen. They deal only
@@ -100,4 +102,27 @@ func writeWindow(b *strings.Builder, env Env, count, cursor, height int, indent 
 		b.WriteString(env.Styles.Faint.Render(fmt.Sprintf("%s↓ %d more below", indent, count-end)))
 		b.WriteString("\n")
 	}
+}
+
+// splitRow fits a row's text and the note that trails it into width,
+// clipping each so that together they fit — clipping them independently
+// against the full width is how a row ends up wider than the terminal. The
+// note gives way first, down to nothing, because the row's own name is
+// what the reader is looking for; the text keeps at least half the width
+// so a long note cannot squeeze it away either.
+func splitRow(text, note string, width int) (string, string) {
+	if note == "" {
+		return clipTail(text, width), ""
+	}
+	room := width - lipgloss.Width(note)
+	if half := width / 2; room < half {
+		room = half
+	}
+	text = clipTail(text, room)
+	room = width - lipgloss.Width(text)
+	if room <= 2 {
+		// Not enough left for even a marked-off fragment of the note.
+		return text, ""
+	}
+	return text, clipTail(note, room)
 }

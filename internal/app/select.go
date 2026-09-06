@@ -68,6 +68,11 @@ type selectItem struct {
 	// Cached marks an item already present in the local cache, so
 	// selecting it will not trigger a download.
 	Cached bool
+	// Note is a short suffix shown after the name — what this row still
+	// needs, or what selected it. NoteWarn styles it as a warning rather
+	// than an aside.
+	Note     string
+	NoteWarn bool
 	// Header marks a non-selectable separator row, e.g. "── Custom ──",
 	// used to group custom content under its own heading.
 	Header bool

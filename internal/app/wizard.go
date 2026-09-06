@@ -335,8 +335,97 @@ func capVersions(versions []catalog.Version, existing string) []catalog.Version 
 // every checked row visible, so selectedIDs stays complete whichever view
 // is on.
 func (s *WizardScreen) refreshLists() {
-	s.packages.setItems(curate(s.fullPackages(), curatedPackages, s.showAll, s.packages.selected))
-	s.addons.setItems(curate(s.fullAddons(), curatedAddons, s.showAll, s.addons.selected))
+	sel := s.selection()
+	s.packages.setItems(curate(s.annotate(s.fullPackages(), sel), curatedPackages, s.showAll, s.packages.selected))
+	s.addons.setItems(curate(s.annotate(s.fullAddons(), sel), curatedAddons, s.showAll, s.addons.selected))
+}
+
+// selection is everything checked across both steps, which is what a
+// requirement is judged against: add-ons depend on effect packages, so
+// neither list can answer the question alone. Add-ons only count when the
+// build can load them.
+func (s *WizardScreen) selection() map[string]bool {
+	sel := make(map[string]bool, len(s.packages.selected)+len(s.addons.selected))
+	for id, on := range s.packages.selected {
+		sel[id] = on
+	}
+	if s.flavor.Addon() {
+		for id, on := range s.addons.selected {
+			sel[id] = on
+		}
+	}
+	return sel
+}
+
+// annotate marks rows with what they still need, and rows that are only
+// there because something else needs them. Both are the same fact seen
+// from either end, and without them a package appearing checked that the
+// user never checked would look like a bug.
+func (s *WizardScreen) annotate(items []selectItem, sel map[string]bool) []selectItem {
+	// Which selected entries pull in which packages, so a dependency can
+	// name what wanted it.
+	wantedBy := map[string][]string{}
+	for _, src := range s.allItems() {
+		if !sel[src.ID] {
+			continue
+		}
+		for _, r := range requirementsFor(src.ID) {
+			for _, dep := range r.AnyOf {
+				if sel[dep] {
+					wantedBy[dep] = append(wantedBy[dep], src.Name)
+				}
+			}
+		}
+	}
+
+	out := make([]selectItem, len(items))
+	copy(out, items)
+	for i := range out {
+		if note, unmet := requirementNote(out[i].ID, sel); unmet && sel[out[i].ID] {
+			out[i].Note, out[i].NoteWarn = note, true
+			continue
+		}
+		if who := wantedBy[out[i].ID]; len(who) > 0 {
+			out[i].Note = "required by " + strings.Join(who, ", ")
+		}
+	}
+	return out
+}
+
+// allItems is every catalog row from both steps, unfiltered — the lookup
+// requirements are resolved against, which must not depend on which rows
+// happen to be visible.
+func (s *WizardScreen) allItems() []selectItem {
+	return append(s.fullPackages(), s.fullAddons()...)
+}
+
+// catalogIDs is every id the loaded catalog offers, so a requirement can
+// only ever select something that exists to download.
+func (s *WizardScreen) catalogIDs() map[string]bool {
+	ids := map[string]bool{}
+	for _, it := range s.allItems() {
+		if !it.Header && !it.Disabled {
+			ids[it.ID] = true
+		}
+	}
+	return ids
+}
+
+// itemNames maps every catalog id to its display name.
+func (s *WizardScreen) itemNames() map[string]string {
+	names := map[string]string{}
+	for _, it := range s.allItems() {
+		names[it.ID] = it.Name
+	}
+	return names
+}
+
+// unmet lists the requirements still not satisfied by the current
+// selection, for the review page.
+func (s *WizardScreen) unmet() []string {
+	sel := s.selection()
+	ids := append(s.packages.selectedIDs(), addonsForDownload(s.flavor, s.addons)...)
+	return unmetRequirements(ids, s.itemNames(), sel)
 }
 
 func (s *WizardScreen) fullPackages() []selectItem {
@@ -514,7 +603,18 @@ func (s *WizardScreen) handleMultiSelectKey(msg tea.KeyPressMsg, m *multiSelect,
 	case key.Matches(msg, s.keys.Down):
 		m.down()
 	case key.Matches(msg, s.keys.Toggle):
+		id := ""
+		if m.canToggle(m.cursor) {
+			id = m.items[m.cursor].ID
+		}
 		m.toggle()
+		// Turning something on pulls in what it needs; turning it off
+		// leaves the dependency alone, since it may be wanted on its own
+		// and the review page will say if something is now missing.
+		if id != "" && m.selected[id] {
+			satisfy(id, s.packages.selected, s.catalogIDs())
+		}
+		s.refreshLists()
 	case key.Matches(msg, wizardShowAll):
 		s.showAll = !s.showAll
 		s.refreshLists()
@@ -904,25 +1004,44 @@ func writeSelectList(b *strings.Builder, env Env, m multiSelect, height int) {
 		if it.Required {
 			name += "  (required)"
 		}
-
 		line := fmt.Sprintf("%s%s %s", marker, box, name)
+
+		// A note rides on the row rather than under it: an unmet
+		// requirement has to be readable without moving the cursor onto
+		// it, and a second line per row would break the window's height
+		// arithmetic for the sake of a handful of rows. The note keeps its
+		// own color, so the row is styled and clipped before it is
+		// appended.
+		note, noteStyle := "", env.Styles.Faint
 		switch {
 		case it.Disabled:
 			// A manual-only add-on says both things: that yarm cannot
 			// install it, which is why the row is greyed, and where to get
 			// it by hand when the catalog knows.
-			note := "  — manual install only"
+			note = "manual install only"
 			if it.DisabledNote != "" {
 				note += ": " + it.DisabledNote
 			}
-			line = env.Styles.Faint.Render(clipTail(line+note, env.Width))
-		case i == m.cursor:
-			line = env.Styles.Selected.Render(clipTail(line, env.Width))
-		default:
-			line = clipTail(line, env.Width)
+		case it.Note != "":
+			note = it.Note
+			if it.NoteWarn {
+				noteStyle = env.Styles.Warn
+			}
 		}
-		b.WriteString(line)
+
+		if note != "" {
+			note = "  — " + note
+		}
+		line, note = splitRow(line, note, env.Width)
+		switch {
+		case it.Disabled:
+			line = env.Styles.Faint.Render(line)
+		case i == m.cursor:
+			line = env.Styles.Selected.Render(line)
+		}
+		b.WriteString(line + noteStyle.Render(note))
 		b.WriteString("\n")
+
 		if it.Description != "" && i == m.cursor {
 			b.WriteString(env.Styles.Faint.Render(clipTail("    "+it.Description, env.Width)))
 			b.WriteString("\n")
@@ -968,23 +1087,50 @@ func (s *WizardScreen) viewReview(b *strings.Builder, env Env, height int) {
 		opts.WriteString("\n")
 	}
 
+	// An unmet requirement is the one thing on this page that can make the
+	// install do nothing once it runs, so it goes above the download list
+	// and is not allowed to scroll away. Built into its own builder
+	// because b already carries the wizard header, which is not this
+	// page's to measure.
+	var check strings.Builder
+	if unmet := s.unmet(); len(unmet) > 0 {
+		section(&check, "Check")
+		for _, line := range unmet {
+			check.WriteString(env.Styles.Warn.Render(clipTail("  ! "+line, env.Width)))
+			check.WriteString("\n")
+		}
+		check.WriteString("\n")
+	}
+	// The page is assembled separately from b, which already carries the
+	// wizard header: only this page's own content can be measured against
+	// the height it was given, and only it may be clipped to fit.
+	var page strings.Builder
+	page.WriteString(check.String())
+
 	missing := s.missing()
-	section(b, "To download")
+	section(&page, "To download")
 	if len(missing) == 0 {
-		b.WriteString(env.Styles.Faint.Render("  nothing — everything is already cached"))
-		b.WriteString("\n")
+		page.WriteString(env.Styles.Faint.Render("  nothing — everything is already cached"))
+		page.WriteString("\n")
 	}
-	// -2 for this section's own header and the blank line before Options.
-	room := height - countLines(opts.String()) - 2
-	if room < 2 {
-		room = 2
+	// -2 for this section's own header and the blank line before Options;
+	// whatever the Check block above already took comes off too.
+	room := height - countLines(opts.String()) - countLines(check.String()) - 2
+	if room < 1 {
+		room = 1
 	}
-	writeWindow(b, env, len(missing), 0, room, "  ", func(i int) {
-		b.WriteString(clipTail("  "+missing[i], env.Width))
-		b.WriteString("\n")
+	writeWindow(&page, env, len(missing), 0, room, "  ", func(i int) {
+		page.WriteString(clipTail("  "+missing[i], env.Width))
+		page.WriteString("\n")
 	})
-	b.WriteString("\n")
-	b.WriteString(opts.String())
+	page.WriteString("\n")
+	page.WriteString(opts.String())
+
+	// Backstop: on a terminal too short for even a one-row download list
+	// plus the options, the arithmetic above cannot win, and a page that
+	// overflows would push the footer — the anti-cheat warning included —
+	// off the screen entirely.
+	b.WriteString(clipLines(page.String(), height))
 }
 
 // addonsForDownload returns the selected add-on ids, or none when the

@@ -886,3 +886,187 @@ func TestCuratedIDsAreCatalogSlugs(t *testing.T) {
 		}
 	}
 }
+
+// withDependencies returns sample data holding a real dependency pair from
+// the catalog: the AutoHDR add-on, which does nothing useful without a
+// tone-mapping shader, plus both shaders that can satisfy it.
+func withDependencies(d WizardData) WizardData {
+	d.Packages = append(d.Packages,
+		catalog.Package{ID: "reshade-hdr-shaders-by-lilium", Name: "ReShade_HDR_shaders by Lilium"},
+		catalog.Package{ID: "advancedautohdr-by-pumbo", Name: "AdvancedAutoHDR by Pumbo"},
+	)
+	d.Addons = append(d.Addons, catalog.Addon{
+		ID:    "autohdr-by-endlesslyflowering-original-by-majorpainthecactus",
+		Name:  "AutoHDR by EndlesslyFlowering",
+		URL64: "https://example.invalid/autohdr.addon64",
+	})
+	return d
+}
+
+// depsWizard loads a wizard over withDependencies data, parked on step.
+func depsWizard(t *testing.T, step wizardStep) *WizardScreen {
+	t.Helper()
+	deps := fakeDeps()
+	deps.WizardData = fakeWizardData{data: withDependencies(sampleWizardData())}
+	return advance(t, loadWizard(t, sampleGameEntry(), 0, deps), step)
+}
+
+// toggleRow moves the cursor onto id and presses space.
+func toggleRow(t *testing.T, s *WizardScreen, m *multiSelect, id string) *WizardScreen {
+	t.Helper()
+	for i := 0; i < len(m.items); i++ {
+		if m.items[m.cursor].ID == id {
+			return pressSpecial(t, s, tea.KeySpace)
+		}
+		s = pressSpecial(t, s, tea.KeyDown)
+	}
+	t.Fatalf("row %q is not in the list", id)
+	return s
+}
+
+const autoHDR = "autohdr-by-endlesslyflowering-original-by-majorpainthecactus"
+
+// Selecting the AutoHDR add-on must bring its tone-mapping shader with it:
+// upstream records the requirement only as English inside the add-on's
+// description, and an AutoHDR install without it silently does nothing.
+func TestWizardSelectingAnAddonSelectsWhatItRequires(t *testing.T) {
+	s := depsWizard(t, stepAddons)
+	s = toggleRow(t, s, &s.addons, autoHDR)
+
+	if !s.packages.selected["reshade-hdr-shaders-by-lilium"] {
+		t.Fatal("selecting AutoHDR should also select the tone-mapping shader it requires")
+	}
+
+	req, ok := advance(t, s, stepReview).buildRequest()
+	if !ok {
+		t.Fatal("buildRequest() failed")
+	}
+	if !slices.Contains(req.Packages, "reshade-hdr-shaders-by-lilium") {
+		t.Errorf("Packages = %v, want the required shader included", req.Packages)
+	}
+}
+
+// A dependency that was pulled in says who pulled it in, so a package the
+// user never checked does not just appear checked.
+func TestWizardDependencySaysWhatRequiredIt(t *testing.T) {
+	s := depsWizard(t, stepAddons)
+	s = toggleRow(t, s, &s.addons, autoHDR)
+
+	body := pressEscTo(t, s, stepShaders).View(wizardEnv())
+	if !strings.Contains(body, "required by AutoHDR by EndlesslyFlowering") {
+		t.Errorf("the shaders step should say what pulled the dependency in:\n%s", body)
+	}
+}
+
+// A requirement the user already met another way is left alone: yarm must
+// not add Lilium's shader on top of the alternative that is already ticked.
+func TestWizardRequirementAlreadyMetIsNotAddedTwice(t *testing.T) {
+	s := depsWizard(t, stepShaders)
+	s = press(t, s, 'a') // both alternatives are off the shortlist
+	s = toggleRow(t, s, &s.packages, "advancedautohdr-by-pumbo")
+	s = toggleRow(t, advance(t, s, stepAddons), &s.addons, autoHDR)
+
+	if s.packages.selected["reshade-hdr-shaders-by-lilium"] {
+		t.Error("the requirement was already met by AdvancedAutoHDR; nothing more should have been added")
+	}
+}
+
+// Unchecking a dependency by hand is allowed — it may be installed
+// already — but the review page has to say what is now missing rather than
+// running an install that quietly does nothing.
+func TestWizardReviewWarnsAboutUnmetRequirements(t *testing.T) {
+	s := depsWizard(t, stepAddons)
+	s = toggleRow(t, s, &s.addons, autoHDR)
+
+	// Drop the dependency again from the shaders step.
+	s = pressEscTo(t, s, stepShaders)
+	s = toggleRow(t, s, &s.packages, "reshade-hdr-shaders-by-lilium")
+	if s.packages.selected["reshade-hdr-shaders-by-lilium"] {
+		t.Fatal("the dependency should have been unchecked")
+	}
+
+	body := advance(t, s, stepReview).View(wizardEnv())
+	if !strings.Contains(body, "Check") || !strings.Contains(body, "needs a tone-mapping shader") {
+		t.Errorf("review should warn that AutoHDR's requirement is unmet:\n%s", body)
+	}
+}
+
+// A requirement nothing in the catalog can satisfy is reported, never
+// silently "satisfied" by selecting something arbitrary.
+func TestRequirementWithNothingToSelectIsOnlyReported(t *testing.T) {
+	selected := map[string]bool{"frame-capture-by-murchalloo": true}
+	if added := satisfy("frame-capture-by-murchalloo", selected, map[string]bool{}); len(added) != 0 {
+		t.Errorf("satisfy() selected %v for a requirement with no catalog entry", added)
+	}
+	got := unmetRequirements([]string{"frame-capture-by-murchalloo"},
+		map[string]string{"frame-capture-by-murchalloo": "Frame Capture"}, selected)
+	if len(got) != 1 || !strings.Contains(got[0], "DepthToAddon.fx") {
+		t.Errorf("unmetRequirements() = %v, want the manual requirement named", got)
+	}
+}
+
+// Every id named by the requirements table must be one the catalog can
+// actually produce, or the dependency silently never resolves.
+func TestRequirementIDsAreCatalogSlugs(t *testing.T) {
+	for id, reqs := range requires {
+		if got := catalog.Slugify(id); got != id {
+			t.Errorf("requires key %q is not a catalog slug (Slugify gives %q)", id, got)
+		}
+		for _, r := range reqs {
+			for _, dep := range r.AnyOf {
+				if got := catalog.Slugify(dep); got != dep {
+					t.Errorf("%q requires %q, which is not a catalog slug (Slugify gives %q)", id, dep, got)
+				}
+			}
+		}
+	}
+}
+
+// pressEscTo walks the wizard backward to step.
+func pressEscTo(t *testing.T, s *WizardScreen, step wizardStep) *WizardScreen {
+	t.Helper()
+	for i := 0; i <= len(wizardSteps); i++ {
+		if s.step == step {
+			return s
+		}
+		next, handled := pressEsc(t, s)
+		if !handled {
+			t.Fatalf("esc stopped at %v before reaching %v", s.step, step)
+		}
+		s = next
+	}
+	t.Fatalf("step %v was never reached", step)
+	return s
+}
+
+// Requirement notes ride on the row and the review page grows a "Check"
+// block, both of which are new ways to overflow a narrow terminal.
+func TestWizardWithRequirementsFitsNarrowTerminals(t *testing.T) {
+	for _, size := range []struct{ width, height int }{{80, 21}, {60, 21}, {44, 21}} {
+		for _, step := range []wizardStep{stepShaders, stepAddons, stepReview} {
+			s := depsWizard(t, stepAddons)
+			s = press(t, s, 'a')
+			s = toggleRow(t, s, &s.addons, autoHDR)
+			// Leave the requirement unmet, which is the widest case: the
+			// row carries a "needs …" note and Review grows a Check block.
+			s = pressEscTo(t, s, stepShaders)
+			s = toggleRow(t, s, &s.packages, "reshade-hdr-shaders-by-lilium")
+			if step != stepShaders {
+				s = advance(t, s, step)
+			}
+
+			env := Env{Styles: NewStyles(true), Width: size.width, Height: size.height}
+			body := s.View(env)
+			if got := countLines(body); got > env.Height {
+				t.Errorf("%dx%d, step %v: rendered %d lines into a height of %d:\n%s",
+					size.width, size.height, step, got, env.Height, body)
+			}
+			for _, line := range strings.Split(body, "\n") {
+				if lipgloss.Width(line) > size.width {
+					t.Errorf("%dx%d, step %v: line is %d columns wide:\n%q",
+						size.width, size.height, step, lipgloss.Width(line), line)
+				}
+			}
+		}
+	}
+}

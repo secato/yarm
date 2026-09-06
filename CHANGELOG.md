@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The wizard understands dependencies between catalog entries. Checking
+  something that needs another package now selects that package too,
+  across steps — ticking the AutoHDR add-on ticks the tone-mapping shader
+  it needs, without which it silently does nothing. Requirements with
+  alternatives (AutoHDR takes Lilium's pack *or* Pumbo's) are satisfied by
+  whichever is already selected. The dependency's row says what pulled it
+  in; unchecking it by hand is allowed but turns the dependent's row into
+  a warning and adds a "Check" block to the review page. Upstream records
+  none of this — it is prose inside PackageDescription — so the table is
+  hand-kept in `internal/app/requires.go`, and only ids the loaded catalog
+  actually offers are ever selected.
+
 ### Changed
 
 - The install wizard's Shaders and Add-ons steps open on a curated
@@ -63,6 +77,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `space` rather than its own `o` key.
 
 ### Fixed
+
+- A list row's trailing note is no longer clipped independently of the
+  row's own text, which could render a line wider than the terminal; and
+  the review page is clipped to the height it was given rather than
+  pushing the footer (anti-cheat warning included) off a short screen.
 
 - A confirm dialog (uninstall, delete a cached resource, adopt an
   unmanaged install) no longer treats Enter as "yes" — only `y` confirms
