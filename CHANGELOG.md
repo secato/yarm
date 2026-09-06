@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `GameDetailScreen` now selects by folder, not by executable: ReShade's
+  unit is the folder, so pressing `i`/`u`/`a` (renamed from `m`, see
+  below) always acts on the current folder's one install, and there is
+  nothing to select within a folder holding several executables (its own
+  bug report: selecting a sibling executable used to look actionable when
+  it never was). The folder cursor (`↑`/`↓`) only appears at all when a
+  game actually has more than one folder — the common single-folder case
+  renders exactly as before, just without a pointless per-executable
+  cursor.
+  - Per-folder rendering is also simplified and consistently indented:
+    `Release/` as a bare header, its `ReShade - <one-line summary>` and
+    `Executables` indented under it, and each executable on one line
+    (`F10.exe · x86 · unknown`) instead of two — both the games list side
+    panel and `GameDetailScreen` share this through `reshadeStatusText`
+    and the same folder-block layout.
+  - `t` ("show all exes") is gone: skipped executables (installers, crash
+    handlers) are simply never shown in this view — the toggle was solving
+    a problem the per-folder redesign no longer has.
+  - Pressing `i` on a folder with an unmanaged install now opens the same
+    adopt confirmation `a` does, instead of attempting a fresh install
+    over files that are already there and would only conflict with it.
+  - `m` ("track this install") is renamed `a` ("adopt ReShade") — a
+    shortcut that actually matches the word it stands for — and its
+    confirm dialog explains what adopting actually does in more detail:
+    which files get recorded, that nothing on disk changes, and what
+    becomes possible afterward (update/uninstall through yarm).
+  - The add-on build is flagged with a red warning wherever it appears —
+    the wizard's version and review steps, and any "ReShade - ..." status
+    line for an add-on install or an unmanaged folder with add-on files —
+    since some anti-cheat systems treat it as a cheat-tool signature and
+    using it in an online or competitive game can get an account banned.
+
 ### Added
 
 - ReShade's own runtime files are now read for information yarm never

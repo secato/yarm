@@ -277,8 +277,7 @@ func TestViewSetsAltScreenAndTitle(t *testing.T) {
 }
 
 // A pushed screen has never seen a WindowSizeMsg — Bubble Tea only sends
-// one on a real resize — so without the shell handing it the current size
-// its table holds no columns or rows and the screen renders blank.
+// one on a real resize — so it must still render correctly from Env alone.
 func TestPushedScreenIsSized(t *testing.T) {
 	m := loaded(t)
 	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -288,16 +287,9 @@ func TestPushedScreenIsSized(t *testing.T) {
 		t.Fatalf("screen is %T, want *GameDetailScreen", m.Screen())
 	}
 
-	if got := len(ds.table.Columns()); got == 0 {
-		t.Error("the pushed screen has no table columns, so it would render blank")
-	}
-	if got := len(ds.table.Rows()); got == 0 {
-		t.Error("the pushed screen has no table rows")
-	}
-
 	body := ds.View(m.env())
 	if !strings.Contains(body, "Control.exe") {
-		t.Errorf("the detail table did not render its executables:\n%s", body)
+		t.Errorf("the detail view did not render its executables:\n%s", body)
 	}
 }
 
@@ -402,8 +394,8 @@ func TestPopToRootClearsStackAndReloads(t *testing.T) {
 	}
 }
 
-// The adopt confirm flow, end to end through the root model: press m on an
-// unmanaged executable, confirm, and land on a Result screen. ScanUnmanaged
+// The adopt confirm flow, end to end through the root model: press a on an
+// unmanaged folder, confirm, and land on a Result screen. ScanUnmanaged
 // probes the real filesystem, so this entry points at a real temp
 // directory holding a minimal ReShade install; the actual recording is
 // faked so the test does not depend on installs.json.
@@ -439,9 +431,9 @@ func TestAdoptConfirmFlow(t *testing.T) {
 		t.Fatalf("screen = %T, want *GameDetailScreen", m.Screen())
 	}
 
-	m = drive(t, m, tea.KeyPressMsg{Code: 'm', Text: "m"})
+	m = drive(t, m, tea.KeyPressMsg{Code: 'a', Text: "a"})
 	if m.overlay == nil {
-		t.Fatal("'m' on an unmanaged executable should open a confirm overlay")
+		t.Fatal("'a' on an unmanaged folder should open a confirm overlay")
 	}
 
 	m = drive(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
@@ -458,15 +450,15 @@ func TestAdoptConfirmFlow(t *testing.T) {
 	}
 }
 
-// 'm' must do nothing on an executable that is not flagged unmanaged —
-// there is nothing to confirm.
-func TestManageKeyNoOpWithoutUnmanaged(t *testing.T) {
+// 'a' must do nothing on a folder that is not flagged unmanaged — there
+// is nothing to confirm.
+func TestAdoptKeyNoOpWithoutUnmanaged(t *testing.T) {
 	m := loaded(t) // cursor starts on Control Ultimate Edition, not unmanaged
 	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
-	m = drive(t, m, tea.KeyPressMsg{Code: 'm', Text: "m"})
+	m = drive(t, m, tea.KeyPressMsg{Code: 'a', Text: "a"})
 	if m.overlay != nil {
-		t.Error("'m' on a not-unmanaged executable should not open a confirm overlay")
+		t.Error("'a' on a not-unmanaged folder should not open a confirm overlay")
 	}
 }
 

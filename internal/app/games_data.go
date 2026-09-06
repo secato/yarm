@@ -113,16 +113,28 @@ func groupByFolder(root string, exes []Executable) []FolderGroup {
 	return groups
 }
 
-// writeReShadeStatus writes what is installed (or found) in grp as plain
-// text lines, styled and ready to append to a strings.Builder. hint is
-// shown under an unmanaged finding, and differs by caller: the games list
-// side panel says to open the detail screen first, the detail screen
-// itself just says to press the key. Shared so the wording (and styling)
-// of "what's installed" matches wherever it is shown.
-func writeReShadeStatus(b *strings.Builder, grp FolderGroup, env Env, hint string) {
+// anticheatWarning is shown wherever the add-on build is in play — it can
+// load code beyond ReShade's own effects, which some anti-cheat systems
+// treat as a cheat-tool signature; using it in an online or competitive
+// game can get an account flagged or banned.
+const anticheatWarning = "⚠ add-ons can trigger anti-cheat detection — avoid them in online or competitive games unless you know the game allows it"
+
+// reshadeStatusText returns what is installed (or found) in grp as plain,
+// styled text, one fact per line, always starting with a "ReShade - "
+// summary line so a caller can print it as a single self-contained block.
+// hint is shown under an unmanaged finding, and differs by caller: the
+// games list side panel says to open the detail screen first, the detail
+// screen itself just says to press the key. Shared so the wording (and
+// styling) of "what's installed" matches wherever it is shown.
+func reshadeStatusText(grp FolderGroup, env Env, hint string) string {
+	var b strings.Builder
+	addon := false
+
 	switch {
 	case grp.Installed != nil:
 		in := grp.Installed
+		addon = strings.EqualFold(in.ReShade.Flavor, string(install.FlavorAddon))
+		b.WriteString("ReShade - ")
 		b.WriteString(env.Styles.Good.Render(
 			fmt.Sprintf("✓ %s (%s) — %s", in.ReShade.Version, in.ReShade.Flavor, dllWithCoverage(in.ReShade.DLL))))
 		b.WriteString("\n")
@@ -130,9 +142,11 @@ func writeReShadeStatus(b *strings.Builder, grp FolderGroup, env Env, hint strin
 			b.WriteString(env.Styles.Faint.Render("last seen running: " + grp.Runtime.Version))
 			b.WriteString("\n")
 		}
-		writeIndentedList(b, env, "packages", in.Packages)
-		writeIndentedList(b, env, "add-ons", in.Addons)
+		writeIndentedList(&b, env, "packages", in.Packages)
+		writeIndentedList(&b, env, "add-ons", in.Addons)
 	case grp.Unmanaged != nil:
+		addon = grp.Unmanaged.HasAddons
+		b.WriteString("ReShade - ")
 		b.WriteString(env.Styles.Warn.Render("⚠ found, untracked (" + dllWithCoverage(grp.Unmanaged.DLLName) + ")"))
 		b.WriteString("\n")
 		if grp.Runtime.Version != "" {
@@ -140,11 +154,17 @@ func writeReShadeStatus(b *strings.Builder, grp FolderGroup, env Env, hint strin
 			b.WriteString("\n")
 		}
 	default:
+		b.WriteString("ReShade - ")
 		b.WriteString(env.Styles.Faint.Render("not installed"))
 		b.WriteString("\n")
 	}
 
-	writeIndentedList(b, env, "enabled", grp.Runtime.ActiveTechniques)
+	if addon {
+		b.WriteString(env.Styles.Bad.Render(anticheatWarning))
+		b.WriteString("\n")
+	}
+
+	writeIndentedList(&b, env, "enabled", grp.Runtime.ActiveTechniques)
 	if n := len(grp.Runtime.AvailableEffects); n > 0 {
 		b.WriteString(env.Styles.Faint.Render(fmt.Sprintf("available: %d effect file(s)", n)))
 		b.WriteString("\n")
@@ -154,6 +174,7 @@ func writeReShadeStatus(b *strings.Builder, grp FolderGroup, env Env, hint strin
 		b.WriteString(env.Styles.Faint.Render(hint))
 		b.WriteString("\n")
 	}
+	return b.String()
 }
 
 // dllWithCoverage appends which graphics APIs a proxy DLL name covers

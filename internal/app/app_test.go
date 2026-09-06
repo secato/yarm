@@ -179,11 +179,7 @@ func TestGameDetailRenders(t *testing.T) {
 
 	s.send(tea.KeyPressMsg{Code: tea.KeyEnter})
 	waitForText(t, s, "Control Ultimate Edition")
-	waitForText(t, s, "executable(s) hidden")
-
-	// Skipped executables appear only when asked for.
-	s.send(tea.KeyPressMsg{Code: 't', Text: "t"})
-	waitForText(t, s, "VC_redist.x64.exe")
+	waitForText(t, s, "Control.exe")
 
 	finish(t, s)
 }

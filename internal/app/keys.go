@@ -24,7 +24,7 @@ type KeyMap struct {
 	// and within the wizard itself.
 	Install   key.Binding
 	Uninstall key.Binding
-	Manage    key.Binding // m: adopt an unmanaged install found on disk
+	Adopt     key.Binding // a: adopt an unmanaged install found on disk
 	Toggle    key.Binding // space: multi-select toggle
 	Flavor    key.Binding // tab: normal/addon flavor toggle
 	Overwrite key.Binding // o: allow replacing foreign files
@@ -50,7 +50,7 @@ func DefaultKeyMap() KeyMap {
 
 		Install:   key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "install ReShade")),
 		Uninstall: key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "uninstall")),
-		Manage:    key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "track this install")),
+		Adopt:     key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "adopt ReShade")),
 		Toggle:    key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "toggle")),
 		Flavor:    key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "toggle flavor")),
 		Overwrite: key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "toggle overwrite")),

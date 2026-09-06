@@ -63,6 +63,11 @@ var dllOptions = []dllOption{
 	{"opengl32.dll", "OpenGL"},
 }
 
+// showAllBinding toggles executables the scanner flagged as installers,
+// crash handlers and the like, on the wizard's own exe-selection step.
+var showAllBinding = key.NewBinding(
+	key.WithKeys("t"), key.WithHelp("t", "show all exes"))
+
 // wizardDataLoadedMsg carries the catalog/custom data the wizard needs,
 // once it has loaded — successfully or not.
 //
@@ -579,7 +584,12 @@ func (s *WizardScreen) viewVersion(b *strings.Builder, env Env) {
 		b.WriteString(env.Styles.Accent.Render("normal"))
 	}
 	b.WriteString(env.Styles.Faint.Render("  (tab to toggle)"))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
+	if s.flavor.Addon() {
+		b.WriteString(env.Styles.Bad.Render(anticheatWarning))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
 
 	if len(s.data.Versions) == 0 {
 		b.WriteString(env.Styles.Faint.Render("No versions available."))
@@ -678,6 +688,10 @@ func (s *WizardScreen) viewReview(b *strings.Builder, env Env) {
 
 	_, _ = fmt.Fprintf(b, "%s\n", exe.Path)
 	_, _ = fmt.Fprintf(b, "ReShade %s (%s) → %s\n", version.Version, s.flavor, s.selectedDLL())
+	if s.flavor.Addon() {
+		b.WriteString(env.Styles.Bad.Render(anticheatWarning))
+		b.WriteString("\n")
+	}
 
 	if ids := s.packages.selectedIDs(); len(ids) > 0 {
 		b.WriteString("packages: " + strings.Join(ids, ", ") + "\n")

@@ -290,6 +290,25 @@ func TestWizardSwitchingToNormalDropsAddonsFromRequest(t *testing.T) {
 	}
 }
 
+// The add-on build can trip anti-cheat detection — a real account-ban
+// risk in an online game — so the version step must warn about it
+// whenever addon is the current flavor, and not when normal is.
+func TestWizardVersionStepWarnsAboutAddonAntiCheatRisk(t *testing.T) {
+	s := loadWizard(t, sampleGameEntry(), 0, fakeDeps()) // fakeDeps defaults to addon
+	s.step = stepVersion
+	if !s.flavor.Addon() {
+		t.Fatal("setup: expected the addon flavor by default")
+	}
+	if body := s.View(wizardEnv()); !strings.Contains(body, anticheatWarning) {
+		t.Errorf("addon flavor should show the anti-cheat warning:\n%s", body)
+	}
+
+	s = pressSpecial(t, s, tea.KeyTab) // -> normal
+	if body := s.View(wizardEnv()); strings.Contains(body, anticheatWarning) {
+		t.Errorf("normal flavor should not show the anti-cheat warning:\n%s", body)
+	}
+}
+
 // HandleBack at the very first step must defer to the shell (pop back to
 // the game detail screen), not try to step further back.
 func TestWizardBackAtFirstStepDefers(t *testing.T) {

@@ -129,7 +129,6 @@ func TestGameDetailShowsOneUnmanagedStatusNotPerExecutable(t *testing.T) {
 
 	gd := NewGameDetailScreen(entry, Deps{})
 	env := Env{Styles: NewStyles(true), Width: 100, Height: 30}
-	gd.resize(env)
 	body := gd.View(env)
 
 	if n := strings.Count(body, "found, untracked"); n != 1 {
@@ -167,9 +166,7 @@ func TestWriteReShadeStatusShowsRuntimeInfoAndListsPackages(t *testing.T) {
 		t.Fatalf("groups = %d, want 1", len(groups))
 	}
 
-	var b strings.Builder
-	writeReShadeStatus(&b, groups[0], Env{Styles: NewStyles(true), Width: 100, Height: 30}, "hint")
-	body := b.String()
+	body := reshadeStatusText(groups[0], Env{Styles: NewStyles(true), Width: 100, Height: 30}, "hint")
 
 	if !strings.Contains(body, "last seen running: 6.8.0") {
 		t.Errorf("body should show the runtime-detected version:\n%s", body)
@@ -191,12 +188,11 @@ func TestWriteReShadeStatusShowsRuntimeInfoAndListsPackages(t *testing.T) {
 }
 
 // Three executables sharing one folder (Control.exe, Control_DX11.exe,
-// Control_DX12.exe) must all offer "update ReShade" once any one of them
-// is installed, and pressing i must always edit the actual install
-// regardless of which sibling is highlighted — ReShade applies to the
-// whole folder, and creating a second install.json entry for a sibling
-// executable over the same files would leave both entries claiming files
-// only one of them can safely own.
+// Control_DX12.exe) have exactly one install between them: pressing i
+// must edit the actual install regardless of which of the three the
+// registry happens to name — there is no per-executable selection to get
+// wrong, since ReShade applies to the whole folder and there is only one
+// folder here.
 func TestFolderLevelInstallTargetsTheActuallyInstalledExe(t *testing.T) {
 	installed := state.Install{
 		Exe:     "Control.exe",
@@ -212,11 +208,12 @@ func TestFolderLevelInstallTargetsTheActuallyInstalledExe(t *testing.T) {
 		Exes:   exes,
 		Groups: groupByFolder("/games/Control", exes),
 	}
+	if len(entry.Groups) != 1 {
+		t.Fatalf("groups = %d, want 1 (all three exes share the game root)", len(entry.Groups))
+	}
 
 	gd := NewGameDetailScreen(entry, fakeDeps())
 	env := Env{Styles: NewStyles(true), Width: 100, Height: 30}
-	gd.resize(env)
-	gd.table.SetCursor(2) // Control_DX12.exe — not the one actually installed
 
 	foundUpdate := false
 	for _, b := range gd.KeyBindings() {
@@ -225,7 +222,7 @@ func TestFolderLevelInstallTargetsTheActuallyInstalledExe(t *testing.T) {
 		}
 	}
 	if !foundUpdate {
-		t.Error(`KeyBindings() should offer "update ReShade" even with a sibling exe highlighted`)
+		t.Error(`KeyBindings() should offer "update ReShade" since the folder already has an install`)
 	}
 
 	_, cmd := gd.Update(tea.KeyPressMsg{Code: 'i', Text: "i"}, env)
@@ -242,5 +239,130 @@ func TestFolderLevelInstallTargetsTheActuallyInstalledExe(t *testing.T) {
 	}
 	if got, ok := wiz.selectedExe(); !ok || got.Path != "Control.exe" {
 		t.Errorf("wizard preselected %+v, want Control.exe (the one actually installed)", got)
+	}
+}
+
+// A game with two distinct folders — one installed, one holding an
+// unmanaged install — must let the cursor move between them, and offer
+// the right action for whichever one is current.
+func TestMultiFolderCursorOffersPerFolderActions(t *testing.T) {
+	dir := t.TempDir()
+	shipDir := filepath.Join(dir, "Ship")
+	if err := os.MkdirAll(shipDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	for name, body := range map[string]string{"dxgi.dll": "dll", "ReShade.ini": "[GENERAL]\n"} {
+		if err := os.WriteFile(filepath.Join(shipDir, name), []byte(body), 0o644); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+	}
+
+	installed := state.Install{Exe: "Release/Game.exe", ReShade: state.ReShadeInfo{Version: "6.8.0", Flavor: "normal", DLL: "dxgi.dll"}}
+	exes := []Executable{
+		{Executable: game.Executable{Path: "Release/Game.exe"}, Installed: &installed},
+		{Executable: game.Executable{Path: "Ship/Game.exe"}},
+	}
+	entry := GameEntry{
+		Game:   game.Game{ID: "manual:x", Name: "Two Folders", Root: dir},
+		Exes:   exes,
+		Groups: groupByFolder(dir, exes),
+	}
+	if len(entry.Groups) != 2 {
+		t.Fatalf("groups = %d, want 2", len(entry.Groups))
+	}
+
+	gd := NewGameDetailScreen(entry, fakeDeps())
+	env := Env{Styles: NewStyles(true), Width: 100, Height: 30}
+
+	// Cursor starts on the first group (Release/, installed): expect an
+	// update binding, not an adopt one.
+	hasUpdate := false
+	for _, b := range gd.KeyBindings() {
+		if strings.Contains(b.Help().Desc, "update ReShade") {
+			hasUpdate = true
+		}
+	}
+	if !hasUpdate {
+		t.Error("starting on Release/ should offer \"update ReShade\"")
+	}
+
+	gd.Update(tea.KeyPressMsg{Code: 'j', Text: "j"}, env)
+	hasAdopt := false
+	for _, b := range gd.KeyBindings() {
+		if strings.Contains(b.Help().Desc, "adopt") {
+			hasAdopt = true
+		}
+	}
+	if !hasAdopt {
+		t.Error("moving to Ship/ should offer to adopt its unmanaged install")
+	}
+
+	body := gd.View(env)
+	if !strings.Contains(body, "Release/") || !strings.Contains(body, "Ship/") {
+		t.Errorf("both folder headers should be shown:\n%s", body)
+	}
+}
+
+// The add-on build can trip anti-cheat detection, which is a real
+// account-ban risk in an online game — the warning must show for both an
+// already-tracked add-on install and an unmanaged one found with add-on
+// files, but not for a plain normal-flavor install.
+func TestReshadeStatusTextWarnsAboutAddonAntiCheatRisk(t *testing.T) {
+	env := Env{Styles: NewStyles(true), Width: 100, Height: 30}
+
+	addonInstalled := FolderGroup{Installed: &state.Install{
+		ReShade: state.ReShadeInfo{Version: "6.8.0", Flavor: "addon", DLL: "dxgi.dll"},
+	}}
+	if body := reshadeStatusText(addonInstalled, env, ""); !strings.Contains(body, anticheatWarning) {
+		t.Errorf("an installed add-on build should warn about anti-cheat risk:\n%s", body)
+	}
+
+	normalInstalled := FolderGroup{Installed: &state.Install{
+		ReShade: state.ReShadeInfo{Version: "6.8.0", Flavor: "normal", DLL: "dxgi.dll"},
+	}}
+	if body := reshadeStatusText(normalInstalled, env, ""); strings.Contains(body, anticheatWarning) {
+		t.Errorf("a normal-flavor install should not warn about add-ons:\n%s", body)
+	}
+
+	unmanagedAddon := FolderGroup{Unmanaged: &install.AdoptCandidate{DLLName: "dxgi.dll", HasAddons: true}}
+	if body := reshadeStatusText(unmanagedAddon, env, ""); !strings.Contains(body, anticheatWarning) {
+		t.Errorf("an unmanaged install with add-on files should warn about anti-cheat risk:\n%s", body)
+	}
+}
+
+// Pressing i on a folder with an unmanaged install must open the same
+// adopt confirmation a presses, not attempt a fresh install over files
+// that are already there.
+func TestInstallKeyRedirectsToAdoptWhenUnmanaged(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{"dxgi.dll": "dll", "ReShade.ini": "[GENERAL]\n"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+	}
+	exes := []Executable{{Executable: game.Executable{Path: "game.exe"}}}
+	entry := GameEntry{
+		Game:   game.Game{ID: "manual:x", Name: "X", Root: dir},
+		Exes:   exes,
+		Groups: groupByFolder(dir, exes),
+	}
+	if entry.Groups[0].Unmanaged == nil {
+		t.Fatal("setup: the folder should be detected as unmanaged")
+	}
+
+	gd := NewGameDetailScreen(entry, fakeDeps())
+	env := Env{Styles: NewStyles(true), Width: 100, Height: 30}
+
+	_, cmd := gd.Update(tea.KeyPressMsg{Code: 'i', Text: "i"}, env)
+	if cmd == nil {
+		t.Fatal("pressing i should still produce a command")
+	}
+	msg, ok := cmd().(showOverlayMsg)
+	if !ok {
+		t.Fatalf("message = %T, want showOverlayMsg (a confirm dialog)", cmd())
+	}
+	confirm, ok := msg.overlay.(confirmOverlay)
+	if !ok || !strings.Contains(confirm.question, "Adopt") {
+		t.Errorf("overlay = %+v, want an \"Adopt\" confirm dialog", msg.overlay)
 	}
 }

@@ -407,23 +407,30 @@ func (s *GamesScreen) renderDetail(e GameEntry, env Env) string {
 			if i > 0 {
 				b.WriteString("\n")
 			}
-			if multi && grp.Dir != "" {
-				b.WriteString(env.Styles.Faint.Render(grp.Dir + "/"))
+			indent := ""
+			if multi {
+				header := grp.Dir + "/"
+				if grp.Dir == "" {
+					header = "(game root)/"
+				}
+				b.WriteString(env.Styles.Subtitle.Render(header))
 				b.WriteString("\n")
+				indent = "  "
 			}
-			b.WriteString(env.Styles.Subtitle.Render("ReShade"))
-			b.WriteString("\n")
-			writeReShadeStatus(&b, grp, env, "press enter, then m to track it")
-			b.WriteString("\n")
-			b.WriteString(env.Styles.Subtitle.Render("Executables"))
-			b.WriteString("\n")
+			b.WriteString(indentLines(reshadeStatusText(grp, env, "press enter, then a to adopt it"), indent))
+			b.WriteString(indent + "Executables\n")
+			stripPrefix := ""
+			if grp.Dir != "" {
+				stripPrefix = grp.Dir + "/"
+			}
 			for _, ex := range grp.Exes {
 				if ex.Skipped {
 					continue
 				}
-				b.WriteString(truncate(ex.Path, s.detailWidth-6) + "\n")
+				name := strings.TrimPrefix(ex.Path, stripPrefix)
+				b.WriteString(indent + "  " + truncate(name, s.detailWidth-8) + "\n")
 				b.WriteString(env.Styles.Faint.Render(
-					fmt.Sprintf("  %s · %s", ex.Arch, apiLabel(ex.API))) + "\n")
+					indent+fmt.Sprintf("    %s · %s", ex.Arch, apiLabel(ex.API))) + "\n")
 			}
 		}
 	}

@@ -6,38 +6,34 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/secato/yarm/internal/install"
 	"github.com/secato/yarm/internal/state"
 )
 
-// GameDetailScreen lists one game's executables and what is installed into
-// each. Pressing i opens the install wizard on the highlighted executable;
-// u opens an uninstall confirmation when it has something installed.
+// GameDetailScreen shows one game's folders, what ReShade status applies
+// to each, and its executables. ReShade applies to a folder as a whole —
+// not to any one executable in it — so this screen's cursor moves between
+// folders, not executables, and only appears at all when a game has more
+// than one; i/u/a act on whichever folder is current (the only one, when
+// there is just one).
 type GameDetailScreen struct {
-	entry   GameEntry
-	deps    Deps
-	keys    KeyMap
-	table   table.Model
-	showAll bool
+	entry  GameEntry
+	deps   Deps
+	keys   KeyMap
+	cursor cursorList
 }
 
 // NewGameDetailScreen returns the detail view for a game.
 func NewGameDetailScreen(entry GameEntry, deps Deps) *GameDetailScreen {
 	return &GameDetailScreen{
-		entry: entry,
-		deps:  deps,
-		keys:  DefaultKeyMap(),
-		table: table.New(table.WithFocused(true)),
+		entry:  entry,
+		deps:   deps,
+		keys:   DefaultKeyMap(),
+		cursor: newCursorList(len(entry.Groups), 0),
 	}
 }
-
-// showAllBinding toggles executables the scanner flagged as installers,
-// crash handlers and the like.
-var showAllBinding = key.NewBinding(
-	key.WithKeys("t"), key.WithHelp("t", "show all exes"))
 
 // uninstallDoneMsg carries an uninstall run's result back to the screen
 // that started it, so it can hand off to a result screen.
@@ -59,28 +55,42 @@ func (s *GameDetailScreen) Init() tea.Cmd { return nil }
 // Title implements Screen.
 func (s *GameDetailScreen) Title() string { return "game — " + s.entry.Name }
 
+// currentGroup returns the folder the cursor is on, or the game's only
+// one when it has just a single folder (no cursor needed to pick it).
+func (s *GameDetailScreen) currentGroup() (FolderGroup, bool) {
+	i := s.cursor.Cursor()
+	if i < 0 || i >= len(s.entry.Groups) {
+		return FolderGroup{}, false
+	}
+	return s.entry.Groups[i], true
+}
+
+// multi reports whether this game has more than one folder — the only
+// case where a folder cursor, or naming which folder something applies
+// to, means anything at all.
+func (s *GameDetailScreen) multi() bool { return len(s.entry.Groups) > 1 }
+
 // KeyBindings implements Screen.
 func (s *GameDetailScreen) KeyBindings() []key.Binding {
-	bindings := []key.Binding{showAllBinding, s.keys.Back}
-	if len(s.visibleExes()) > 0 {
-		installBinding := s.keys.Install
-		// ReShade applies to the whole folder, not to whichever
-		// executable happens to be highlighted, so this checks the
-		// group's install rather than exe.Installed: Control.exe,
-		// Control_DX11.exe and Control_DX12.exe share one folder and one
-		// install, and any of them should offer "update", not just
-		// whichever one the install happened to be recorded against.
-		if exe, ok := s.selected(); ok {
-			if grp, ok := s.entry.GroupFor(exe.Path); ok && grp.Installed != nil {
-				installBinding = key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "update ReShade"))
-			}
-		}
-		bindings = append([]key.Binding{installBinding, s.keys.Uninstall}, bindings...)
+	bindings := []key.Binding{s.keys.Back}
+	if s.multi() {
+		bindings = append([]key.Binding{s.keys.Up, s.keys.Down}, bindings...)
 	}
-	if exe, ok := s.selected(); ok {
-		if grp, ok := s.entry.GroupFor(exe.Path); ok && grp.Unmanaged != nil {
-			bindings = append([]key.Binding{s.keys.Manage}, bindings...)
-		}
+
+	grp, ok := s.currentGroup()
+	if !ok {
+		return bindings
+	}
+	switch {
+	case grp.Unmanaged != nil:
+		bindings = append([]key.Binding{s.keys.Adopt}, bindings...)
+	case len(s.entry.PlayableExes()) > 0 && grp.Installed != nil:
+		bindings = append([]key.Binding{
+			key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "update ReShade")),
+			s.keys.Uninstall,
+		}, bindings...)
+	case len(s.entry.PlayableExes()) > 0:
+		bindings = append([]key.Binding{s.keys.Install}, bindings...)
 	}
 	return bindings
 }
@@ -88,10 +98,6 @@ func (s *GameDetailScreen) KeyBindings() []key.Binding {
 // Update implements Screen.
 func (s *GameDetailScreen) Update(msg tea.Msg, env Env) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		s.resize(env)
-		return s, nil
-
 	case uninstallDoneMsg:
 		return s, PushScreen(NewUninstallResultScreen(msg.exePath, msg.result, nil))
 
@@ -100,55 +106,45 @@ func (s *GameDetailScreen) Update(msg tea.Msg, env Env) (Screen, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		switch {
-		case key.Matches(msg, showAllBinding):
-			s.showAll = !s.showAll
-			s.resize(env)
+		case s.multi() && key.Matches(msg, s.keys.Up):
+			s.cursor.up()
+			return s, nil
+		case s.multi() && key.Matches(msg, s.keys.Down):
+			s.cursor.down()
 			return s, nil
 		case key.Matches(msg, s.keys.Install):
 			return s.startInstall()
 		case key.Matches(msg, s.keys.Uninstall):
 			return s.startUninstall()
-		case key.Matches(msg, s.keys.Manage):
+		case key.Matches(msg, s.keys.Adopt):
 			return s.startAdopt()
 		}
 	}
-
-	var cmd tea.Cmd
-	s.table, cmd = s.table.Update(msg)
-	return s, cmd
+	return s, nil
 }
 
-// selected returns the executable highlighted in the table.
-func (s *GameDetailScreen) selected() (Executable, bool) {
-	exes := s.visibleExes()
-	i := s.table.Cursor()
-	if i < 0 || i >= len(exes) {
-		return Executable{}, false
-	}
-	return exes[i], true
-}
-
-// startInstall opens the wizard on the highlighted executable — or, when
-// its folder already has an install, on whichever executable that install
-// is actually recorded against, regardless of which one is highlighted.
-// ReShade applies to the whole folder: re-running the wizard against a
-// sibling executable would leave the original install.json entry in
-// place while writing a second one over the same files, so this always
-// edits the one install a folder can have rather than risking a second.
+// startInstall opens the wizard on the current folder — or, when it
+// already has an install, on whichever executable that install is
+// actually recorded against, since it may not be the folder's usual
+// "primary" one. A folder yarm has not adopted an unmanaged install in
+// yet is not a fresh-install candidate: attempting one would collide with
+// the files already there, so this hands off to the adopt confirmation
+// instead, same as pressing a directly.
 func (s *GameDetailScreen) startInstall() (Screen, tea.Cmd) {
-	exe, ok := s.selected()
+	grp, ok := s.currentGroup()
 	if !ok {
 		return s, nil
 	}
-	target := exe
-	if grp, ok := s.entry.GroupFor(exe.Path); ok {
-		if installed, ok := grp.installedExe(); ok {
-			target = installed
-		}
+	if grp.Unmanaged != nil {
+		return s.startAdopt()
+	}
+
+	target := grp.primaryExe()
+	if installed, ok := grp.installedExe(); ok {
+		target = installed
 	}
 	// The wizard's own exe step starts from PlayableExes(), so the
-	// preselection has to be an index into that list, not into whatever
-	// this screen's "show all" toggle currently displays.
+	// preselection has to be an index into that list.
 	preselected := 0
 	for i, e := range s.entry.PlayableExes() {
 		if e.Path == target.Path {
@@ -159,17 +155,12 @@ func (s *GameDetailScreen) startInstall() (Screen, tea.Cmd) {
 	return s, PushScreen(NewWizardScreen(s.entry, preselected, s.deps))
 }
 
-// startUninstall confirms, then removes, the install covering the
-// highlighted executable's folder — resolved the same way startInstall
-// resolves its target, since the install may be recorded against a
-// sibling executable in the same folder rather than the highlighted one.
+// startUninstall confirms, then removes, the install covering the current
+// folder — resolved to whichever executable it is actually recorded
+// against, which may not be the one a fresh install would default to.
 func (s *GameDetailScreen) startUninstall() (Screen, tea.Cmd) {
-	exe, ok := s.selected()
-	if !ok || s.deps.Uninstaller == nil {
-		return s, nil
-	}
-	grp, ok := s.entry.GroupFor(exe.Path)
-	if !ok || grp.Installed == nil {
+	grp, ok := s.currentGroup()
+	if !ok || grp.Installed == nil || s.deps.Uninstaller == nil {
 		return s, nil
 	}
 	target, ok := grp.installedExe()
@@ -198,18 +189,13 @@ func (s *GameDetailScreen) startUninstall() (Screen, tea.Cmd) {
 }
 
 // startAdopt confirms, then records, the unmanaged install found in the
-// highlighted executable's folder. The install is tied to the folder's
-// primary executable, not necessarily the one highlighted — ReShade
-// intercepts by directory, so pressing m on a launcher stub sitting next
-// to the real game exe should still record the install against the game
-// exe, not the stub.
+// current folder. The install is tied to the folder's primary executable
+// — ReShade intercepts by directory, so this is not necessarily whichever
+// executable a user might expect, but it is the one yarm will report
+// against from now on.
 func (s *GameDetailScreen) startAdopt() (Screen, tea.Cmd) {
-	exe, ok := s.selected()
-	if !ok || s.deps.Adopter == nil {
-		return s, nil
-	}
-	grp, ok := s.entry.GroupFor(exe.Path)
-	if !ok || grp.Unmanaged == nil {
+	grp, ok := s.currentGroup()
+	if !ok || grp.Unmanaged == nil || s.deps.Adopter == nil {
 		return s, nil
 	}
 	candidate := *grp.Unmanaged
@@ -227,90 +213,13 @@ func (s *GameDetailScreen) startAdopt() (Screen, tea.Cmd) {
 	)
 
 	detail := fmt.Sprintf(
-		"Found ReShade (%s) already installed here, with %d file(s). "+
-			"Tracking it lets yarm update or uninstall it later; nothing on disk changes now.",
+		"This folder already has ReShade (%s) installed, with %d file(s): the proxy DLL, "+
+			"ReShade.ini, and any shaders, textures or add-ons already there. Adopting it records "+
+			"those files as yarm's own — nothing on disk changes now — so yarm can update or "+
+			"uninstall this install for you from then on, the same as one it created itself.",
 		candidate.DLLName, candidate.FileCount())
 
-	return s, Confirm("Track the existing ReShade install on "+exePath+"?", detail, action)
-}
-
-// visibleExes returns the executables the table should show.
-func (s *GameDetailScreen) visibleExes() []Executable {
-	if s.showAll {
-		return s.entry.Exes
-	}
-	return s.entry.PlayableExes()
-}
-
-func (s *GameDetailScreen) resize(env Env) {
-	const (
-		archW = 8
-		apiW  = 14 // room for "DirectX 12"-style labels
-	)
-	pathW := env.Width - archW - apiW - 6
-	if pathW < 20 {
-		pathW = 20
-	}
-
-	s.table.SetColumns([]table.Column{
-		{Title: "Executable", Width: pathW},
-		{Title: "Arch", Width: archW},
-		{Title: "API", Width: apiW},
-	})
-	s.table.SetWidth(env.Width)
-
-	// Everything printed above the table in View(): the root path, a blank
-	// line, the "ReShade" header, the section itself, a blank line, and
-	// the "Executables" header.
-	fixed := 5 + strings.Count(s.reshadeSection(env), "\n")
-	h := env.Height - fixed
-	if h < 3 {
-		h = 3
-	}
-	s.table.SetHeight(h)
-
-	rows := make([]table.Row, 0, len(s.entry.Exes))
-	for _, e := range s.visibleExes() {
-		// The status marker reflects the executable's folder, not the
-		// executable itself: every executable sharing an installed
-		// folder is covered by the same install, so all of them show the
-		// same ✓ rather than only the one literally recorded against.
-		marker := ""
-		if grp, ok := s.entry.GroupFor(e.Path); ok {
-			switch {
-			case grp.Installed != nil:
-				marker = "✓ "
-			case grp.Unmanaged != nil:
-				marker = "⚠ "
-			}
-		}
-		name := marker + e.Path
-		if e.Skipped {
-			name = marker + "· " + e.Path
-		}
-		rows = append(rows, table.Row{name, string(e.Arch), apiLabel(e.API)})
-	}
-	s.table.SetRows(rows)
-}
-
-// reshadeSection renders what is installed (or found) for every folder
-// this game's executables live in — shown before the executables table so
-// "what's actually installed" is the first thing the user sees, not
-// something they have to infer from a blank column.
-func (s *GameDetailScreen) reshadeSection(env Env) string {
-	var b strings.Builder
-	multi := len(s.entry.Groups) > 1
-	for i, grp := range s.entry.Groups {
-		if multi && grp.Dir != "" {
-			b.WriteString(env.Styles.Faint.Render(grp.Dir + "/"))
-			b.WriteString("\n")
-		}
-		writeReShadeStatus(&b, grp, env, "press m to track it")
-		if i < len(s.entry.Groups)-1 {
-			b.WriteString("\n")
-		}
-	}
-	return b.String()
+	return s, Confirm("Adopt the existing ReShade install on "+exePath+"?", detail, action)
 }
 
 // View implements Screen.
@@ -337,20 +246,67 @@ func (s *GameDetailScreen) View(env Env) string {
 		return b.String()
 	}
 
-	b.WriteString(env.Styles.Subtitle.Render("ReShade"))
-	b.WriteString("\n")
-	b.WriteString(s.reshadeSection(env))
-	b.WriteString("\n")
-
-	b.WriteString(env.Styles.Subtitle.Render("Executables"))
-	b.WriteString("\n")
-	b.WriteString(s.table.View())
-
-	hidden := len(s.entry.Exes) - len(s.visibleExes())
-	if hidden > 0 {
-		b.WriteString("\n")
-		b.WriteString(env.Styles.Faint.Render(
-			fmt.Sprintf("%d executable(s) hidden — press t to show all", hidden)))
+	multi := s.multi()
+	for i, grp := range s.entry.Groups {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		s.writeGroup(&b, grp, i, multi, env)
 	}
 	return b.String()
+}
+
+// writeGroup renders one folder: its ReShade status, then its
+// executables (each on one line — the folder header already says which
+// directory, so an executable's own path need not repeat it). Indented
+// one level, with its own "<dir>/" header, only when the game has more
+// than one folder; a single-folder game (by far the common case) renders
+// exactly as it always did, at the left margin.
+func (s *GameDetailScreen) writeGroup(b *strings.Builder, grp FolderGroup, i int, multi bool, env Env) {
+	indent := ""
+	if multi {
+		marker := "  "
+		style := env.Styles.Subtitle
+		if i == s.cursor.Cursor() {
+			marker = "▸ "
+			style = env.Styles.Selected
+		}
+		header := grp.Dir + "/"
+		if grp.Dir == "" {
+			header = "(game root)/"
+		}
+		b.WriteString(style.Render(marker + header))
+		b.WriteString("\n")
+		indent = "  "
+	}
+
+	b.WriteString(indentLines(reshadeStatusText(grp, env, "press a to adopt it"), indent))
+
+	stripPrefix := ""
+	if grp.Dir != "" {
+		stripPrefix = grp.Dir + "/"
+	}
+	b.WriteString(indent + "Executables\n")
+	for _, e := range grp.Exes {
+		if e.Skipped {
+			continue
+		}
+		name := strings.TrimPrefix(e.Path, stripPrefix)
+		_, _ = fmt.Fprintf(b, "%s  %s · %s · %s\n", indent, name, e.Arch, apiLabel(e.API))
+	}
+}
+
+// indentLines prefixes every line of s with prefix, including the first —
+// used to nest a folder's ReShade status under its own header only when
+// there is more than one folder to distinguish (prefix is "" otherwise, a
+// no-op).
+func indentLines(s, prefix string) string {
+	if prefix == "" || s == "" {
+		return s
+	}
+	lines := strings.Split(strings.TrimSuffix(s, "\n"), "\n")
+	for i, line := range lines {
+		lines[i] = prefix + line
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
