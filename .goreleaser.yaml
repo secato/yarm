@@ -1,0 +1,104 @@
+# GoReleaser config — see docs/plan/07-repo-ci-release.md §7.4.
+#
+# Nothing here publishes on its own: .github/workflows/release.yml runs it
+# only for a pushed `v*` tag. Locally, `make snapshot` builds every archive
+# without touching GitHub or the AUR.
+version: 2
+
+project_name: yarm
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: yarm
+    main: ./cmd/yarm
+    binary: yarm
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, windows, darwin]
+    goarch: [amd64, arm64]
+    ignore:
+      # Windows on ARM is not a platform any Windows game runs ReShade on.
+      - goos: windows
+        goarch: arm64
+    # Same variables the Makefile sets, so `make build` and a release build
+    # report version information the same way.
+    ldflags:
+      - -s -w
+      - -X github.com/secato/yarm/internal/buildinfo.Version={{ .Version }}
+      - -X github.com/secato/yarm/internal/buildinfo.Commit={{ .ShortCommit }}
+      - -X github.com/secato/yarm/internal/buildinfo.Date={{ .CommitDate }}
+    # Reproducible builds: stamp the binary with the commit's own time
+    # rather than the moment the release ran.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: yarm
+    ids: [yarm]
+    # Windows users unpack in Explorer, which handles zip and not tar.gz.
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+      - CHANGELOG.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+release:
+  # Named explicitly rather than inferred from `git remote`, so the config
+  # validates (and a snapshot builds) in a clone that has no remote set.
+  github:
+    owner: secato
+    name: yarm
+  # The tag's own release notes come from the changelog above; this points
+  # at the file that carries the prose.
+  footer: |
+    **Full changelog**: https://github.com/secato/yarm/blob/main/CHANGELOG.md
+
+    ---
+    Never install ReShade into a game with an active anti-cheat while
+    playing online.
+
+aurs:
+  - name: yarm-bin
+    ids: [yarm]
+    homepage: https://github.com/secato/yarm
+    description: "Yet Another ReShade Manager — TUI to install ReShade, shaders and add-ons per game"
+    maintainers:
+      - "secato <5840942+secato@users.noreply.github.com>"
+    license: MIT
+    private_key: "{{ .Env.AUR_KEY }}"
+    git_url: "ssh://aur@aur.archlinux.org/yarm-bin.git"
+    # `auto` skips the AUR push for snapshots and prereleases, so a
+    # `v0.1.0-rc1` tag cannot land in the AUR by accident.
+    skip_upload: auto
+    provides:
+      - yarm
+    conflicts:
+      - yarm
+    package: |-
+      install -Dm755 "./yarm" "${pkgdir}/usr/bin/yarm"
+      install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/yarm-bin/LICENSE"
+      install -Dm644 "./README.md" "${pkgdir}/usr/share/doc/yarm-bin/README.md"

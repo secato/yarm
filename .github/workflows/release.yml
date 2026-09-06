@@ -1,0 +1,53 @@
+name: Release
+
+# Only a pushed `v*` tag releases anything. Nothing here runs on a branch
+# push, so a merge to main cannot publish a release by accident.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # create the GitHub Release and upload archives
+
+jobs:
+  # The release binaries are built from the tag, so the tag has to be green
+  # on its own rather than trusting that the branch it points at was.
+  verify:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go build ./...
+      - run: go test -race ./...
+
+  release:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # GoReleaser builds the changelog from the commits since the last
+          # tag, which a shallow clone does not have.
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Passwordless AUR deploy key; see CONTRIBUTING.md. Absent until
+          # the AUR package exists, which fails the aurs step — so keep the
+          # first tag a prerelease (`v0.1.0-rc1`), which skip_upload: auto
+          # skips, or add the secret before tagging v0.1.0.
+          AUR_KEY: ${{ secrets.AUR_KEY }}

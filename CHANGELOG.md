@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Release plumbing: `.goreleaser.yaml` (linux/windows/darwin archives,
+  checksums, AUR `yarm-bin`) and a `Release` workflow that runs only for a
+  pushed `v*` tag, and only after re-running build and tests on that tag.
+  Nothing publishes without a tag; the AUR step skips itself for
+  prereleases.
+
 - `docs/demo.tape`, a vhs script that records the demo against a scratch
   `YARM_HOME` rather than whatever games the recording machine has.
 
