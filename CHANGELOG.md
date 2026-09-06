@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `docs/demo.tape`, a vhs script that records the demo against a scratch
+  `YARM_HOME` rather than whatever games the recording machine has.
+
 - The wizard understands dependencies between catalog entries. Checking
   something that needs another package now selects that package too,
   across steps — ticking the AutoHDR add-on ticks the tone-mapping shader
@@ -22,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   actually offers are ever selected.
 
 ### Changed
+
+- README brought up to date: the feature list covers the resources
+  browser, adopting a hand-made install, the curated shortlist and
+  dependencies; added a key-bindings table; dropped the "not yet usable"
+  status and the placeholder demo image.
 
 - The install wizard's Shaders and Add-ons steps open on a curated
   shortlist instead of upstream's whole catalog (43 effect packages, 24

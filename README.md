@@ -10,26 +10,35 @@ packages and add-ons on a per-game basis, on Windows and Linux. YARM keeps a
 shared download cache, remembers exactly which files it wrote into each game
 folder, and can cleanly uninstall without touching anything it didn't create.
 
-![demo placeholder](docs/demo.gif)
-
-> **Status: early development.** Following the implementation plan in
-> [`docs/plan/`](docs/plan/README.md) — not yet usable.
+> **Status: pre-release.** Everything below works; there is no tagged
+> release yet. Following the implementation plan in
+> [`docs/plan/`](docs/plan/README.md).
 
 ## Features
 
 - Detects installed Steam games (more launchers planned) and lets you add
   any folder manually.
-- Installs ReShade (normal or add-on support build) plus effect packages
-  (SweetFX, standard shaders, etc.) and add-ons, downloaded from official
-  sources and cached locally.
-- Records every file it writes per game/executable so uninstall removes
-  only what it installed — never touches your own files.
-- Cache manager: list, sort and delete cached downloads; see how much space
-  they use.
+- Installs ReShade — normal or add-on build — plus effect packages and
+  add-ons, downloaded from official sources and cached locally. The
+  wizard opens on a curated shortlist of the packs people actually use;
+  `a` widens it to the full catalog.
+- Understands dependencies: checking something that needs another package
+  selects that package too, and says why. Checking the AutoHDR add-on
+  brings its tone-mapping shader with it.
+- Works per **folder**, not per executable — ReShade attaches to a
+  directory, so every executable in it is covered by one install.
+- Records every file it writes so uninstall removes only what it
+  installed, never your own files or presets.
+- Adopts a ReShade install you did by hand, so yarm can manage it from
+  then on.
+- Resources browser: what is cached, what it costs on disk, and which
+  installs use it; download ahead, refresh or delete.
 - Custom content: drop your own shaders or add-ons into a cache folder and
-  YARM offers them in the install wizard.
-- On Linux/Proton, automatically fetches and installs `d3dcompiler_47.dll`
-  alongside ReShade — no manual DLL overrides needed for D3D9/10/11 games.
+  yarm offers them in the wizard alongside the catalog.
+- On Linux/Proton, fetches and installs `d3dcompiler_47.dll` alongside
+  ReShade — no manual DLL overrides needed for D3D9/10/11 games.
+- Warns, in red and on every step, when you are about to install an
+  add-on build into a game that might have anti-cheat.
 
 ## Install
 
@@ -41,8 +50,24 @@ folder, and can cleanly uninstall without touching anything it didn't create.
 
 ## Quick start
 
-Run `yarm` with no arguments to launch the TUI. Key bindings are shown in the
-help overlay (`?`).
+Run `yarm` with no arguments to launch the TUI. Every screen lists its keys
+in the footer, and `?` opens the full help overlay.
+
+| Key | Does |
+| --- | --- |
+| `↑` `↓` / `j` `k` | move |
+| `enter` | open, or advance the wizard a step |
+| `esc` | back a step, or back a screen |
+| `i` / `e` / `u` | install, edit an install, uninstall |
+| `a` | adopt a hand-made install (games list) · show the whole catalog (wizard) |
+| `c` / `x` / `s` | resources · custom content · settings |
+| `/` `r` | filter · rescan |
+| `q` | quit |
+
+Prefer the command line? `yarm games ls`, `yarm cache ls` and
+`yarm installs` report the same information without the UI (`--json` where
+it makes sense), and `--no-color` (or `NO_COLOR=1`) turns off styling for
+pipelines.
 
 ## How it works
 
