@@ -1,7 +1,29 @@
-proposal.md
+# Build output
 bin/
-cover.out
 dist/
+/yarm
+/yarm.exe
 
-# Design documents and the implementation log, kept locally.
+# Test and profiling output
+cover.out
+coverage.*
+*.test
+*.prof
+__debug_bin*
+
+# Local notes and design documents, kept out of the repository.
+proposal.md
 docs/plan/
+
+# Local tool and editor state, which belongs to a machine rather than to
+# the project. Contributors using other editors should add their own to a
+# global gitignore rather than here.
+.claude/
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS junk
+.DS_Store
+Thumbs.db
