@@ -14,6 +14,7 @@ import (
 
 	"github.com/secato/yarm/internal/artifacts"
 	"github.com/secato/yarm/internal/catalog"
+	"github.com/secato/yarm/internal/config"
 	"github.com/secato/yarm/internal/game"
 	"github.com/secato/yarm/internal/install"
 	"github.com/secato/yarm/internal/state"
@@ -1597,5 +1598,75 @@ func TestEditingSummaryMovesWithLeftAndRight(t *testing.T) {
 	}
 	if s := pressSpecial(t, s, tea.KeyDown); s.hubCursor.Cursor() != 1 {
 		t.Error("↓ should still move, whichever layout is showing")
+	}
+}
+
+// A build the user did not pick on this screen has to say why it is
+// picked. The case this comes from: a config written before the default
+// changed still asked for the add-on build, so the wizard opened on it
+// every time and looked simply wrong — the setting that caused it is in a
+// file, or two screens away.
+func TestReShadeStepSaysWhereAPreselectedBuildCameFrom(t *testing.T) {
+	env := Env{Styles: NewStyles(true), Width: 96, Height: 20}
+	entry := sampleEntries()[0]
+
+	t.Run("from config", func(t *testing.T) {
+		deps := fakeDeps()
+		deps.Defaults = config.DefaultsConfig{ReshadeFlavor: "addon"}
+		w := NewWizardScreen(entry, entry.Exes[0], deps)
+		w.applyWizardData(wizardDataLoadedMsg{data: sampleWizardData()})
+
+		body := w.View(env)
+		if !strings.Contains(body, "defaults.reshade_flavor") {
+			t.Errorf("the note should name the setting responsible:\n%s", body)
+		}
+		if !strings.Contains(body, "settings") {
+			t.Errorf("the note should say where to change it:\n%s", body)
+		}
+	})
+
+	t.Run("the safe default explains itself", func(t *testing.T) {
+		deps := fakeDeps()
+		deps.Defaults = config.DefaultsConfig{ReshadeFlavor: "normal"}
+		w := NewWizardScreen(entry, entry.Exes[0], deps)
+		w.applyWizardData(wizardDataLoadedMsg{data: sampleWizardData()})
+
+		if body := w.View(env); strings.Contains(body, "reshade_flavor") {
+			t.Errorf("the default build needs no note:\n%s", body)
+		}
+	})
+
+	t.Run("from the existing install", func(t *testing.T) {
+		installed := sampleEntries()[0]
+		exe := installed.Exes[0]
+		exe.Installed = &state.Install{
+			Exe:     exe.Path,
+			ReShade: state.ReShadeInfo{Version: "6.8.0", Flavor: "addon", DLL: "dxgi.dll"},
+		}
+		w := NewWizardScreen(installed, exe, fakeDeps())
+		w.applyWizardData(wizardDataLoadedMsg{data: sampleWizardData()})
+		w.step = stepReShade
+
+		body := w.View(env)
+		if !strings.Contains(body, "already has") {
+			t.Errorf("editing an install should say the build came from it:\n%s", body)
+		}
+	})
+}
+
+// The note takes a row, so the panes must give one up rather than the
+// page growing past the window.
+func TestReShadeStepFitsWithTheNote(t *testing.T) {
+	entry := sampleEntries()[0]
+	deps := fakeDeps()
+	deps.Defaults = config.DefaultsConfig{ReshadeFlavor: "addon"}
+	w := NewWizardScreen(entry, entry.Exes[0], deps)
+	w.applyWizardData(wizardDataLoadedMsg{data: sampleWizardData()})
+
+	for _, height := range []int{16, 20, 30} {
+		env := Env{Styles: NewStyles(true), Width: 96, Height: height}
+		if got := countLines(w.View(env)); got > height {
+			t.Errorf("height %d: rendered %d lines", height, got)
+		}
 	}
 }

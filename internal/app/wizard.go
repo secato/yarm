@@ -97,6 +97,25 @@ var dllOptions = []dllOption{
 // right — the same order the resources browser lists its panes.
 var wizardFlavors = []install.Flavor{install.FlavorNormal, install.FlavorAddon}
 
+// flavorSource says where the preselected build came from.
+//
+// A preselection the user did not make on this screen needs to say so.
+// The case that prompted this: a config written before the default
+// changed still asked for the add-on build, so the wizard opened on it
+// every time with nothing on screen explaining why — the setting is two
+// screens away in Settings, or in a file, and the wizard looked simply
+// wrong instead.
+type flavorSource int
+
+const (
+	// flavorFromDefault is the safe default, which needs no explanation.
+	flavorFromDefault flavorSource = iota
+	// flavorFromConfig is defaults.reshade_flavor in config.yaml.
+	flavorFromConfig
+	// flavorFromExisting is what this folder already has installed.
+	flavorFromExisting
+)
+
 // wizardDataLoadedMsg carries the catalog/custom data the wizard needs,
 // once it has loaded — successfully or not.
 //
@@ -147,6 +166,7 @@ type WizardScreen struct {
 	// version list, so ←/→ switches build without losing which version is
 	// highlighted.
 	flavor        install.Flavor
+	flavorSource  flavorSource
 	versionCursor cursorList
 
 	// Step: API
@@ -175,11 +195,14 @@ func NewWizardScreen(entry GameEntry, exe Executable, deps Deps) *WizardScreen {
 	// is the one anti-cheat can detect, so it is opted into, never
 	// defaulted into.
 	flavor := install.FlavorNormal
+	source := flavorFromDefault
 	switch {
 	case existing != nil:
 		flavor = install.Flavor(existing.ReShade.Flavor)
+		source = flavorFromExisting
 	case deps.Defaults.ReshadeFlavor == string(install.FlavorAddon):
 		flavor = install.FlavorAddon
+		source = flavorFromConfig
 	}
 
 	step := stepReShade
@@ -188,17 +211,18 @@ func NewWizardScreen(entry GameEntry, exe Executable, deps Deps) *WizardScreen {
 	}
 
 	return &WizardScreen{
-		keys:     DefaultKeyMap(),
-		step:     step,
-		editing:  existing != nil,
-		entry:    entry,
-		exe:      exe,
-		deps:     deps,
-		targetOS: artifacts.CurrentTargetOS(),
-		existing: existing,
-		loading:  true,
-		flavor:   flavor,
-		options:  newOptions(),
+		keys:         DefaultKeyMap(),
+		step:         step,
+		editing:      existing != nil,
+		entry:        entry,
+		exe:          exe,
+		deps:         deps,
+		targetOS:     artifacts.CurrentTargetOS(),
+		existing:     existing,
+		loading:      true,
+		flavor:       flavor,
+		flavorSource: source,
+		options:      newOptions(),
 	}
 }
 
@@ -1022,6 +1046,20 @@ func (s *WizardScreen) viewFooter(env Env) string {
 // read as a column of versions with their badges.
 const minVersionPaneWidth = 22
 
+// flavorNote explains a preselected build the user did not choose here,
+// and says where to change it. The safe default needs no note: it is what
+// someone would expect to find selected.
+func (s *WizardScreen) flavorNote() string {
+	switch s.flavorSource {
+	case flavorFromExisting:
+		return string(s.flavor) + " build: what this folder already has"
+	case flavorFromConfig:
+		return string(s.flavor) + " build preselected by your config (defaults.reshade_flavor) — change it in settings"
+	default:
+		return ""
+	}
+}
+
 // viewReShade draws the two builds as side-by-side panes over the same
 // version list, so the choice between them is a visible comparison rather
 // than a toggle the user has to know about. ←/→ moves between panes; the
@@ -1032,6 +1070,18 @@ func (s *WizardScreen) viewReShade(b *strings.Builder, env Env, height int) {
 		b.WriteString("\n")
 		return
 	}
+
+	// The note sits under the panes, so they get one row less.
+	note := s.flavorNote()
+	if note != "" {
+		height--
+	}
+	defer func() {
+		if note != "" {
+			b.WriteString(env.Styles.Faint.Render(clipTail(note, env.Width)))
+			b.WriteString("\n")
+		}
+	}()
 
 	// Two panes need room for both; below that, show the focused build
 	// full width with a strip naming the other, the same fold the

@@ -17,7 +17,10 @@ builds:
     binary: yarm
     env:
       - CGO_ENABLED=0
-    goos: [linux, windows, darwin]
+    # No darwin: ReShade injects into Windows games, which macOS does not
+    # run. The binary builds there, but shipping it would only invite
+    # reports from people it can never help.
+    goos: [linux, windows]
     goarch: [amd64, arm64]
     ignore:
       # Windows on ARM is not a platform any Windows game runs ReShade on.
