@@ -81,12 +81,15 @@ func TestCursorRecoversAfterEmptyResize(t *testing.T) {
 	}
 }
 
-func TestEnterOpensDetailAndEscReturns(t *testing.T) {
+// Enter does the obvious thing to the highlighted game rather than opening
+// a screen to look at it: a game with one folder and no install goes
+// straight to the wizard.
+func TestEnterActsOnTheGameAndEscReturns(t *testing.T) {
 	m := loaded(t)
 
 	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if _, ok := m.Screen().(*GameDetailScreen); !ok {
-		t.Fatalf("after enter the screen is %T, want *GameDetailScreen", m.Screen())
+	if _, ok := m.Screen().(*WizardScreen); !ok {
+		t.Fatalf("after enter the screen is %T, want *WizardScreen", m.Screen())
 	}
 
 	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
@@ -307,14 +310,19 @@ func TestPushedScreenIsSized(t *testing.T) {
 	m := loaded(t)
 	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
-	ds, ok := m.Screen().(*GameDetailScreen)
+	ds, ok := m.Screen().(*WizardScreen)
 	if !ok {
-		t.Fatalf("screen is %T, want *GameDetailScreen", m.Screen())
+		t.Fatalf("screen is %T, want *WizardScreen", m.Screen())
 	}
 
+	// It has never been sized by a WindowSizeMsg, so anything it renders
+	// has to come from Env — and it must not overflow it.
 	body := ds.View(m.env())
-	if !strings.Contains(body, "Vantage.exe") {
-		t.Errorf("the detail view did not render its executables:\n%s", body)
+	if body == "" {
+		t.Error("the pushed screen rendered nothing")
+	}
+	if got := countLines(body); got > m.env().Height {
+		t.Errorf("rendered %d lines into a height of %d:\n%s", got, m.env().Height, body)
 	}
 }
 
@@ -344,11 +352,13 @@ func TestUninstallConfirmFlow(t *testing.T) {
 	// install recorded on its first executable.
 	m = drive(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"})
 	m = drive(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"})
-	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
-	gd, ok := m.Screen().(*GameDetailScreen)
-	if !ok || gd.entry.Name != "Ember Hollow" {
-		t.Fatalf("screen = %T (%q), want *GameDetailScreen for Ember Hollow", m.Screen(), gd.entry.Name)
+	gs, ok := m.Screen().(*GamesScreen)
+	if !ok {
+		t.Fatalf("screen = %T, want *GamesScreen", m.Screen())
+	}
+	if e, _ := gs.selected(); e.Name != "Ember Hollow" {
+		t.Fatalf("selected = %q, want Ember Hollow", e.Name)
 	}
 
 	m = drive(t, m, tea.KeyPressMsg{Code: 'u', Text: "u"})
@@ -374,11 +384,6 @@ func TestUninstallConfirmFlow(t *testing.T) {
 // is nothing to confirm.
 func TestUninstallKeyNoOpWithoutInstall(t *testing.T) {
 	m := loaded(t) // cursor starts on Vantage Point Deluxe, uninstalled
-	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-
-	if _, ok := m.Screen().(*GameDetailScreen); !ok {
-		t.Fatalf("screen = %T, want *GameDetailScreen", m.Screen())
-	}
 
 	m = drive(t, m, tea.KeyPressMsg{Code: 'u', Text: "u"})
 	if m.overlay != nil {
@@ -474,19 +479,16 @@ func TestGamesScreenMultiFolderGameOffersInstallButNotEditOrUninstall(t *testing
 	for _, b := range gs.KeyBindings() {
 		offered[b.Help().Desc] = true
 	}
-	if !offered["install ReShade"] {
-		t.Errorf("install should be offered and drill in; bindings = %v", offered)
-	}
-	for _, unwanted := range []string{"edit install", "uninstall"} {
-		if offered[unwanted] {
-			t.Errorf("a multi-folder game has no single target to %q from the list", unwanted)
+	for _, want := range []string{"install ReShade", "edit install", "uninstall"} {
+		if !offered[want] {
+			t.Errorf("%q should be offered; bindings = %v", want, offered)
 		}
 	}
 
-	// And pressing it opens the folder list, exactly as enter does.
+	// Pressing one asks which folder rather than guessing.
 	m = drive(t, m, tea.KeyPressMsg{Code: 'i', Text: "i"})
-	if _, ok := m.Screen().(*GameDetailScreen); !ok {
-		t.Fatalf("screen after i = %T, want *GameDetailScreen", m.Screen())
+	if _, ok := m.Screen().(*FolderPickScreen); !ok {
+		t.Fatalf("screen after i = %T, want *FolderPickScreen", m.Screen())
 	}
 }
 
@@ -496,8 +498,7 @@ func TestGamesScreenMultiFolderGameOffersInstallButNotEditOrUninstall(t *testing
 // games list that reflects what just changed.
 func TestPopToRootClearsStackAndReloads(t *testing.T) {
 	m := loaded(t)
-	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})   // -> GameDetail
-	m = drive(t, m, tea.KeyPressMsg{Code: 'i', Text: "i"}) // -> Wizard
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // -> Wizard
 	if _, ok := m.Screen().(*WizardScreen); !ok {
 		t.Fatalf("setup: screen = %T, want *WizardScreen", m.Screen())
 	}
@@ -543,15 +544,11 @@ func TestAdoptConfirmFlow(t *testing.T) {
 		tea.WindowSizeMsg{Width: termWidth, Height: termHeight},
 		gamesLoadedMsg{entries: []GameEntry{entry}},
 	)
-	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-
-	if _, ok := m.Screen().(*GameDetailScreen); !ok {
-		t.Fatalf("screen = %T, want *GameDetailScreen", m.Screen())
-	}
-
-	m = drive(t, m, tea.KeyPressMsg{Code: 'a', Text: "a"})
+	// Adopting has no key of its own: `a` adds a folder, and install
+	// redirects to adopting when the folder's ReShade is not yarm's.
+	m = drive(t, m, tea.KeyPressMsg{Code: 'i', Text: "i"})
 	if m.overlay == nil {
-		t.Fatal("'a' on an unmanaged folder should open a confirm overlay")
+		t.Fatal("i on an unmanaged folder should open the adopt confirmation")
 	}
 
 	m = drive(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})

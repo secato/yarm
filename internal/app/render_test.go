@@ -29,41 +29,41 @@ func bigGame(folders, exesPerFolder int) GameEntry {
 	return withGroups([]GameEntry{e})[0]
 }
 
-// The detail view must stay inside the window however many folders and
-// executables a game has — falling back to the folder under the cursor,
-// which is the one every action on this screen applies to.
-func TestGameDetailStaysInsideTheWindow(t *testing.T) {
-	s := NewGameDetailScreen(bigGame(4, 12), fakeDeps())
+// The folder picker is a list like any other and must stay inside the
+// window, however many folders a game has.
+func TestFolderPickerStaysInsideTheWindow(t *testing.T) {
+	e := bigGame(12, 4)
+	s := &FolderPickScreen{
+		entry:  e,
+		groups: e.Groups,
+		deps:   fakeDeps(),
+		keys:   DefaultKeyMap(),
+		cursor: newCursorList(len(e.Groups), 0),
+		verb:   verbInstall,
+	}
 	env := Env{Styles: NewStyles(true), Width: 80, Height: 21}
 
 	body := s.View(env)
 	if got := countLines(body); got > env.Height {
-		t.Errorf("detail view rendered %d lines into a height of %d:\n%s", got, env.Height, body)
+		t.Errorf("the picker rendered %d lines into a height of %d:\n%s", got, env.Height, body)
 	}
-	if !strings.Contains(body, "more folder(s) below") {
-		t.Errorf("a list cut short should say how many folders are hidden:\n%s", body)
+	if !strings.Contains(body, "more below") {
+		t.Errorf("a list cut short should say how much it hid:\n%s", body)
 	}
-
-	// The cursor scrolls the list: moving down brings the folders above
-	// into the hidden count.
-	s.cursor.down()
-	body = s.View(env)
-	if !strings.Contains(body, "↑ 1 more folder(s) above") {
-		t.Errorf("moving the cursor down should scroll the folder list:\n%s", body)
-	}
-	if got := countLines(body); got > env.Height {
-		t.Errorf("scrolled view rendered %d lines into a height of %d:\n%s", got, env.Height, body)
+	if !strings.Contains(body, "executable(s)") {
+		t.Errorf("each folder should say what is in it, to choose between them:\n%s", body)
 	}
 }
 
-// A folder with a dozen executables lists a few and counts the rest —
-// they are context for the folder, not things to act on individually.
-func TestGameDetailCapsExecutablesPerFolder(t *testing.T) {
-	s := NewGameDetailScreen(bigGame(1, 12), fakeDeps())
-	body := s.View(Env{Styles: NewStyles(true), Width: 80, Height: 21})
+// The side panel lists a few executables per folder and counts the rest:
+// they are context for the folder, not things to act on individually, and
+// the panel has a warning under them that must not be what gets clipped.
+func TestSidePanelCapsExecutablesPerFolder(t *testing.T) {
+	env := Env{Styles: NewStyles(true), Width: 120, Height: 40}
+	body := panelText(t, bigGame(1, 12), env)
 
-	if !strings.Contains(body, "+6 more") {
-		t.Errorf("12 executables should list 6 and count the other 6:\n%s", body)
+	if !strings.Contains(body, "+8 more") {
+		t.Errorf("12 executables should list 4 and count the other 8:\n%s", body)
 	}
 	if strings.Contains(body, "tool11.exe") {
 		t.Errorf("executables past the cap should not be listed:\n%s", body)
@@ -110,5 +110,32 @@ func TestCustomScreenWindowsLongLists(t *testing.T) {
 	}
 	if !strings.Contains(body, "more above") {
 		t.Errorf("a windowed list should say how many rows are hidden:\n%s", body)
+	}
+}
+
+// The panel is the only place a game's folders, install and executables
+// are shown now, so it gets the width the table does not need — including
+// whatever the name column leaves over once it hits its cap.
+func TestSidePanelTakesTheWidthTheTableDoesNotNeed(t *testing.T) {
+	entry := bigGame(1, 2)
+	for _, width := range []int{100, 160, 220} {
+		env := Env{Styles: NewStyles(true), Width: width, Height: 24}
+		s := gamesWith(t, entry, env)
+
+		if s.detailWidth < width*2/5 {
+			t.Errorf("width %d: panel is %d columns, want at least two fifths", width, s.detailWidth)
+		}
+		if s.detailWidth > width-30 {
+			t.Errorf("width %d: panel is %d columns, leaving too little for the table", width, s.detailWidth)
+		}
+	}
+}
+
+// Below the width where a panel is worth having, it is dropped entirely
+// rather than squeezed into something unreadable.
+func TestSidePanelIsDroppedWhenTooNarrow(t *testing.T) {
+	env := Env{Styles: NewStyles(true), Width: 60, Height: 24}
+	if s := gamesWith(t, bigGame(1, 2), env); s.detailWidth != 0 {
+		t.Errorf("panel width = %d at 60 columns, want it dropped", s.detailWidth)
 	}
 }

@@ -42,41 +42,6 @@ func clipLines(s string, height int) string {
 	return strings.Join(kept, "\n") + fmt.Sprintf("\n… %d more line(s)", len(lines)-len(kept))
 }
 
-// fitBlocks returns the [start, end) run of variable-height blocks that
-// fits in height, grown outward from focus so the focused block is always
-// shown whole — the rows-of-different-sizes counterpart to writeWindow's
-// fixed-height rows. Blocks are assumed to be separated by one blank line.
-func fitBlocks(blocks []string, focus, height int) (start, end int) {
-	if len(blocks) == 0 {
-		return 0, 0
-	}
-	switch {
-	case focus < 0:
-		focus = 0
-	case focus >= len(blocks):
-		focus = len(blocks) - 1
-	}
-
-	used := countLines(blocks[focus])
-	start, end = focus, focus+1
-	for {
-		grew := false
-		if end < len(blocks) {
-			if n := countLines(blocks[end]) + 1; used+n <= height {
-				used, end, grew = used+n, end+1, true
-			}
-		}
-		if start > 0 {
-			if n := countLines(blocks[start-1]) + 1; used+n <= height {
-				used, start, grew = used+n, start-1, true
-			}
-		}
-		if !grew {
-			return start, end
-		}
-	}
-}
-
 // writeWindow renders the slice of count rows that fits in height around
 // cursor, indenting its own markers to match the caller's rows and saying
 // how many rows it hid at either end — a truncated list must never look

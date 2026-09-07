@@ -46,6 +46,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The game detail screen is gone. Everything it showed is in the games
+  list's side panel, and every action — install, edit, uninstall, adopt —
+  runs from the list itself. A game whose executables live in several
+  folders gets a folder picker first, since "install into this game" is
+  not a complete instruction; a game with one eligible folder acts
+  immediately. `enter` now does the obvious thing to the highlighted game
+  (edit what it has, adopt what was found, install if neither) rather than
+  opening a screen to look at it.
+- The side panel takes two fifths of the width instead of a third, plus
+  whatever the table does not need once the game-name column hits its cap.
+
 - The edit summary is a dashboard: each section is a pane listing what is
   actually in it (every selected shader and add-on by name, the version and
   build, the DLL and what it covers), with the changed sections marked and

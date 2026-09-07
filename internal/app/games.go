@@ -83,16 +83,32 @@ func gamesColumns(width int) []table.Column {
 		sourceW  = 8
 		statusW  = 16
 		minNameW = 16
+		// A game name rarely needs more than this, and every column past
+		// it is space the side panel could be using instead.
+		maxNameW = 34
 	)
 	nameW := width - sourceW - statusW - 6
-	if nameW < minNameW {
+	switch {
+	case nameW < minNameW:
 		nameW = minNameW
+	case nameW > maxNameW:
+		nameW = maxNameW
 	}
 	return []table.Column{
 		{Title: "Game", Width: nameW},
 		{Title: "Source", Width: sourceW},
 		{Title: "ReShade", Width: statusW},
 	}
+}
+
+// gamesTableWidth is what the table occupies once its name column has hit
+// its cap — the point past which extra width is just padding.
+func gamesTableWidth() int {
+	w := 0
+	for _, c := range gamesColumns(1 << 20) {
+		w += c.Width
+	}
+	return w + 6
 }
 
 // Init implements Screen.
@@ -131,41 +147,30 @@ func (s *GamesScreen) KeyBindings() []key.Binding {
 		s.keys.Cache, s.keys.Custom, s.keys.Setting,
 	}
 
-	// Acting directly from the list only makes sense for a game with
-	// exactly one folder — with more than one there is no single
-	// install/uninstall to act on without saying which, which is what the
-	// detail view (enter) is for.
-	entry, grp, ok := s.singleGroupSelection()
+	// Every action runs from this list now. A game with several folders
+	// needs one more question answered first — which folder — and the
+	// picker asks it; the key is offered either way, because offering it
+	// only for one-folder games reads as the action being unavailable
+	// rather than as needing one more step.
+	e, ok := s.selected()
 	if !ok {
-		// More than one folder: there is no single target to install into
-		// from here, but the key still works — it opens the folder list,
-		// which is where the choice is made. Offering it inconsistently
-		// (present for one-folder games, absent otherwise) reads as the
-		// action being unavailable rather than as needing one more step.
-		if e, ok := s.selected(); ok && len(e.Groups) > 1 && len(e.PlayableExes()) > 0 {
-			bindings = append([]key.Binding{s.keys.Install}, bindings...)
-		}
 		return bindings
 	}
-	switch {
-	case grp.Unmanaged != nil:
-		bindings = append([]key.Binding{key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "adopt ReShade"))}, bindings...)
-	case len(entry.PlayableExes()) > 0 && grp.Installed != nil:
+	// Adopting has no key of its own here — `a` already means "add folder"
+	// — but install redirects to it for a folder whose ReShade yarm did
+	// not put there, so the binding says what pressing i will actually do.
+	if len(groupsWithUnmanaged(e)) > 0 {
+		bindings = append([]key.Binding{
+			key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "adopt ReShade")),
+		}, bindings...)
+	}
+	if len(groupsWithInstall(e)) > 0 {
 		bindings = append([]key.Binding{editInstallBinding, s.keys.Uninstall}, bindings...)
-	case len(entry.PlayableExes()) > 0:
+	}
+	if len(installableGroups(e)) > 0 {
 		bindings = append([]key.Binding{s.keys.Install}, bindings...)
 	}
 	return bindings
-}
-
-// singleGroupSelection returns the highlighted game and its one folder
-// group, when it has exactly one.
-func (s *GamesScreen) singleGroupSelection() (GameEntry, FolderGroup, bool) {
-	entry, ok := s.selected()
-	if !ok || len(entry.Groups) != 1 {
-		return GameEntry{}, FolderGroup{}, false
-	}
-	return entry, entry.Groups[0], true
 }
 
 // Update implements Screen.
@@ -247,26 +252,30 @@ func (s *GamesScreen) handleKey(msg tea.KeyPressMsg, env Env) (Screen, tea.Cmd) 
 	case key.Matches(msg, s.keys.Setting):
 		return s, PushScreen(NewSettingsScreen(s.deps.ConfigDir, s.deps.Config))
 
-	case key.Matches(msg, s.keys.Install) || key.Matches(msg, editInstallBinding):
-		if entry, grp, ok := s.singleGroupSelection(); ok {
-			return s, startInstallForGroup(entry, grp, s.deps)
+	case key.Matches(msg, s.keys.Install):
+		if e, ok := s.selected(); ok {
+			return s, pickFolder(e, s.deps, verbInstall, installableGroups(e), startInstallForGroup)
 		}
-		// With several folders, installing means picking one first — the
-		// same screen enter opens, rather than nothing happening.
-		if entry, ok := s.selected(); ok && len(entry.Groups) > 1 {
-			return s, PushScreen(NewGameDetailScreen(entry, s.deps))
+		return s, nil
+
+	case key.Matches(msg, editInstallBinding):
+		if e, ok := s.selected(); ok {
+			return s, pickFolder(e, s.deps, verbEdit, groupsWithInstall(e), startInstallForGroup)
 		}
 		return s, nil
 
 	case key.Matches(msg, s.keys.Uninstall):
-		if entry, grp, ok := s.singleGroupSelection(); ok {
-			return s, startUninstallForGroup(entry, grp, s.deps)
+		if e, ok := s.selected(); ok {
+			return s, pickFolder(e, s.deps, verbUninstall, groupsWithInstall(e), startUninstallForGroup)
 		}
 		return s, nil
 
+	// Enter does the obvious thing to the highlighted game: edit what it
+	// has, adopt what was found on disk, or install when it has neither.
 	case key.Matches(msg, s.keys.Enter):
-		if entry, ok := s.selected(); ok {
-			return s, PushScreen(NewGameDetailScreen(entry, s.deps))
+		if e, ok := s.selected(); ok {
+			verb, groups := installOrEdit(e)
+			return s, pickFolder(e, s.deps, verb, groups, startInstallForGroup)
 		}
 		return s, nil
 	}
@@ -310,13 +319,24 @@ func (s *GamesScreen) resize(env Env) {
 	}
 	s.filter.SetWidth(filterWidth)
 
-	s.detailWidth = env.Width / 3
-	if s.detailWidth < 24 {
+	// Two fifths, not one third: the panel is now the only place a game's
+	// folders, install and executables are shown — there is no detail
+	// screen behind it any more — while the table needs only enough for a
+	// name, a source and a status.
+	s.detailWidth = env.Width * 2 / 5
+	if s.detailWidth < 28 {
 		s.detailWidth = 0 // too narrow to be useful; drop the panel
 	}
+	// The table only needs what its columns actually use; whatever it does
+	// not need goes to the panel rather than to empty space between the
+	// name column and the source column.
 	tableWidth := env.Width - s.detailWidth
 	if s.detailWidth > 0 {
 		tableWidth -= 2
+		if used := gamesTableWidth(); tableWidth > used {
+			s.detailWidth += tableWidth - used
+			tableWidth = used
+		}
 	}
 	if tableWidth < 24 {
 		tableWidth = 24

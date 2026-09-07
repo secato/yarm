@@ -63,8 +63,7 @@ func TestLoadGamesSurfacesScanError(t *testing.T) {
 // from an ordinary empty or native-build game.
 func TestScanErrorRendersDistinctlyFromNativeBuild(t *testing.T) {
 	entry := GameEntry{ScanErr: os.ErrPermission}
-	gd := NewGameDetailScreen(entry, Deps{})
-	body := gd.View(Env{Styles: NewStyles(true), Width: 100, Height: 30})
+	body := panelText(t, entry, Env{Styles: NewStyles(true), Width: 100, Height: 30})
 
 	if !strings.Contains(body, "Could not scan") || !strings.Contains(body, "Permission denied") {
 		t.Errorf("detail view should explain the scan error:\n%s", body)
@@ -127,9 +126,8 @@ func TestGameDetailShowsOneUnmanagedStatusNotPerExecutable(t *testing.T) {
 		Groups: groupByFolder(dir, exes),
 	}
 
-	gd := NewGameDetailScreen(entry, Deps{})
 	env := Env{Styles: NewStyles(true), Width: 100, Height: 30}
-	body := gd.View(env)
+	body := panelText(t, entry, env)
 
 	if n := strings.Count(body, "found, untracked"); n != 1 {
 		t.Errorf("body mentions \"found, untracked\" %d time(s), want exactly 1:\n%s", n, body)
@@ -212,8 +210,8 @@ func TestFolderLevelInstallTargetsTheActuallyInstalledExe(t *testing.T) {
 		t.Fatalf("groups = %d, want 1 (all three exes share the game root)", len(entry.Groups))
 	}
 
-	gd := NewGameDetailScreen(entry, fakeDeps())
 	env := Env{Styles: NewStyles(true), Width: 100, Height: 30}
+	gd := gamesWith(t, entry, env)
 
 	foundUpdate := false
 	for _, b := range gd.KeyBindings() {
@@ -245,7 +243,7 @@ func TestFolderLevelInstallTargetsTheActuallyInstalledExe(t *testing.T) {
 // A game with two distinct folders — one installed, one holding an
 // unmanaged install — must let the cursor move between them, and offer
 // the right action for whichever one is current.
-func TestMultiFolderCursorOffersPerFolderActions(t *testing.T) {
+func TestMultiFolderGameOffersEveryActionItsFoldersAllow(t *testing.T) {
 	dir := t.TempDir()
 	shipDir := filepath.Join(dir, "Ship")
 	if err := os.MkdirAll(shipDir, 0o755); err != nil {
@@ -271,35 +269,50 @@ func TestMultiFolderCursorOffersPerFolderActions(t *testing.T) {
 		t.Fatalf("groups = %d, want 2", len(entry.Groups))
 	}
 
-	gd := NewGameDetailScreen(entry, fakeDeps())
 	env := Env{Styles: NewStyles(true), Width: 100, Height: 30}
+	gs := gamesWith(t, entry, env)
 
-	// Cursor starts on the first group (Release/, installed): expect an
-	// update binding, not an adopt one.
-	hasUpdate := false
-	for _, b := range gd.KeyBindings() {
-		if strings.Contains(b.Help().Desc, "edit install") {
-			hasUpdate = true
+	// Both actions are offered from the list, because both are possible
+	// somewhere in this game; which folder each applies to is the picker's
+	// question, not a cursor's.
+	offered := map[string]bool{}
+	for _, b := range gs.KeyBindings() {
+		offered[b.Help().Desc] = true
+	}
+	for _, want := range []string{"edit install", "adopt ReShade"} {
+		if !offered[want] {
+			t.Errorf("%q should be offered; bindings = %v", want, offered)
 		}
 	}
-	if !hasUpdate {
-		t.Error("starting on Release/ should offer \"update ReShade\"")
+
+	// Only one folder has an install, so edit does not need to ask which:
+	// it goes straight to the wizard on that folder.
+	_, cmd := gs.Update(tea.KeyPressMsg{Code: 'e', Text: "e"}, env)
+	if cmd == nil {
+		t.Fatal("edit should act on the one installed folder")
+	}
+	push, ok := cmd().(pushScreenMsg)
+	if !ok {
+		t.Fatalf("message = %T, want pushScreenMsg", cmd())
+	}
+	if wiz, ok := push.screen.(*WizardScreen); !ok {
+		t.Fatalf("screen = %T, want *WizardScreen", push.screen)
+	} else if wiz.exe.Path != "Release/Game.exe" {
+		t.Errorf("wizard targets %q, want the installed folder's exe", wiz.exe.Path)
 	}
 
-	gd.Update(tea.KeyPressMsg{Code: 'j', Text: "j"}, env)
-	hasAdopt := false
-	for _, b := range gd.KeyBindings() {
-		if strings.Contains(b.Help().Desc, "adopt") {
-			hasAdopt = true
-		}
+	// Installing could mean either folder, so that one does ask.
+	_, cmd = gs.Update(tea.KeyPressMsg{Code: 'i', Text: "i"}, env)
+	push, ok = cmd().(pushScreenMsg)
+	if !ok {
+		t.Fatalf("message = %T, want pushScreenMsg", cmd())
 	}
-	if !hasAdopt {
-		t.Error("moving to Ship/ should offer to adopt its unmanaged install")
+	pick, ok := push.screen.(*FolderPickScreen)
+	if !ok {
+		t.Fatalf("screen = %T, want *FolderPickScreen", push.screen)
 	}
-
-	body := gd.View(env)
-	if !strings.Contains(body, "Release/") || !strings.Contains(body, "Ship/") {
-		t.Errorf("both folder headers should be shown:\n%s", body)
+	if len(pick.groups) != 2 {
+		t.Errorf("picker offers %d folder(s), want both", len(pick.groups))
 	}
 }
 
@@ -331,7 +344,7 @@ func TestGroupIsAddonDetectsAddonAntiCheatRisk(t *testing.T) {
 // The anti-cheat warning must appear once, at the very bottom of a
 // folder's whole block — after its executables — not sandwiched between
 // the ReShade status and the executables list.
-func TestGameDetailShowsAntiCheatWarningAtBottomOfPane(t *testing.T) {
+func TestSidePanelShowsAntiCheatWarningBelowEverythingElse(t *testing.T) {
 	installed := state.Install{
 		Exe:     "game.exe",
 		ReShade: state.ReShadeInfo{Version: "6.8.0", Flavor: "addon", DLL: "dxgi.dll"},
@@ -343,8 +356,8 @@ func TestGameDetailShowsAntiCheatWarningAtBottomOfPane(t *testing.T) {
 		Groups: groupByFolder("/games/x", exes),
 	}
 
-	gd := NewGameDetailScreen(entry, Deps{})
-	body := gd.View(Env{Styles: NewStyles(true), Width: 100, Height: 30})
+	env := Env{Styles: NewStyles(true), Width: 100, Height: 30}
+	body := gamesWith(t, entry, env).View(env)
 
 	execIdx := strings.Index(body, "Executables")
 	warnIdx := strings.Index(body, "anti-cheat")
@@ -376,10 +389,10 @@ func TestInstallKeyRedirectsToAdoptWhenUnmanaged(t *testing.T) {
 		t.Fatal("setup: the folder should be detected as unmanaged")
 	}
 
-	gd := NewGameDetailScreen(entry, fakeDeps())
 	env := Env{Styles: NewStyles(true), Width: 100, Height: 30}
+	gs := gamesWith(t, entry, env)
 
-	_, cmd := gd.Update(tea.KeyPressMsg{Code: 'i', Text: "i"}, env)
+	_, cmd := gs.Update(tea.KeyPressMsg{Code: 'i', Text: "i"}, env)
 	if cmd == nil {
 		t.Fatal("pressing i should still produce a command")
 	}
@@ -444,4 +457,26 @@ func TestAnticheatWarningIsItsOwnBlock(t *testing.T) {
 	if !strings.Contains(got, "anti-cheat detection") {
 		t.Errorf("wrapping lost the warning's point:\n%s", got)
 	}
+}
+
+// panelText renders the games list's side panel for one entry — the view
+// that replaced the game detail screen, and now the only place a game's
+// folders, status and executables are shown.
+func panelText(t *testing.T, entry GameEntry, env Env) string {
+	t.Helper()
+	s := NewGamesScreen(fakeLoader{entries: []GameEntry{entry}}, fakeDeps(), false)
+	s.resize(env)
+	next, _ := s.Update(gamesLoadedMsg{entries: []GameEntry{entry}}, env)
+	body, _ := next.(*GamesScreen).renderDetail(entry, env)
+	return body
+}
+
+// gamesWith returns a games list with entry loaded and selected — the
+// screen every action now runs from.
+func gamesWith(t *testing.T, entry GameEntry, env Env) *GamesScreen {
+	t.Helper()
+	s := NewGamesScreen(fakeLoader{entries: []GameEntry{entry}}, fakeDeps(), false)
+	s.resize(env)
+	next, _ := s.Update(gamesLoadedMsg{entries: []GameEntry{entry}}, env)
+	return next.(*GamesScreen)
 }
