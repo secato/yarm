@@ -91,19 +91,9 @@ YARM tells you rather than installing something that cannot work.
 
 ## Using it
 
-Run `yarm`. Every screen lists its keys along the bottom, and `?` opens the
-full help.
-
-| Key | Does |
-| --- | --- |
-| `↑` `↓` `←` `→` | move (arrows only — every letter is an action) |
-| `enter` | open, or advance the wizard a step |
-| `esc` | back a step, or back a screen |
-| `i` / `e` / `u` | install, edit an install, uninstall |
-| `a` | adopt a hand-made install (games list) · show the whole catalog (wizard) |
-| `c` / `x` / `s` | resources · custom content · settings |
-| `/` `r` | filter · rescan |
-| `q` | quit |
+Run `yarm`. Every screen lists its keys along the bottom and `?` opens the full
+help, so there is nothing to memorise: arrows move, `enter` goes in, `esc` goes
+back.
 
 Nothing is written to a game folder until you confirm on the review page, which
 lists every file that is about to change.
