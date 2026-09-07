@@ -186,3 +186,64 @@ func TestCopyTreePreservesTheTree(t *testing.T) {
 		t.Error("the symlink was copied")
 	}
 }
+
+// When the directory cannot simply be renamed — the real case is a
+// cache_dir on another filesystem — the content is copied instead, and
+// the user still ends up with it in the new location. Simulated here by
+// taking write permission off the parent, which is what stops a rename.
+func TestMigrateFallsBackToCopyingWhenItCannotRename(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	tmp := t.TempDir()
+	oldParent := filepath.Join(tmp, "cache")
+	oldDir := filepath.Join(oldParent, "custom")
+	newDir := filepath.Join(tmp, "data", "custom")
+	writeTree(t, oldDir, map[string]string{"shaders/A/Shaders/a.fx": "a"})
+
+	if err := os.Chmod(oldParent, 0o555); err != nil {
+		t.Skipf("cannot make the parent read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(oldParent, 0o755) })
+
+	moved, err := MigrateCustom(oldDir, newDir)
+	if err != nil {
+		t.Fatalf("MigrateCustom: %v", err)
+	}
+	if !moved {
+		t.Fatal("MigrateCustom reported nothing moved")
+	}
+	if got := readFile(t, filepath.Join(newDir, "shaders", "A", "Shaders", "a.fx")); got != "a" {
+		t.Errorf("copied file contains %q", got)
+	}
+	// Cleanup of the old location is best-effort and may be partial — here
+	// the files inside come away but the directory itself cannot be
+	// unlinked from its read-only parent. That is untidy, not harmful: the
+	// content is already safely in its new home, so it must not be
+	// reported as a failure.
+}
+
+// A destination that cannot be created is reported rather than silently
+// leaving the content behind.
+func TestMigrateReportsAnUnusableDestination(t *testing.T) {
+	tmp := t.TempDir()
+	oldDir := filepath.Join(tmp, "cache", "custom")
+	writeTree(t, oldDir, map[string]string{"shaders/A/Shaders/a.fx": "a"})
+
+	// A file where the destination's parent directory needs to be.
+	blocker := filepath.Join(tmp, "data")
+	if err := os.WriteFile(blocker, []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	moved, err := MigrateCustom(oldDir, filepath.Join(blocker, "custom"))
+	if err == nil {
+		t.Fatal("want an error when the destination cannot be created")
+	}
+	if moved {
+		t.Error("it reported moving something after failing")
+	}
+	if got := readFile(t, filepath.Join(oldDir, "shaders", "A", "Shaders", "a.fx")); got != "a" {
+		t.Errorf("the content was disturbed by a failed migration: %q", got)
+	}
+}
