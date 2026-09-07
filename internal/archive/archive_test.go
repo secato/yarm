@@ -98,42 +98,6 @@ func TestSafePathWindowsDriveLetter(t *testing.T) {
 	}
 }
 
-func TestTopDir(t *testing.T) {
-	tests := []struct {
-		name  string
-		files map[string]string
-		want  string
-	}{
-		{
-			name:  "github archive wrapper",
-			files: map[string]string{"repo-main/Shaders/A.fx": "x", "repo-main/README.md": "y"},
-			want:  "repo-main",
-		},
-		{
-			name:  "no wrapper, files at root",
-			files: map[string]string{"A.fx": "x", "Shaders/B.fx": "y"},
-			want:  "",
-		},
-		{
-			name:  "two top dirs",
-			files: map[string]string{"a/x.fx": "x", "b/y.fx": "y"},
-			want:  "",
-		},
-		{
-			name:  "single dir",
-			files: map[string]string{"only/x.fx": "x"},
-			want:  "only",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := TopDir(buildZip(t, tt.files)); got != tt.want {
-				t.Errorf("TopDir() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestStripPrefix(t *testing.T) {
 	tests := []struct{ name, prefix, want string }{
 		{"repo-main/Shaders/A.fx", "repo-main", "Shaders/A.fx"},
@@ -206,7 +170,7 @@ func TestExtractEntry(t *testing.T) {
 		t.Fatal("no file entry in fixture zip")
 	}
 
-	if err := ExtractEntry(target, dst); err != nil {
+	if err := NewBudget(DefaultLimits()).ExtractEntry(target, dst); err != nil {
 		t.Fatalf("ExtractEntry() error = %v", err)
 	}
 	got, err := os.ReadFile(dst)
@@ -228,10 +192,13 @@ func TestExtractPackageShape(t *testing.T) {
 		"SweetFX-master/../escape.txt":          "nope",
 	})
 
-	top := TopDir(entries)
-	if top != "SweetFX-master" {
-		t.Fatalf("TopDir() = %q", top)
+	// The same two calls artifacts/packages.go makes: find where the
+	// shaders actually live, and strip everything above them.
+	top := FindDir(entries, "Shaders", 4)
+	if top != "SweetFX-master/Shaders" {
+		t.Fatalf("FindDir() = %q", top)
 	}
+	wrapper := strings.TrimSuffix(top, "/Shaders")
 
 	dst := t.TempDir()
 	var extracted []string
@@ -239,7 +206,7 @@ func TestExtractPackageShape(t *testing.T) {
 		if e.IsDir() {
 			continue
 		}
-		rel := StripPrefix(e.Name(), top)
+		rel := StripPrefix(e.Name(), wrapper)
 		if rel == "" {
 			continue
 		}
@@ -247,7 +214,7 @@ func TestExtractPackageShape(t *testing.T) {
 		if err != nil {
 			continue // the escape entry is refused
 		}
-		if err := ExtractEntry(e, full); err != nil {
+		if err := NewBudget(DefaultLimits()).ExtractEntry(e, full); err != nil {
 			t.Fatalf("ExtractEntry(%s): %v", rel, err)
 		}
 		extracted = append(extracted, rel)

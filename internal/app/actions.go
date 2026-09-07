@@ -38,6 +38,13 @@ type adoptDoneMsg struct {
 // with two meanings depending on state.
 var editInstallBinding = key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit install"))
 
+// adoptBinding is the same key as Install, with the help text that matches
+// what it will actually do: a folder whose ReShade yarm did not put there
+// cannot be installed into, so install redirects to adopting it. It is not
+// a KeyMap entry because adopting has no key of its own — `a` already
+// means "add folder" on the games list.
+var adoptBinding = key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "adopt ReShade"))
+
 // startInstallForGroup opens the wizard on grp — or, when it already has
 // an install, on whichever executable that install is actually recorded
 // against, since it may not be the folder's usual "primary" one. A folder

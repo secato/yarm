@@ -74,12 +74,3 @@ func ResolveAlias(id string) string {
 	}
 	return id
 }
-
-// Aliases returns a copy of the alias map, for help text and tests.
-func Aliases() map[string]string {
-	out := make(map[string]string, len(aliases))
-	for k, v := range aliases {
-		out[k] = v
-	}
-	return out
-}

@@ -164,6 +164,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   top 3); "overwrite existing files" became a checkbox toggled with
   `space` rather than its own `o` key.
 
+### Removed
+
+- Dead code found by a reachability pass (`golang.org/x/tools/cmd/deadcode`
+  from `main`, which `golangci-lint`'s `unused` cannot see): the wizard's
+  `apiKnown` wrapper, `archive.TopDir` and the free `archive.ExtractEntry`
+  (production always extracts through a shared `Budget`, and finds shader
+  directories with `FindDir`/`StripPrefix`), `catalog.Aliases`,
+  `Budget.Used`, the `Adopt` key binding — adopting is reached through
+  `i`, since `a` adds a folder — and four `Styles` fields nothing rendered
+  with.
+
 ### Fixed
 
 - Panel boxes are sized from measured lipgloss behavior rather than

@@ -24,7 +24,6 @@ type KeyMap struct {
 	// and within the wizard itself.
 	Install   key.Binding
 	Uninstall key.Binding
-	Adopt     key.Binding // a: adopt an unmanaged install found on disk
 	Toggle    key.Binding // space: multi-select toggle
 }
 
@@ -48,7 +47,6 @@ func DefaultKeyMap() KeyMap {
 
 		Install:   key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "install ReShade")),
 		Uninstall: key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "uninstall")),
-		Adopt:     key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "adopt ReShade")),
 		Toggle:    key.NewBinding(key.WithKeys("space"), key.WithHelp("space", "toggle")),
 	}
 }

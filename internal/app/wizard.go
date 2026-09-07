@@ -579,11 +579,6 @@ func (s *WizardScreen) indexOfVersion(version string) int {
 	return s.indexOfLatest()
 }
 
-// apiKnown reports whether the target executable's guessed API maps to
-// exactly one ReShade proxy DLL — the case where the API step's
-// preselection is a real recommendation rather than a bare default.
-func (s *WizardScreen) apiKnown() bool { return s.exe.API.RecommendedDLL() != "" }
-
 // recommendedDLLIndex returns the dllOptions index to preselect: the
 // recorded DLL when editing an existing install, otherwise a guess from
 // the target exe's API, or 0 (dxgi.dll) when there is no safe

@@ -424,7 +424,7 @@ func TestWizardBackAtFirstStepDefers(t *testing.T) {
 // detected API, and says plainly when there is nothing to detect.
 func TestWizardAPIStepExplainsItsRecommendation(t *testing.T) {
 	confident := loadWizard(t, sampleGameEntry(), 0, fakeDeps()) // D3D12
-	if !confident.apiKnown() {
+	if confident.exe.API.RecommendedDLL() == "" {
 		t.Fatal("a D3D12 exe should map to a recommended DLL")
 	}
 	confident = advance(t, confident, stepAPI)
@@ -434,7 +434,7 @@ func TestWizardAPIStepExplainsItsRecommendation(t *testing.T) {
 	}
 
 	unsupported := loadWizard(t, sampleGameEntry(), 1, fakeDeps()) // Vulkan
-	if unsupported.apiKnown() {
+	if unsupported.exe.API.RecommendedDLL() != "" {
 		t.Fatal("an unsupported API should not map to a recommended DLL")
 	}
 	unsupported = advance(t, unsupported, stepAPI)

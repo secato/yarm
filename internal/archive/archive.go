@@ -55,9 +55,6 @@ type Budget struct {
 // NewBudget returns a Budget enforcing l.
 func NewBudget(l Limits) *Budget { return &Budget{limits: l} }
 
-// Used reports how many bytes have been extracted through this Budget.
-func (b *Budget) Used() int64 { return b.used }
-
 // Precheck rejects an archive up front using the sizes its headers
 // declare, so an obvious bomb costs nothing to refuse. Declared sizes are
 // attacker-controlled, so passing this is necessary but not sufficient;
@@ -156,37 +153,6 @@ func hasVolumeName(name string) bool {
 		((name[0] >= 'a' && name[0] <= 'z') || (name[0] >= 'A' && name[0] <= 'Z'))
 }
 
-// TopDir returns the single top-level directory shared by every entry, or
-// "" when entries live at the root or under more than one directory.
-// GitHub archive zips wrap everything in "<repo>-<branch>/", which callers
-// strip before copying.
-func TopDir(entries []Entry) string {
-	var top string
-	for _, e := range entries {
-		name := strings.ReplaceAll(e.Name(), `\`, "/")
-		name = strings.TrimPrefix(name, "./")
-		if name == "" {
-			continue
-		}
-		first, _, hasSlash := strings.Cut(name, "/")
-		if !hasSlash {
-			// A file at the archive root means there is no single wrapper.
-			if !e.IsDir() {
-				return ""
-			}
-			first = strings.TrimSuffix(name, "/")
-		}
-		if top == "" {
-			top = first
-			continue
-		}
-		if first != top {
-			return ""
-		}
-	}
-	return top
-}
-
 // StripPrefix removes a leading directory component from an archive
 // entry's name, returning "" when the entry is that directory itself.
 func StripPrefix(name, prefix string) string {
@@ -196,13 +162,6 @@ func StripPrefix(name, prefix string) string {
 	n := strings.TrimPrefix(strings.ReplaceAll(name, `\`, "/"), "./")
 	n = strings.TrimPrefix(n, prefix)
 	return strings.TrimPrefix(n, "/")
-}
-
-// ExtractEntry writes one archive entry to dst under a fresh default
-// budget. Use a shared Budget when extracting several entries from the
-// same archive, so their combined size is bounded.
-func ExtractEntry(e Entry, dst string) error {
-	return NewBudget(DefaultLimits()).ExtractEntry(e, dst)
 }
 
 // ExtractEntry writes one archive entry to dst, creating parent

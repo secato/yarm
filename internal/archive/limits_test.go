@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -85,10 +86,15 @@ func TestBudgetStopsTotalExpansion(t *testing.T) {
 	if !errors.Is(lastErr, ErrTooLarge) {
 		t.Errorf("error = %v, want ErrTooLarge", lastErr)
 	}
-	if budget.Used() > limits.MaxTotalSize {
-		t.Errorf("extracted %d bytes, over the %d budget", budget.Used(), limits.MaxTotalSize)
+	// Asserted against what actually landed on disk rather than against
+	// the budget's own counter: the counter agreeing with its own limit
+	// proves very little, while the bytes written are the thing the limit
+	// exists to bound.
+	written := dirSize(t, dst)
+	if written > limits.MaxTotalSize {
+		t.Errorf("extracted %d bytes, over the %d budget", written, limits.MaxTotalSize)
 	}
-	t.Logf("stopped after %d/%d entries, %d bytes", extracted, entries, budget.Used())
+	t.Logf("stopped after %d/%d entries, %d bytes on disk", extracted, entries, written)
 }
 
 // Precheck should refuse an obvious bomb without extracting anything.
@@ -159,7 +165,7 @@ func TestExtractEntryNeverCreatesSymlinks(t *testing.T) {
 	}
 
 	dst := filepath.Join(t.TempDir(), "link")
-	if err := ExtractEntry(FromZip(zr)[0], dst); err != nil {
+	if err := NewBudget(DefaultLimits()).ExtractEntry(FromZip(zr)[0], dst); err != nil {
 		t.Fatalf("ExtractEntry: %v", err)
 	}
 
@@ -177,4 +183,25 @@ func TestExtractEntryNeverCreatesSymlinks(t *testing.T) {
 	if string(body) != "/etc/passwd" {
 		t.Errorf("content = %q, want the link target stored as plain text", body)
 	}
+}
+
+// dirSize totals the regular files under dir.
+func dirSize(t *testing.T, dir string) int64 {
+	t.Helper()
+	var total int64
+	err := filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		total += info.Size()
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", dir, err)
+	}
+	return total
 }

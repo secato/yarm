@@ -160,9 +160,7 @@ func (s *GamesScreen) KeyBindings() []key.Binding {
 	// — but install redirects to it for a folder whose ReShade yarm did
 	// not put there, so the binding says what pressing i will actually do.
 	if len(groupsWithUnmanaged(e)) > 0 {
-		bindings = append([]key.Binding{
-			key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "adopt ReShade")),
-		}, bindings...)
+		bindings = append([]key.Binding{adoptBinding}, bindings...)
 	}
 	if len(groupsWithInstall(e)) > 0 {
 		bindings = append([]key.Binding{editInstallBinding, s.keys.Uninstall}, bindings...)

@@ -13,21 +13,17 @@ import (
 // colors, because Bubble Tea v2 reports the real background color and
 // resolving up front keeps rendering pure.
 type Styles struct {
-	Title      lipgloss.Style
-	Subtitle   lipgloss.Style
-	Faint      lipgloss.Style
-	Accent     lipgloss.Style
-	Good       lipgloss.Style
-	Warn       lipgloss.Style
-	Bad        lipgloss.Style
-	Border     lipgloss.Style
-	Panel      lipgloss.Style
-	StatusBar  lipgloss.Style
-	Selected   lipgloss.Style
-	TableHead  lipgloss.Style
-	TableCell  lipgloss.Style
-	Overlay    lipgloss.Style
-	OverlayDim lipgloss.Style
+	Title     lipgloss.Style
+	Subtitle  lipgloss.Style
+	Faint     lipgloss.Style
+	Accent    lipgloss.Style
+	Good      lipgloss.Style
+	Warn      lipgloss.Style
+	Bad       lipgloss.Style
+	Panel     lipgloss.Style
+	StatusBar lipgloss.Style
+	Selected  lipgloss.Style
+	Overlay   lipgloss.Style
 }
 
 // NewStyles builds the palette for a light or dark terminal.
@@ -56,7 +52,6 @@ func NewStyles(isDark bool) Styles {
 		Good:     lipgloss.NewStyle().Foreground(good),
 		Warn:     lipgloss.NewStyle().Foreground(warn),
 		Bad:      lipgloss.NewStyle().Foreground(bad),
-		Border:   lipgloss.NewStyle().Foreground(border),
 		Panel: lipgloss.NewStyle().
 			Background(panelBg).
 			Border(lipgloss.RoundedBorder()).
@@ -64,12 +59,9 @@ func NewStyles(isDark bool) Styles {
 			Padding(0, 1),
 		StatusBar: lipgloss.NewStyle().Foreground(faint),
 		Selected:  lipgloss.NewStyle().Background(selBg).Foreground(fg).Bold(true),
-		TableHead: lipgloss.NewStyle().Foreground(faint).Bold(true),
-		TableCell: base,
 		Overlay: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(accent).
 			Padding(1, 2),
-		OverlayDim: lipgloss.NewStyle().Foreground(faint),
 	}
 }

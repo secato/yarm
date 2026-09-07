@@ -36,7 +36,7 @@ func TestAliasesResolveToRealPackages(t *testing.T) {
 
 	// The fixture holds only the first three packages, so check the
 	// aliases those cover; the rest are asserted against the id format.
-	for alias, full := range Aliases() {
+	for alias, full := range aliases {
 		if Slugify(full) != full {
 			t.Errorf("alias %q maps to %q, which is not a valid slug", alias, full)
 		}
