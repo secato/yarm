@@ -29,9 +29,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Nothing publishes without a tag; the AUR step skips itself for
   prereleases.
 
-- `docs/demo.tape`, a vhs script that records the demo against a scratch
-  `YARM_HOME` rather than whatever games the recording machine has.
-
 - The wizard understands dependencies between catalog entries. Checking
   something that needs another package now selects that package too,
   across steps — ticking the AutoHDR add-on ticks the tone-mapping shader
@@ -45,6 +42,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   actually offers are ever selected.
 
 ### Changed
+
+- README rewritten for people who want to use yarm rather than read its
+  design: what it does for you, in plain terms, with the logo and a
+  screenshot of the games list, and the technical detail left to
+  `docs/plan/`. The vhs tape and the unrecorded demo GIF are gone in
+  favour of `docs/main-screen.png`.
 
 - The catalog is loaded once per session, and the load starts at launch
   alongside the game scan. Opening the install wizard or the resources

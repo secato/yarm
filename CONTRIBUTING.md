@@ -56,20 +56,11 @@ how the Steam provider is structured.
   real internet (e.g. downloading a real ReShade release) must be gated
   behind `YARM_NETWORK_TESTS=1` and skipped otherwise.
 
-## Recording the demo
+## The screenshot
 
-`docs/demo.tape` is a [vhs](https://github.com/charmbracelet/vhs) script that
-drives the real TUI against a scratch `YARM_HOME`, so it does not depend on
-what is installed on the recording machine:
-
-```sh
-yay -S vhs                       # or go install github.com/charmbracelet/vhs@latest
-go build -o /tmp/yarm-demo ./cmd/yarm
-vhs docs/demo.tape               # writes docs/demo.gif
-```
-
-Run yarm once beforehand so the catalog cache is warm — otherwise most of
-the recording is a spinner.
+`docs/main-screen.png` is the games list in the README. Retake it whenever
+the layout changes enough that it misleads: run yarm in a terminal around
+160×40 with a warm cache, on a real library, and crop to the terminal.
 
 ## Releasing
 

@@ -1,57 +1,91 @@
+<div align="center">
+
+<img src="docs/logo.png" alt="YARM" width="220">
+
 # YARM — Yet Another ReShade Manager
+
+**Install ReShade in your games from the terminal, and take it back out just as easily.**
 
 [![CI](https://github.com/secato/yarm/actions/workflows/ci.yml/badge.svg)](https://github.com/secato/yarm/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/secato/yarm)](https://github.com/secato/yarm/releases)
 [![Go Report Card](https://goreportcard.com/badge/github.com/secato/yarm)](https://goreportcard.com/report/github.com/secato/yarm)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A terminal UI to install and uninstall [ReShade](https://reshade.me/), effect
-packages and add-ons on a per-game basis, on Windows and Linux. YARM keeps a
-shared download cache, remembers exactly which files it wrote into each game
-folder, and can cleanly uninstall without touching anything it didn't create.
+</div>
 
-> **Status: pre-release.** Everything below works; there is no tagged
-> release yet. Following the implementation plan in
-> [`docs/plan/`](docs/plan/README.md).
+YARM finds your games, installs [ReShade](https://reshade.me/) into the ones you
+choose along with the shaders and add-ons you want, and keeps track of every
+file it put there — so uninstalling gives you the folder back exactly as it was.
 
-## Features
+It is a single binary with no runtime, no installer and no launcher running in
+the background. It runs on **Windows and Linux** (including Steam Deck and
+Proton), where it does the fiddly Proton-specific parts for you, and it works
+over SSH just as well as it does locally.
 
-- Detects installed Steam games (more launchers planned) and lets you add
-  any folder manually.
-- Installs ReShade — normal or add-on build — plus effect packages and
-  add-ons, downloaded from official sources and cached locally. The
-  wizard opens on a curated shortlist of the packs people actually use;
-  `a` widens it to the full catalog.
-- Understands dependencies: checking something that needs another package
-  selects that package too, and says why. Checking the AutoHDR add-on
-  brings its tone-mapping shader with it.
-- Works per **folder**, not per executable — ReShade attaches to a
-  directory, so every executable in it is covered by one install.
-- Records every file it writes so uninstall removes only what it
-  installed, never your own files or presets.
-- Adopts a ReShade install you did by hand, so yarm can manage it from
-  then on.
-- Resources browser: what is cached, what it costs on disk, and which
-  installs use it; download ahead, refresh or delete.
-- Custom content: drop your own shaders or add-ons into a cache folder and
-  yarm offers them in the wizard alongside the catalog.
-- On Linux/Proton, fetches and installs `d3dcompiler_47.dll` alongside
-  ReShade — no manual DLL overrides needed for D3D9/10/11 games.
-- Warns, in red and on every step, when you are about to install an
-  add-on build into a game that might have anti-cheat.
+<div align="center">
 
-## Install
+<img src="docs/main-screen.png" alt="The games list, with a game's install details in the side panel" width="900">
 
-- **Windows / Linux**: download the latest zip/tar.gz from the
-  [Releases](https://github.com/secato/yarm/releases) page and run the
-  `yarm` binary.
-- **Arch Linux**: `yay -S yarm-bin`
-- **From source**: `go install github.com/secato/yarm/cmd/yarm@latest`
+</div>
 
-## Quick start
+> **Status: pre-release.** Everything described here works, but there is no
+> tagged release yet.
 
-Run `yarm` with no arguments to launch the TUI. Every screen lists its keys
-in the footer, and `?` opens the full help overlay.
+## What it does for you
+
+**Finds your games.** Steam libraries are detected automatically, wherever they
+live. Anything else — GOG, Epic, a folder you unzipped somewhere — you add by
+path, once.
+
+**Installs ReShade the right way for each game.** YARM looks at the game's
+executable to work out whether it is 32- or 64-bit and which graphics API it
+uses, then picks the matching ReShade build and proxy DLL for you. You can
+override any of it if you know better.
+
+**Gives you the shaders people actually use.** The wizard opens on a curated
+shortlist — SweetFX, iMMERSE, qUINT, METEOR, LumeniteFX and the rest — instead
+of a wall of a hundred packages. One key widens it to the full catalog when you
+want something specific.
+
+**Handles dependencies for you.** Some add-ons need a particular shader to work
+at all. Pick the AutoHDR add-on and YARM selects the tone-mapping shader it
+needs, and tells you why it did.
+
+**Downloads once, not once per game.** Everything is cached and shared, so
+installing the same shader pack into a fifth game copies files rather than
+re-downloading them. You can see what is cached, what it costs in disk space,
+and which games are using it.
+
+**Uninstalls cleanly.** YARM records every file it writes. Uninstall removes
+exactly those and nothing else — your presets, screenshots and edited configs
+stay. If it had to replace a file that was already there, it kept a copy and
+puts it back.
+
+**Tells you before it overwrites anything.** If something else already occupies
+the DLL slot ReShade needs — another injector, or a ReShade you installed by
+hand — YARM says so before it starts, not after.
+
+**Takes over installs you did by hand.** Point it at a game you set up
+yourself and it can adopt that install and manage it from then on.
+
+**Lets you bring your own.** Drop your own shaders or add-ons into a folder and
+they appear in the wizard next to the catalog ones.
+
+**Warns you about anti-cheat.** The add-on build of ReShade is detectable.
+YARM says so, in red, on every screen where it matters.
+
+## Installing YARM
+
+| | |
+| --- | --- |
+| **Windows / Linux** | Download the zip or tar.gz from [Releases](https://github.com/secato/yarm/releases) and run `yarm`. There is nothing to install. |
+| **Arch Linux** | `yay -S yarm-bin` |
+| **From source** | `go install github.com/secato/yarm/cmd/yarm@latest` |
+
+## Using it
+
+Run `yarm`. Every screen lists its keys along the bottom, and `?` opens the
+full help.
 
 | Key | Does |
 | --- | --- |
@@ -64,37 +98,29 @@ in the footer, and `?` opens the full help overlay.
 | `/` `r` | filter · rescan |
 | `q` | quit |
 
-Prefer the command line? `yarm games ls`, `yarm cache ls` and
-`yarm installs` report the same information without the UI (`--json` where
-it makes sense), and `--no-color` (or `NO_COLOR=1`) turns off styling for
-pipelines.
+Nothing is written to a game folder until you confirm on the review page, which
+lists every file that is about to change.
 
-## How it works
+If you would rather not use the UI, `yarm games ls`, `yarm cache ls` and
+`yarm installs` print the same information (with `--json` where it helps), and
+`--no-color` — or `NO_COLOR=1` — turns off styling.
 
-YARM keeps three things on disk (see [`docs/plan/03-data-and-storage.md`](docs/plan/03-data-and-storage.md)
-for exact paths and layout):
+## On Linux and Proton
 
-- **Config** (`config.yaml`) — your preferences and manually added games.
-- **State** (`installs.json`) — a manifest of what YARM installed, per game
-  and executable, so uninstall is exact and reversible.
-- **Cache** — downloaded ReShade builds, effect packages, add-ons and the
-  Windows D3D compiler, reused across every game you install to.
-
-## Linux / Proton notes
-
-- `d3dcompiler_47.dll` is downloaded and copied into the game folder
-  automatically — Wine's built-in one fails on some ReShade shaders.
-- Vulkan and D3D8 games are not supported yet; the installer will say so.
-- YARM never asks you to add Steam launch options.
-- **Troubleshooting**: if a future Wine/Proton build stops picking up the
-  game-folder DLL automatically, set a launch option:
+- `d3dcompiler_47.dll` is downloaded and installed for you. Wine's own copy
+  fails on some ReShade shaders, and this is the step most manual guides get
+  wrong.
+- You do **not** need to add Steam launch options or set DLL overrides.
+- Vulkan and D3D8 games are not supported yet. YARM will tell you rather than
+  install something that cannot work.
+- If a future Proton version stops picking up the DLL on its own, this launch
+  option fixes it — replace `dxgi` with whichever API the game uses:
   `WINEDLLOVERRIDES="d3dcompiler_47=n;dxgi=n,b" %command%`
-  (adjust the second DLL name to whatever graphics API the game uses).
 
-## Custom content
+## Adding your own shaders and add-ons
 
-Drop your own shaders or add-ons into the cache's `custom/` folder and they
-show up in the install wizard:
+Anything you put in the cache's `custom/` folder shows up in the wizard beside
+the catalog packages:
 
 ```
 custom/
@@ -102,24 +128,26 @@ custom/
 └── addons/<name>/*.addon32|*.addon64
 ```
 
-See [`docs/plan/03-data-and-storage.md`](docs/plan/03-data-and-storage.md) §3.5 for details.
+`yarm paths` prints where that folder is on your system.
 
-## Config reference
+## A word of warning
 
-See [`docs/plan/03-data-and-storage.md`](docs/plan/03-data-and-storage.md) §3.2 for the full
-`config.yaml` reference.
+**Never install ReShade — or any third-party DLL — into a game with an active
+anti-cheat while playing online.** It can get your account banned. Use it for
+single-player and offline games, or games you are certain allow it. The add-on
+build is the most detectable of all, which is why YARM never selects it for you.
 
-## FAQ
+## Documentation
 
-**Is this safe to use with online/anti-cheat-protected games?**
-No. Never install ReShade (or any third-party DLL) into a game with an
-active anti-cheat while playing online — it can get you banned. Use it only
-for offline/single-player games or games without kernel-level anti-cheat.
+The design documents live in [`docs/plan/`](docs/plan/README.md) and cover the
+architecture, the exact on-disk layout of the config, state and cache, the
+upstream sources YARM reads, and how the install engine works.
+[`CONTRIBUTING.md`](CONTRIBUTING.md) covers building and testing.
 
 ## Credits
 
 - [ReShade](https://reshade.me/) by crosire.
-- Effect package and add-on catalogs sourced from the
+- Effect package and add-on catalogs from the
   [reshade-shaders](https://github.com/crosire/reshade-shaders) `list` branch.
 - Inspired by [LeShade](https://github.com/Ishidawg/LeShade) and
   [reshade-steam-proton](https://github.com/kevinlekiller/reshade-steam-proton-installer).
