@@ -76,7 +76,7 @@ YARM says so, in red, on every screen where it matters.
 
 ## Installing YARM
 
-| | |
+| Platform | How |
 | --- | --- |
 | **Windows / Linux** | Download the zip or tar.gz from [Releases](https://github.com/secato/yarm/releases) and run `yarm`. There is nothing to install. |
 | **Arch Linux** | `yay -S yarm-bin` |
