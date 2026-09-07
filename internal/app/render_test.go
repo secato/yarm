@@ -139,3 +139,47 @@ func TestSidePanelIsDroppedWhenTooNarrow(t *testing.T) {
 		t.Errorf("panel width = %d at 60 columns, want it dropped", s.detailWidth)
 	}
 }
+
+// bubbles' own table styles hardcode a pink for the selected row and give
+// the header no color, so a table left on them is the one list in the app
+// that ignores the terminal's theme and highlights its cursor differently
+// from every other list.
+func TestGamesTableUsesTheAppPalette(t *testing.T) {
+	for _, dark := range []bool{true, false} {
+		styles := NewStyles(dark)
+		got := styles.Table()
+
+		if got.Selected.Render("x") != styles.Selected.Render("x") {
+			t.Errorf("dark=%v: the table's selected row should be styled like every other list's", dark)
+		}
+		if !strings.Contains(got.Header.Render("Game"), "\x1b[") {
+			t.Errorf("dark=%v: the header should carry the palette's own color", dark)
+		}
+		// Columns are laid out assuming one column of padding per side.
+		if got.Cell.GetPaddingLeft() != 1 || got.Cell.GetPaddingRight() != 1 {
+			t.Errorf("dark=%v: cells need the padding the layout assumes", dark)
+		}
+	}
+}
+
+// A cell that sets its own color emits a reset that also clears the row
+// highlight bubbles wraps around it, striping the selection.
+func TestGamesTableSelectionIsOneUnbrokenHighlight(t *testing.T) {
+	env := Env{Styles: NewStyles(true), Width: 60, Height: 8}
+	entry := bigGame(1, 1)
+	s := gamesWith(t, entry, env)
+
+	var row string
+	for _, line := range strings.Split(s.View(env), "\n") {
+		if strings.Contains(line, entry.Name) && strings.Contains(line, "\x1b[") {
+			row = line
+			break
+		}
+	}
+	if row == "" {
+		t.Fatalf("no styled row for %q in:\n%s", entry.Name, s.View(env))
+	}
+	if n := strings.Count(row, "\x1b[m"); n != 1 {
+		t.Errorf("the selected row resets its styling %d times; it should be one highlight:\n%q", n, row)
+	}
+}

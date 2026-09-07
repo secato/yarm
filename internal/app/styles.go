@@ -3,6 +3,7 @@
 package app
 
 import (
+	"charm.land/bubbles/v2/table"
 	"charm.land/lipgloss/v2"
 )
 
@@ -24,6 +25,28 @@ type Styles struct {
 	StatusBar lipgloss.Style
 	Selected  lipgloss.Style
 	Overlay   lipgloss.Style
+
+	// tableHead and tableCell are only ever handed to bubbles' table
+	// through Table(); nothing else draws with them.
+	tableHead lipgloss.Style
+	tableCell lipgloss.Style
+}
+
+// Table maps this palette onto bubbles' table styles. Without it a table
+// renders with the library's own defaults, which hardcode a pink for the
+// selected row and give the header no color at all — so the one list in
+// the app built on bubbles/table was the one list that ignored the
+// terminal's theme and highlighted its cursor differently from everything
+// else.
+//
+// The padding matches DefaultStyles: the table lays its columns out
+// assuming each cell carries one column of padding on either side.
+func (s Styles) Table() table.Styles {
+	return table.Styles{
+		Header:   s.tableHead.Padding(0, 1),
+		Cell:     s.tableCell.Padding(0, 1),
+		Selected: s.Selected,
+	}
 }
 
 // NewStyles builds the palette for a light or dark terminal.
@@ -63,5 +86,13 @@ func NewStyles(isDark bool) Styles {
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(accent).
 			Padding(1, 2),
+
+		tableHead: lipgloss.NewStyle().Foreground(faint).Bold(true),
+		// Deliberately colorless: bubbles renders each cell first and then
+		// wraps the whole row in Selected, so a cell that sets a color
+		// emits a reset that also clears the row's highlight — the
+		// selection ends up striped. Cells inherit the terminal's own
+		// foreground, which is what base was setting anyway.
+		tableCell: lipgloss.NewStyle(),
 	}
 }

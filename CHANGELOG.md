@@ -172,10 +172,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (production always extracts through a shared `Budget`, and finds shader
   directories with `FindDir`/`StripPrefix`), `catalog.Aliases`,
   `Budget.Used`, the `Adopt` key binding — adopting is reached through
-  `i`, since `a` adds a folder — and four `Styles` fields nothing rendered
-  with.
+  `i`, since `a` adds a folder — and two `Styles` fields nothing rendered
+  with (`Border`, `OverlayDim`). The two table fields came back as
+  unexported inputs to `Styles.Table()`, which is where they should have
+  been handed to `bubbles` in the first place — see Fixed.
 
 ### Fixed
+
+- The games table is drawn with yarm's palette instead of `bubbles`'
+  defaults, which hardcode a pink for the selected row and leave the header
+  uncolored — it was the one list in the app that ignored the terminal
+  theme and highlighted its cursor differently from every other list. Its
+  selected row is now a single unbroken highlight, matching the rest.
 
 - Panel boxes are sized from measured lipgloss behavior rather than
   assumption: `Width(w)` renders a box exactly `w` columns wide with `w-4`

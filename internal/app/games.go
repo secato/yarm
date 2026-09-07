@@ -311,6 +311,10 @@ func (s *GamesScreen) applyFilter() {
 
 // resize lays the table out for the current window and refreshes rows.
 func (s *GamesScreen) resize(env Env) {
+	// The palette only exists on Env, which the constructor never sees, so
+	// this is the first place the table can be told what to draw with.
+	s.table.SetStyles(env.Styles.Table())
+
 	filterWidth := env.Width - 6
 	if filterWidth < 10 {
 		filterWidth = 10
