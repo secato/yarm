@@ -78,7 +78,7 @@ var (
 var wizardShowAll = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "show all"))
 
 // dllOption is one radio choice on the API step, matching ReShade's own
-// installer (docs/plan/04-external-sources.md §4.6).
+// installer.
 type dllOption struct {
 	Name string
 	For  string
@@ -117,7 +117,7 @@ type wizardDataLoadedMsg struct {
 //
 // It is one Screen implementation holding a step index and one field group
 // per step, rather than several pushed screens, so the in-progress Request
-// lives in exactly one place (§6.1: "wizard holds Request").
+// lives in exactly one place ("wizard holds Request").
 type WizardScreen struct {
 	keys     KeyMap
 	entry    GameEntry
@@ -338,7 +338,7 @@ func (s *WizardScreen) prevStep(from wizardStep) wizardStep {
 }
 
 // nextStep steps forward, skipping Add-ons when the build cannot load them
-// (§6.1: "skipped when flavor = normal").
+// ("skipped when flavor = normal").
 func (s *WizardScreen) nextStep(from wizardStep) wizardStep {
 	next := from + 1
 	if next == stepAddons && !s.flavor.Addon() {

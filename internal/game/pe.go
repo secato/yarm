@@ -58,8 +58,9 @@ func importedDLLs(symbols []string) map[string]bool {
 	return dlls
 }
 
-// apiOf guesses a graphics API from a set of imported DLL names, in the
-// priority order specified by docs/plan/04-external-sources.md §4.6.
+// apiOf guesses a graphics API from a set of imported DLL names. The
+// order matters: a game importing both dxgi and d3d9 is a D3D10+ game
+// carrying a legacy dependency, not a D3D9 one.
 func apiOf(dlls map[string]bool) API {
 	hasPrefix := func(prefix string) bool {
 		for dll := range dlls {

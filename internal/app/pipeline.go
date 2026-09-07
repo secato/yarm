@@ -31,10 +31,9 @@ type Installer interface {
 
 // RealInstaller wires the cache, the catalog and the install engine
 // together. It exists in internal/app, not internal/install, because
-// combining those packages is exactly the kind of glue
-// docs/plan/02-architecture.md reserves for the app layer — "nothing
-// imports app", and app is the one thing above install, catalog and
-// cache alike. cmd/yarm's `install` command builds the same pipeline for
+// combining those packages is exactly the kind of glue the app layer is
+// for: nothing imports app, so app is the one thing that sits above
+// install, catalog and cache alike. cmd/yarm's `install` command builds the same pipeline for
 // the CLI; the two are intentionally not shared, since each belongs to
 // its own top-layer entry point.
 type RealInstaller struct {

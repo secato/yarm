@@ -24,7 +24,7 @@ type customLoadedMsg struct {
 
 // CustomScreen shows the two user-managed content folders under
 // cache/custom and what yarm found in them. There is no editing here —
-// per §6.1 the user manages the folders themselves; this is a read-only
+// the user manages the folders themselves; this is a read-only
 // view plus a way to see exactly where they are.
 type CustomScreen struct {
 	keys KeyMap
@@ -42,7 +42,8 @@ type CustomScreen struct {
 }
 
 // customPrintBinding shows the highlighted folder's full path in the
-// status bar ("o prints path", §6.1).
+// status bar: the folder is the user's to manage, so the useful thing
+// yarm can offer is where it is.
 var customPrintBinding = key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "print path"))
 
 type customRow struct {

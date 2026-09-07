@@ -123,7 +123,7 @@ func TestDiscover(t *testing.T) {
 	mkGameDir(t, steamRoot, "Steamworks Shared")
 
 	// Manifest present but the install directory is missing on disk: must
-	// be excluded (docs/plan/04-external-sources.md §4.5).
+	// be excluded.
 	writeManifest(t, steamRoot, "9999999", "Uninstalled Game", "Uninstalled Game")
 
 	writeManifest(t, extraLibrary, "700220", "Vantage Point", "Vantage Point")

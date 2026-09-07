@@ -139,10 +139,8 @@ build is the most detectable of all, which is why YARM never selects it for you.
 
 ## Documentation
 
-The design documents live in [`docs/plan/`](docs/plan/README.md) and cover the
-architecture, the exact on-disk layout of the config, state and cache, the
-upstream sources YARM reads, and how the install engine works.
-[`CONTRIBUTING.md`](CONTRIBUTING.md) covers building and testing.
+[`CONTRIBUTING.md`](CONTRIBUTING.md) covers the package layout, building and
+testing, and how to add support for another game library.
 
 ## Credits
 

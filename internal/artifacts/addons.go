@@ -47,10 +47,10 @@ func InstallAddonFile(src, dstDir string, arch game.Arch) (string, error) {
 // ExtractAddonZip pulls every .addon32/.addon64 matching arch out of a
 // downloaded zip into dstDir, returning the files written.
 //
-// An archive with no add-on files at all is reported as an error: §4.3
-// classifies those entries as "manual — see repository", and reaching here
-// with one means the catalog promised something the archive does not
-// deliver.
+// An archive with no add-on files at all is reported as an error: the
+// catalog classifies those entries as manual ("see repository"), so
+// reaching here with one means the catalog promised something the archive
+// does not deliver.
 func ExtractAddonZip(zipPath, dstDir string, arch game.Arch) ([]string, error) {
 	f, err := os.Open(zipPath)
 	if err != nil {

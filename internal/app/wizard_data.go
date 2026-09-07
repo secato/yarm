@@ -82,8 +82,8 @@ func firstErr(errs ...error) error {
 }
 
 // PackagesWithCustom returns the catalog packages followed by any custom
-// shader folders, the custom ones under a non-selectable header — the
-// layout §6.1 describes for the packages step.
+// shader folders, the custom ones under a non-selectable header so the
+// list says where each entry came from.
 func (d WizardData) PackagesWithCustom(cache CacheStatus) []selectItem {
 	items := make([]selectItem, 0, len(d.Packages)+len(d.CustomShaders)+1)
 	for _, p := range d.Packages {
@@ -107,8 +107,9 @@ func (d WizardData) PackagesWithCustom(cache CacheStatus) []selectItem {
 }
 
 // AddonsWithCustom returns the catalog add-ons followed by custom add-on
-// folders. Manual-only add-ons are included but marked Disabled, per §6.1
-// ("manual entries greyed with URL").
+// folders. Manual-only add-ons are included but marked Disabled, greyed
+// out with the URL to fetch them from by hand: hiding them would leave
+// the user wondering why an add-on they know of is missing.
 func (d WizardData) AddonsWithCustom(cache CacheStatus) []selectItem {
 	items := make([]selectItem, 0, len(d.Addons)+len(d.CustomAddons)+1)
 	for _, a := range d.Addons {

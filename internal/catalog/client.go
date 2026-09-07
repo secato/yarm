@@ -16,7 +16,7 @@ import (
 	"github.com/secato/yarm/internal/fsutil"
 )
 
-// Upstream catalog sources (docs/plan/04-external-sources.md §4.1–4.3).
+// Upstream catalog sources.
 const (
 	PackagesURL = "https://raw.githubusercontent.com/crosire/reshade-shaders/list/EffectPackages.ini"
 	AddonsURL   = "https://raw.githubusercontent.com/crosire/reshade-shaders/list/Addons.ini"

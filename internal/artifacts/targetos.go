@@ -7,7 +7,7 @@ import "runtime"
 // It is a value passed around rather than a read of runtime.GOOS, because
 // what matters is the OS the *game* will run under, and because keeping it
 // explicit lets both branches of every OS-dependent rule be tested on any
-// CI runner (docs/plan/08-implementation-steps.md, step 4).
+// CI runner.
 type TargetOS string
 
 // TargetOS values.
@@ -38,8 +38,7 @@ func CurrentTargetOS() TargetOS {
 // effects; Windows already ships d3dcompiler_47.dll as a system component,
 // so copying one there would be redundant at best. Under Wine/Proton the
 // builtin implementation fails on some shaders, which is why the real
-// Microsoft DLL is downloaded and placed in the game directory
-// (docs/plan/01-decisions.md, docs/plan/04-external-sources.md §4.4).
+// Microsoft DLL is downloaded and placed in the game directory.
 //
 // Anything else returns false: not downloading a 38 MB installer is the
 // safe default for a platform whose install rules are not defined.

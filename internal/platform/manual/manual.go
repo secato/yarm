@@ -51,8 +51,9 @@ func (p *Provider) Discover(_ context.Context) ([]game.Game, error) {
 	return games, nil
 }
 
-// ID derives the stable "manual:<sha1(root)[:12]>" game id documented in
-// docs/plan/03-data-and-storage.md §3.3.
+// ID derives a stable "manual:<sha1(root)[:12]>" game id. It is derived
+// from the folder rather than stored, so the same folder added twice is
+// the same game, and a game keeps its recorded install across restarts.
 func ID(root string) string {
 	sum := sha1.Sum([]byte(root)) //nolint:gosec // id derivation, not a security use of the hash
 	return ProviderName + ":" + hex.EncodeToString(sum[:])[:12]

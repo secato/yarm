@@ -26,8 +26,7 @@ const (
 // The setup exe is a .NET PE with a zip appended. Go's
 // archive/zip.NewReader reads it directly: the central directory records
 // offsets relative to the start of the archive, and the reader derives the
-// base offset itself, so the PE prefix needs no special handling
-// (docs/plan/04-external-sources.md §4.1).
+// base offset itself, so the PE prefix needs no special handling.
 //
 // Both DLLs must be present. A setup exe missing either one is not
 // something to install half of.

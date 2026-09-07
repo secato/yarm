@@ -31,8 +31,7 @@ func Async[T any](ctx context.Context, work func(context.Context) (T, error), on
 // result. A tea.Cmd can only ever produce one message, so the work is run
 // here directly (not wrapped in a Cmd) and streamed back through a
 // channel; pair this with WaitForActivity to turn arrivals into messages
-// the Bubble Tea loop can react to (docs/plan/02-architecture.md §2.3, the
-// "waitForActivity" pattern).
+// the Bubble Tea loop can react to (the "waitForActivity" pattern).
 //
 // work must call send for everything it wants delivered, including its
 // own final result — StreamJob does not add one. Once work returns, the

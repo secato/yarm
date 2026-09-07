@@ -11,8 +11,9 @@ import (
 	"github.com/secato/yarm/internal/install"
 )
 
-// maxLogLines bounds how many progress lines the screen keeps, per §6.1
-// ("log lines (last 8)").
+// maxLogLines bounds how many progress lines the screen keeps: the last
+// eight, which is enough to see what is happening without the screen
+// becoming a scrollback nobody reads.
 const maxLogLines = 8
 
 // progressUpdateMsg carries one narrated step of a running install.
@@ -30,8 +31,7 @@ type installDoneMsg struct {
 // The work happens in a goroutine started from Init, not inside a single
 // tea.Cmd: a Cmd can only ever deliver one message, and this needs to
 // stream several. Progress flows back over a channel, following the
-// "waitForActivity" pattern docs/plan/02-architecture.md §2.3 names —
-// each message drained from the channel triggers re-issuing the same
+// "waitForActivity" pattern — each message drained from the channel triggers re-issuing the same
 // listen command, until the job sends its final result and closes it.
 type ProgressScreen struct {
 	keys      KeyMap

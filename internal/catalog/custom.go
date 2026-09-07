@@ -8,8 +8,7 @@ import (
 	"strings"
 )
 
-// Custom content subdirectories under cache/custom
-// (docs/plan/03-data-and-storage.md §3.5).
+// Custom content subdirectories under cache/custom.
 const (
 	CustomShadersDir = "shaders"
 	CustomAddonsDir  = "addons"

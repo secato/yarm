@@ -1,4 +1,4 @@
-# GoReleaser config — see docs/plan/07-repo-ci-release.md §7.4.
+# GoReleaser config.
 #
 # Nothing here publishes on its own: .github/workflows/release.yml runs it
 # only for a pushed `v*` tag. Locally, `make snapshot` builds every archive

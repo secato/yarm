@@ -25,9 +25,9 @@ func requireNetwork(t *testing.T) {
 }
 
 // TestExtractD3DCompilerLive checks the pinned Firefox installer still
-// exists, still hashes as recorded, and still yields the exact DLL §4.4
-// promises. If Mozilla ever re-publishes that release, this is what
-// catches it.
+// exists, still hashes as recorded, and still yields the exact DLL the
+// pinned hashes promise. If Mozilla ever re-publishes that release, this
+// is what catches it.
 func TestExtractD3DCompilerLive(t *testing.T) {
 	requireNetwork(t)
 
@@ -68,8 +68,8 @@ func TestExtractD3DCompilerLive(t *testing.T) {
 }
 
 // TestExtractReShadeLive checks that reshade.me still publishes a setup
-// executable Go's archive/zip can read directly, which the whole
-// extraction path in §4.1 depends on.
+// executable Go's archive/zip can read directly, which the whole ReShade
+// extraction path depends on.
 func TestExtractReShadeLive(t *testing.T) {
 	requireNetwork(t)
 

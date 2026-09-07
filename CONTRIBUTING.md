@@ -23,8 +23,7 @@ obvious from the diff.
 
 ## Project layout
 
-See [`docs/plan/02-architecture.md`](docs/plan/02-architecture.md) for the
-package layout and dependency rules. The short version:
+The package layout and dependency rules:
 
 - `internal/app` (the TUI) is the only package allowed to depend on
   everything else. Nothing else imports `app`.
@@ -43,9 +42,9 @@ Steam is the only provider in v1. To add another (GOG/Heroic/Epic/Lutris):
 3. Add fixtures under `testdata/` for whatever manifest format the launcher
    uses, and unit tests exercising provider discovery against them.
 
-See [`docs/plan/02-architecture.md`](docs/plan/02-architecture.md) and
-[`docs/plan/04-external-sources.md`](docs/plan/04-external-sources.md) for
-how the Steam provider is structured.
+`internal/platform/steam` is the worked example: roots per OS in
+`roots_*.go`, manifest parsing beside it, and every path it reads covered
+by a fixture under `testdata/`.
 
 ## Tests
 

@@ -194,7 +194,9 @@ func TestPlanArchSelectsDLL(t *testing.T) {
 	}
 }
 
-// The conflict decision table from §5.2.
+// The conflict decision table: what the planner does with a file already
+// sitting where it wants to write, for each combination of who owns it
+// and whether overwrite is on.
 func TestPlanConflictDetection(t *testing.T) {
 	const dest = "Game/dxgi.dll"
 

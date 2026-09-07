@@ -23,8 +23,7 @@ const D3DCompiler = "d3dcompiler_47.dll"
 const archiveEntry = "core/" + D3DCompiler
 
 // D3DSource pins one architecture's Firefox installer and the hashes of
-// both the installer and the DLL extracted from it
-// (docs/plan/04-external-sources.md §4.4).
+// both the installer and the DLL extracted from it.
 //
 // Firefox 62.0.3 is used because winetricks and reshade-steam-proton use
 // it: it is a stable, permanently-hosted Mozilla CDN URL that happens to

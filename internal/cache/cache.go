@@ -20,7 +20,7 @@ import (
 	"github.com/secato/yarm/internal/game"
 )
 
-// Subdirectories of the cache root (docs/plan/03-data-and-storage.md §3.4).
+// Subdirectories of the cache root.
 const (
 	DirReShade     = "reshade"
 	DirPackages    = "packages"
@@ -90,7 +90,7 @@ func (c *Cache) HasReShade(version string, addon bool) bool {
 }
 
 // HasPackage reports whether any cached version of a package exists.
-// Package cache keys carry a download date and content hash (§4.2), so
+// Package cache keys carry a download date and content hash, so
 // this checks for the id's directory rather than one exact version.
 func (c *Cache) HasPackage(id string) bool {
 	return nonEmpty(c.abs(filepath.Join(DirPackages, id)))
@@ -158,9 +158,9 @@ func (c *Cache) EnsureReShade(ctx context.Context, version string, addon bool, o
 // EnsurePackage returns the directory holding a normalized effect package.
 //
 // GitHub branch archives are not versioned, so the cache key is the
-// download date plus the first 7 hex characters of the zip's SHA-256
-// (§4.2). Re-downloading an unchanged branch therefore reuses the same
-// directory on the same day, and a changed branch gets a new one.
+// download date plus the first 7 hex characters of the zip's SHA-256.
+// Re-downloading an unchanged branch therefore reuses the same directory
+// on the same day, and a changed branch gets a new one.
 func (c *Cache) EnsurePackage(ctx context.Context, pkg catalog.Package, onProgress fetch.ProgressFunc) (string, error) {
 	zipPath := c.abs(filepath.Join(DirDownloads, pkg.ID+".zip"))
 	defer func() { _ = os.Remove(zipPath) }()
@@ -253,7 +253,7 @@ func (c *Cache) EnsureAddon(ctx context.Context, addon catalog.Addon, arch game.
 // an architecture, downloading the pinned Firefox installer if needed.
 //
 // Only ever needed for Linux/Proton installs; on Windows the system
-// already has this DLL (§4.4).
+// already has this DLL.
 func (c *Cache) EnsureD3DCompiler(ctx context.Context, arch game.Arch, onProgress fetch.ProgressFunc) (string, error) {
 	src, err := artifacts.D3DSourceFor(arch)
 	if err != nil {

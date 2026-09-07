@@ -2,3 +2,6 @@ proposal.md
 bin/
 cover.out
 dist/
+
+# Design documents and the implementation log, kept locally.
+docs/plan/

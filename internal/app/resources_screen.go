@@ -547,7 +547,7 @@ func ensureAddonAllArches(c *cache.Cache, a catalog.Addon) error {
 }
 
 // confirmDelete removes every cached entry for the highlighted item —
-// there can be more than one for a package or add-on (§4.2: package cache
+// there can be more than one for a package or add-on (package cache
 // keys carry a download date and content hash, so re-fetching an updated
 // branch keeps the old one around until it is cleaned up).
 func (s *ResourcesScreen) confirmDelete() (Screen, tea.Cmd) {

@@ -7,8 +7,7 @@ import (
 	"path/filepath"
 )
 
-// defaultRoots returns candidate Steam install directories on macOS
-// (docs/plan/04-external-sources.md §4.5).
+// defaultRoots returns candidate Steam install directories on macOS.
 func defaultRoots() []string {
 	home, err := os.UserHomeDir()
 	if err != nil {

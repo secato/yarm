@@ -13,10 +13,10 @@ import (
 	"github.com/secato/yarm/internal/state"
 )
 
-// knownDLLNames are the proxy DLL names ReShade's own installer uses
-// (docs/plan/04-external-sources.md §4.6), in the order checked — a game
-// folder installed by hand or another tool has exactly one of these next
-// to the executable if it is running ReShade at all.
+// knownDLLNames are the proxy DLL names ReShade's own installer uses, in
+// the order checked — a game folder installed by hand or another tool has
+// exactly one of these next to the executable if it is running ReShade at
+// all.
 var knownDLLNames = []string{"dxgi.dll", "d3d11.dll", "d3d10.dll", "d3d12.dll", "d3d9.dll", "opengl32.dll"}
 
 // AdoptedVersion is what Adopt records as an install's ReShade version,

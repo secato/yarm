@@ -6,10 +6,9 @@ import (
 	"strings"
 )
 
-// defaultINI is the ReShade.ini YARM writes when a game has none
-// (docs/plan/05-install-engine.md §5.3). The search paths match the
-// layout the installer creates, and "**" makes ReShade recurse, which
-// packages with nested effect directories rely on.
+// defaultINI is the ReShade.ini YARM writes when a game has none. The
+// search paths match the layout the installer creates, and "**" makes
+// ReShade recurse, which packages with nested effect directories rely on.
 //
 // It is written with CRLF line endings: ReShade is a Windows program and
 // its own installer writes CRLF, so a file created here for a Proton game

@@ -395,7 +395,7 @@ func pruneEmptyDirs(root string, rels []string) {
 }
 
 // safeDest resolves a game-relative destination, refusing anything that
-// would escape the game root (§5.5). Destinations are built from catalog
+// would escape the game root. Destinations are built from catalog
 // content, so this is enforced rather than assumed.
 func safeDest(root, rel string) (string, error) {
 	clean := filepath.FromSlash(rel)

@@ -6,7 +6,7 @@ import "golang.org/x/sys/windows/registry"
 
 // defaultRoots returns candidate Steam install directories on Windows:
 // the per-user registry path, the machine-wide 32-on-64 registry path, and
-// the conventional default as a last resort (docs/plan/04-external-sources.md §4.5).
+// the conventional default as a last resort.
 func defaultRoots() []string {
 	var roots []string
 	if p, ok := registryString(registry.CURRENT_USER, `Software\Valve\Steam`, "SteamPath"); ok {

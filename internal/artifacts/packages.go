@@ -23,7 +23,7 @@ const (
 )
 
 // maxPackageDepth is how deep inside a package zip the Shaders/Textures
-// directories are looked for (§4.2: depth <= 2, allowing for the GitHub
+// directories are looked for (depth <= 2, allowing for the GitHub
 // wrapper directory).
 const maxPackageDepth = 2
 

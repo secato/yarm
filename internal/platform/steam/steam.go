@@ -18,7 +18,7 @@ import (
 const ProviderName = "steam"
 
 // skipNamePrefixes match Valve-installed helpers, not games, that still
-// show up as "apps" in a Steam library (docs/plan/04-external-sources.md §4.5).
+// show up as "apps" in a Steam library.
 var skipNamePrefixes = []string{
 	"Proton",
 	"Steam Linux Runtime",

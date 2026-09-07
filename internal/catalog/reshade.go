@@ -13,8 +13,7 @@ import (
 
 // minReShadeMajor is the oldest major version YARM offers. Setup
 // executables before 5.0.0 are not reliably zip-appended, so the
-// extraction path in internal/artifacts cannot be trusted for them
-// (docs/plan/04-external-sources.md §4.1).
+// extraction path in internal/artifacts cannot be trusted for them.
 const minReShadeMajor = 5
 
 // downloadURLRe matches the setup links on reshade.me's front page, e.g.

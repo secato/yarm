@@ -8,7 +8,7 @@ import (
 )
 
 // defaultRoots returns candidate Steam install directories on Linux,
-// covering native, Flatpak and Snap installs (docs/plan/04-external-sources.md §4.5).
+// covering native, Flatpak and Snap installs.
 func defaultRoots() []string {
 	home, err := os.UserHomeDir()
 	if err != nil {

@@ -286,8 +286,8 @@ func printGamesText(w io.Writer, games []gameOutput) {
 }
 
 // newCatalogCmd builds the hidden `catalog` debug command. It is not part
-// of the documented CLI (§1 lists the public subcommands); it exists so
-// each implementation step stays demoable before the TUI arrives.
+// of the documented CLI; it exists so each implementation step stays
+// demoable before the TUI arrives.
 func newCatalogCmd(verbose, debug *bool) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:    "catalog",
@@ -427,7 +427,9 @@ func printCatalogText(w io.Writer, c catalogOutput) {
 	}
 }
 
-// userAgent identifies YARM to reshade.me and GitHub, as §4.1 requires.
+// userAgent identifies YARM to reshade.me and GitHub. Both are public
+// endpoints being polled by a tool their maintainers did not write, so
+// the request says plainly what it is and where to complain.
 func userAgent() string {
 	return fmt.Sprintf("yarm/%s (+https://github.com/secato/yarm)", buildinfo.Version)
 }

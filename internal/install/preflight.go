@@ -9,7 +9,7 @@ import (
 )
 
 // The planner already decides what happens to a file that is in the way
-// (§5.2: keep it, or back it up and replace it) — but it decides that
+// (keep it, or back it up and replace it) — but it decides that
 // while the install is running, after everything has been downloaded, and
 // reports it in the result. By then the user has already answered the only
 // question that mattered: whether to overwrite.

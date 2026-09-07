@@ -11,9 +11,9 @@ import (
 )
 
 // fakeSetupExe writes a file shaped like a ReShade setup executable: a
-// block of PE-ish prefix bytes followed by an appended zip. This is the
-// structure §4.1 relies on, and building it here means the extraction path
-// is tested without a network download.
+// block of PE-ish prefix bytes followed by an appended zip. That is how
+// the real installer is built, and shaping one here means the extraction
+// path is tested without a network download.
 func fakeSetupExe(t *testing.T, path string, files map[string][]byte) {
 	t.Helper()
 

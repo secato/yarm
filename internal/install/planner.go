@@ -212,7 +212,7 @@ func (p Planner) classify(req Request, prev state.Install, hasPrev bool, f Plann
 	}
 
 	// ReShade.ini is the user's configuration once written: it is never
-	// overwritten, only created when absent (§5.2).
+	// overwritten, only created when absent.
 	if f.Origin == state.OriginINI {
 		return ActionSkip, "", nil
 	}
@@ -295,7 +295,7 @@ func packageFiles(dir, exeDir string, origin state.Origin) ([]PlannedFile, error
 				Size:   size,
 			})
 		case artifacts.TexturesDir:
-			// Textures are installed whole (§4.2).
+			// Textures are installed whole.
 			out = append(out, PlannedFile{
 				Source: filepath.Join(dir, filepath.FromSlash(rel)),
 				Dest:   join(exeDir, TexturesDir+"/"+rest),

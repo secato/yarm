@@ -8,7 +8,7 @@ import (
 )
 
 // maxScanDepth limits how many directory levels below the game root are
-// searched for executables (docs/plan/04-external-sources.md §4.6).
+// searched for executables.
 //
 // Depth 4 rather than 3: Source 2 and some Unreal layouts put the real
 // binary at game/bin/<platform>/<name>.exe, which a depth-3 walk misses
