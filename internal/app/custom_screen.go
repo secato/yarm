@@ -11,7 +11,7 @@ import (
 	"github.com/secato/yarm/internal/catalog"
 )
 
-// customLoadedMsg carries a scan of cache/custom, success or failure.
+// customLoadedMsg carries a scan of the custom folder, success or failure.
 //
 // Built as a plain tea.Cmd rather than through the Async helper: Async
 // would route a scan failure to the shell's generic error overlay,
@@ -22,10 +22,10 @@ type customLoadedMsg struct {
 	err             error
 }
 
-// CustomScreen shows the two user-managed content folders under
-// cache/custom and what yarm found in them. There is no editing here —
-// the user manages the folders themselves; this is a read-only
-// view plus a way to see exactly where they are.
+// CustomScreen shows the two user-managed content folders — shaders and
+// add-ons — and what yarm found in them. There is no editing here: the
+// user manages the folders themselves, so this is a read-only view plus a
+// way to see exactly where they are.
 type CustomScreen struct {
 	keys KeyMap
 	dir  string
@@ -54,7 +54,7 @@ type customRow struct {
 }
 
 // NewCustomScreen returns the custom-content screen, which scans
-// cache/custom on Init.
+// the custom-content folder on Init.
 func NewCustomScreen(customDir string) *CustomScreen {
 	return &CustomScreen{keys: DefaultKeyMap(), dir: customDir, loading: true}
 }
@@ -168,7 +168,7 @@ func (s *CustomScreen) moveCursor(delta int) {
 // View implements Screen.
 func (s *CustomScreen) View(env Env) string {
 	if s.loading {
-		return env.Styles.Faint.Render("scanning cache/custom…")
+		return env.Styles.Faint.Render("scanning the custom folder…")
 	}
 
 	// A header costs three lines and an entry with a description two, so

@@ -7,4 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- Custom shaders and add-ons now live in the data directory
+  (`~/.local/share/yarm/custom`, `%LOCALAPPDATA%\yarm\custom`) instead of
+  under the cache. Everything else in the cache can be deleted and
+  re-downloaded; custom content is placed by hand and cannot be, and
+  `~/.cache` is a directory the XDG spec, cleanup tools and users all treat
+  as disposable. An existing `cache/custom` is moved on the next launch,
+  and `yarm paths` now prints the folder.

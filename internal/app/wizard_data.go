@@ -9,7 +9,7 @@ import (
 )
 
 // WizardData is everything the install wizard needs from the catalog and
-// from cache/custom, gathered once when the wizard opens.
+// from the custom folder, gathered once when the wizard opens.
 type WizardData struct {
 	Versions      []catalog.Version
 	Packages      []catalog.Package

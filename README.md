@@ -100,8 +100,8 @@ lists every file that is about to change.
 
 ## Adding your own shaders and add-ons
 
-Anything you put in the cache's `custom/` folder shows up in the wizard beside
-the catalog packages:
+Anything you put in yarm's `custom/` folder shows up in the wizard beside the
+catalog packages:
 
 ```
 custom/
@@ -113,8 +113,11 @@ By default that is:
 
 | OS | Folder |
 | --- | --- |
-| **Linux** | `~/.cache/yarm/custom/` (or `$XDG_CACHE_HOME/yarm/custom/`) |
-| **Windows** | `%LOCALAPPDATA%\yarm\cache\custom\` |
+| **Linux** | `~/.local/share/yarm/custom/` (or `$XDG_DATA_HOME/yarm/custom/`) |
+| **Windows** | `%LOCALAPPDATA%\yarm\custom\` |
+
+It lives with your data rather than in the cache, so clearing yarm's downloads
+— or your `~/.cache` — never touches it.
 
 `yarm paths` prints the exact locations on your system.
 

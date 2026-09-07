@@ -64,7 +64,7 @@ func newRootCmd() *cobra.Command {
 
 			c := newCache(dirs, cfg)
 			cl := newCatalogClient(dirs, cfg)
-			customDir := filepath.Join(cacheRoot(dirs, cfg), "custom")
+			customDir := dirs.Custom()
 
 			return app.Run(cmd.Context(), app.Options{
 				Loader: app.ProviderLoader{
@@ -126,7 +126,7 @@ func newVersionCmd() *cobra.Command {
 func newPathsCmd(verbose, debug *bool) *cobra.Command {
 	return &cobra.Command{
 		Use:   "paths",
-		Short: "Print the config, data and cache directories (creating them if needed)",
+		Short: "Print the config, data, cache and custom-content directories (creating them if needed)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dirs, _, closeLog, err := bootstrap(*verbose, *debug)
 			if err != nil {
@@ -139,6 +139,10 @@ func newPathsCmd(verbose, debug *bool) *cobra.Command {
 			_, _ = fmt.Fprintf(out, "config: %s\n", dirs.Config)
 			_, _ = fmt.Fprintf(out, "data:   %s\n", dirs.Data)
 			_, _ = fmt.Fprintf(out, "cache:  %s\n", dirs.Cache)
+			// Named too: it is the one directory the user is expected to
+			// put files into themselves, and the README sends them here
+			// to find out where it is.
+			_, _ = fmt.Fprintf(out, "custom: %s\n", dirs.Custom())
 			return nil
 		},
 	}
@@ -325,7 +329,7 @@ func newCatalogLsCmd(verbose, debug *bool) *cobra.Command {
 				userAgent(),
 			)
 
-			out, err := collectCatalog(cmd.Context(), cl, filepath.Join(cacheDir, "custom"))
+			out, err := collectCatalog(cmd.Context(), cl, dirs.Custom())
 			if err != nil {
 				return err
 			}
@@ -1119,7 +1123,7 @@ func resolveArtifacts(ctx context.Context, dirs paths.Dirs, cfg config.Config, r
 	}
 
 	for _, id := range req.Custom {
-		found, err := catalog.ScanCustom(filepath.Join(cacheRoot(dirs, cfg), "custom"))
+		found, err := catalog.ScanCustom(dirs.Custom())
 		if err != nil {
 			return install.Artifacts{}, err
 		}
@@ -1188,6 +1192,20 @@ func bootstrap(verbose, debug bool) (paths.Dirs, config.Config, func() error, er
 	}
 
 	slog.Debug("directories resolved", "config", dirs.Config, "data", dirs.Data, "cache", dirs.Cache)
+
+	// Custom content moved out of the cache and into the data directory.
+	// A failure here is logged rather than fatal: the content is still
+	// wherever it was, and refusing to start over a directory yarm only
+	// reads would be worse than starting without it.
+	oldCustom := filepath.Join(cacheRoot(dirs, cfg), paths.DirCustom)
+	switch moved, err := paths.MigrateCustom(oldCustom, dirs.Custom()); {
+	case err != nil:
+		slog.Warn("could not move custom content out of the cache",
+			"from", oldCustom, "to", dirs.Custom(), "error", err)
+	case moved:
+		slog.Info("moved custom content out of the cache",
+			"from", oldCustom, "to", dirs.Custom())
+	}
 
 	return dirs, cfg, closeLog, nil
 }

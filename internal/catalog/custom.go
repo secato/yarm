@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// Custom content subdirectories under cache/custom.
+// Subdirectories of the custom-content folder.
 const (
 	CustomShadersDir = "shaders"
 	CustomAddonsDir  = "addons"
@@ -26,7 +26,7 @@ const (
 	CustomAddons  CustomKind = "addons"
 )
 
-// Custom is one user-managed folder under cache/custom.
+// Custom is one user-managed folder of shaders or add-ons.
 type Custom struct {
 	// ID is "custom:<kind>:<slug>", distinct from catalog package ids so
 	// the two can share a selection list without colliding.
@@ -44,7 +44,7 @@ type customMeta struct {
 	Description string `json:"description"`
 }
 
-// ScanCustom lists user-managed content under root (cache/custom). A
+// ScanCustom lists user-managed content under root. A
 // missing root is not an error: most users never create one.
 //
 // A shaders folder counts only if it actually holds shaders, and an addons

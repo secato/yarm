@@ -79,7 +79,7 @@ func TestScanCustom(t *testing.T) {
 	}
 }
 
-// Most users never create cache/custom; that is not an error.
+// Most users never create the custom folder; that is not an error.
 func TestScanCustomMissingRoot(t *testing.T) {
 	got, err := ScanCustom(filepath.Join(t.TempDir(), "nope"))
 	if err != nil {

@@ -29,7 +29,7 @@ type Artifacts struct {
 	Packages map[string]string
 	// Addons maps an add-on id to a directory of .addon32/.addon64 files.
 	Addons map[string]string
-	// Custom maps a custom content id to its folder under cache/custom.
+	// Custom maps a custom content id to the folder holding its files.
 	Custom map[string]string
 }
 

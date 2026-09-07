@@ -28,7 +28,6 @@ const (
 	DirD3DCompiler = "d3dcompiler"
 	DirDownloads   = "downloads"
 	DirCatalog     = "catalog"
-	DirCustom      = "custom"
 )
 
 // Flavor names the two ReShade builds.

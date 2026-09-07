@@ -103,11 +103,11 @@ func TestGamesDetailPanelIsClippedToItsHeight(t *testing.T) {
 // The custom-content screen windows its two sections rather than printing
 // every folder the user has dropped in.
 func TestCustomScreenWindowsLongLists(t *testing.T) {
-	s := NewCustomScreen("/cache/custom")
+	s := NewCustomScreen("/data/custom")
 	s.loading = false
 	for i := 0; i < 40; i++ {
 		s.shaders = append(s.shaders, catalog.Custom{
-			Name: fmt.Sprintf("Pack %02d", i), Path: fmt.Sprintf("/cache/custom/shaders/pack%02d", i),
+			Name: fmt.Sprintf("Pack %02d", i), Path: fmt.Sprintf("/data/custom/shaders/pack%02d", i),
 		})
 	}
 	s.buildRows()

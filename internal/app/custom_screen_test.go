@@ -42,7 +42,7 @@ func TestCustomScreenListsShadersAndAddons(t *testing.T) {
 	}
 }
 
-// A missing cache/custom directory is normal (most users never create
+// A missing custom-content folder is normal (most users never create
 // one) and must not be reported as an error.
 func TestCustomScreenMissingDirIsNotAnError(t *testing.T) {
 	s := loadCustomScreen(t, filepath.Join(t.TempDir(), "nope"))

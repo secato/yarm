@@ -104,6 +104,6 @@ func keepInShortlist(id string, shortlist map[string]bool, sticky bool) bool {
 	return sticky || isCustomID(id) || shortlist[id]
 }
 
-// isCustomID reports whether an id came from cache/custom rather than the
+// isCustomID reports whether an id came from the custom folder rather than the
 // upstream catalog.
 func isCustomID(id string) bool { return strings.HasPrefix(id, "custom:") }

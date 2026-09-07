@@ -28,7 +28,7 @@ type Deps struct {
 	// etc.) by the resources screen, to cross-reference a cached artifact
 	// against every recorded install without needing its own interface.
 	StateDir string
-	// CustomDir is cache/custom, scanned by the custom-content and
+	// CustomDir is <data>/custom, scanned by the custom-content and
 	// resources screens.
 	CustomDir string
 	// Config is the configuration as loaded at startup, and ConfigDir is
