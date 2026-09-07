@@ -94,22 +94,23 @@ func arrowKeyMap() table.KeyMap {
 }
 
 // gamesColumns sizes the table for the available width, giving the name
-// the slack because it is the column users scan.
+// the slack because it is the column users scan — and because the name is
+// the only column here that can actually be long. Source is a provider
+// slug and ReShade is a version and a build; neither grows.
+//
+// The name takes *all* of it, with no cap. A cap would leave the table
+// rendering narrower than the width it was given, and that width has
+// nowhere else to go: the panel is already sized, so the difference shows
+// up as a gap between the two.
 func gamesColumns(width int) []table.Column {
 	const (
 		sourceW  = 8
 		statusW  = 16
 		minNameW = 16
-		// A game name rarely needs more than this, and every column past
-		// it is space the side panel could be using instead.
-		maxNameW = 34
 	)
 	nameW := width - sourceW - statusW - 6
-	switch {
-	case nameW < minNameW:
+	if nameW < minNameW {
 		nameW = minNameW
-	case nameW > maxNameW:
-		nameW = maxNameW
 	}
 	return []table.Column{
 		{Title: "Game", Width: nameW},
@@ -118,19 +119,25 @@ func gamesColumns(width int) []table.Column {
 	}
 }
 
-// gamesTableWidth is what the table occupies once its name column has hit
-// its cap — the point past which extra width is just padding.
-func gamesTableWidth() int {
-	w := 0
-	for _, c := range gamesColumns(1 << 20) {
-		w += c.Width
-	}
-	return w + 6
-}
-
 // Init implements Screen.
 func (s *GamesScreen) Init() tea.Cmd {
-	return tea.Batch(s.load(), SetStatus("scanning for games…"))
+	return tea.Batch(s.load(), s.preloadCatalog(), SetStatus("scanning for games…"))
+}
+
+// preloadCatalog warms the (memoized) catalog load while the game scan is
+// already running, so opening the wizard is instant rather than a spinner
+// on data that was never going to be different. Its result is dropped:
+// whoever asks next gets it from the memo, and reports the error if it
+// failed.
+func (s *GamesScreen) preloadCatalog() tea.Cmd {
+	loader := s.deps.WizardData
+	if loader == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		_, _ = loader.LoadWizardData(context.Background())
+		return nil
+	}
 }
 
 // load discovers games off the UI goroutine.
@@ -338,24 +345,26 @@ func (s *GamesScreen) resize(env Env) {
 	}
 	s.filter.SetWidth(filterWidth)
 
-	// Two fifths, not one third: the panel is now the only place a game's
+	// Two fifths for the panel, three fifths for the table, and nothing
+	// held back on either side: the panel is the only place a game's
 	// folders, install and executables are shown — there is no detail
-	// screen behind it any more — while the table needs only enough for a
-	// name, a source and a status.
+	// screen behind it any more — while the table's name column absorbs
+	// whatever the other two columns do not need.
+	//
+	// An earlier version handed the panel every column the table did not
+	// use, which on a wide terminal made it the larger part of the screen
+	// wrapped around a folder path. Capping it fixed that and created the
+	// opposite problem, since the table was capped too and the leftover
+	// then belonged to neither. A plain proportional split has no leftover
+	// to place.
 	s.detailWidth = env.Width * 2 / 5
 	if s.detailWidth < 28 {
 		s.detailWidth = 0 // too narrow to be useful; drop the panel
 	}
-	// The table only needs what its columns actually use; whatever it does
-	// not need goes to the panel rather than to empty space between the
-	// name column and the source column.
+
 	tableWidth := env.Width - s.detailWidth
 	if s.detailWidth > 0 {
-		tableWidth -= 2
-		if used := gamesTableWidth(); tableWidth > used {
-			s.detailWidth += tableWidth - used
-			tableWidth = used
-		}
+		tableWidth -= 2 // the gutter between them
 	}
 	if tableWidth < 24 {
 		tableWidth = 24

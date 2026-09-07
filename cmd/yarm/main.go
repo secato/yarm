@@ -72,7 +72,7 @@ func newRootCmd() *cobra.Command {
 					StateDir:  dirs.Data,
 				},
 				Deps: app.Deps{
-					WizardData: app.CatalogWizardData{Client: cl, CustomDir: customDir},
+					WizardData: app.Memoize(app.CatalogWizardData{Client: cl, CustomDir: customDir}),
 					Installer: &app.RealInstaller{
 						Cache:     c,
 						Catalog:   cl,

@@ -18,6 +18,12 @@ type WizardData struct {
 	CustomAddons  []catalog.Custom
 }
 
+// empty reports whether a load produced nothing at all — the state
+// LoadWizardData treats as a failure.
+func (d WizardData) empty() bool {
+	return len(d.Versions) == 0 && len(d.Packages) == 0 && len(d.Addons) == 0
+}
+
 // WizardDataLoader supplies WizardData. An interface so tests can hand the
 // wizard a fixed fixture instead of reaching the network and disk.
 type WizardDataLoader interface {
@@ -59,7 +65,7 @@ func (l CatalogWizardData) LoadWizardData(ctx context.Context) (WizardData, erro
 		}
 	}
 
-	if len(data.Versions) == 0 && len(data.Packages) == 0 && len(data.Addons) == 0 {
+	if data.empty() {
 		return data, firstErr(vErr, pErr, aErr, cErr)
 	}
 	return data, nil

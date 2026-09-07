@@ -46,6 +46,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The catalog is loaded once per session, and the load starts at launch
+  alongside the game scan. Opening the install wizard or the resources
+  browser used to redo the whole thing every time — three catalog files
+  re-read and re-parsed, the custom-content directory rescanned, and an
+  uncached request to reshade.me for the "latest" marker — so every open
+  waited on a network round trip for data that cannot change while yarm is
+  running. With the data already in memory the wizard now skips its
+  loading state entirely rather than painting a frame of "loading catalog
+  data…". A failed load is not remembered, so the next screen to ask
+  retries.
+
+- The games list splits its width proportionally: two fifths panel, three
+  fifths table, with the name column absorbing whatever the other two
+  columns do not need. The panel had been given every column the table did
+  not use, which on a wide terminal made it the larger part of the screen
+  wrapped around a folder path.
+
+- The folder picker names each folder's executables (with architecture and
+  API, three of them and a count for the rest) instead of only counting
+  them. Two folders of the same game are told apart by what is in them,
+  which "3 executable(s)" does not say.
+
 - Navigation is arrows only. `j`/`k`/`h`/`l` are no longer bound anywhere,
   and the games table no longer answers to `f`, `b`, `u`, `d`, `g`, `G` or
   space either — letters the screen gives to other actions, and a space

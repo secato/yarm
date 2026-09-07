@@ -225,6 +225,15 @@ func (s *WizardScreen) Init() tea.Cmd {
 		return nil
 	}
 	loader := s.deps.WizardData
+	// The games screen starts this load at startup, so by the time a game
+	// is picked the answer is usually already in memory. Take it here
+	// rather than through a command: a message would cost a frame of
+	// "loading catalog data…" for something that is not being waited on.
+	if pre, ok := loader.(preloadedWizardData); ok {
+		if data, ok := pre.loaded(); ok {
+			return s.applyWizardData(wizardDataLoadedMsg{data: data})
+		}
+	}
 	return func() tea.Msg {
 		data, err := loader.LoadWizardData(context.Background())
 		return wizardDataLoadedMsg{data: data, err: err}
@@ -349,47 +358,56 @@ func (s *WizardScreen) folder() string {
 func (s *WizardScreen) Update(msg tea.Msg, env Env) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
 	case wizardDataLoadedMsg:
-		s.loading = false
-		s.data = msg.data
-		existingVersion := ""
-		if s.existing != nil {
-			existingVersion = s.existing.ReShade.Version
-		}
-		s.data.Versions = capVersions(s.data.Versions, existingVersion)
-
-		s.packages = newMultiSelect(s.data.PackagesWithCustom(s.deps.CacheStatus))
-		s.addons = newMultiSelect(s.data.AddonsWithCustom(s.deps.CacheStatus))
-		versionIndex := s.indexOfLatest()
-		if s.existing != nil {
-			s.preselectExistingIDs(s.packages, s.existing.Packages)
-			s.preselectExistingIDs(s.addons, s.existing.Addons)
-			versionIndex = s.indexOfVersion(s.existing.ReShade.Version)
-		} else {
-			s.preselectDefaultPackages()
-		}
-		// After preselection, not before: what is already selected is part
-		// of what the shortlist has to keep visible.
-		s.refreshLists()
-		s.versionCursor = newCursorList(len(s.data.Versions), versionIndex)
-		s.dllCursor = newCursorList(len(dllOptions), s.recommendedDLLIndex())
-		// The summary's rows depend on the build, which is only settled
-		// once the recorded install (or the configured default) has been
-		// applied above.
-		s.syncHub()
-
-		switch {
-		case msg.err != nil:
-			s.loadErr = msg.err.Error()
-			return s, ReportError(msg.err)
-		case len(s.data.Versions) == 0 && len(s.data.Packages) == 0 && len(s.data.Addons) == 0:
-			s.loadErr = "no catalog data available (offline, with nothing cached yet?)"
-		}
-		return s, nil
+		return s, s.applyWizardData(msg)
 
 	case tea.KeyPressMsg:
 		return s.handleKey(msg, env)
 	}
 	return s, nil
+}
+
+// applyWizardData fills the wizard's lists from a completed load. Split
+// out of Update because Init calls it too, directly, when the loader
+// already has the data in memory: going through a message there would
+// paint one frame of "loading catalog data…" for data that was never
+// actually being waited on.
+func (s *WizardScreen) applyWizardData(msg wizardDataLoadedMsg) tea.Cmd {
+	s.loading = false
+	s.data = msg.data
+	existingVersion := ""
+	if s.existing != nil {
+		existingVersion = s.existing.ReShade.Version
+	}
+	s.data.Versions = capVersions(s.data.Versions, existingVersion)
+
+	s.packages = newMultiSelect(s.data.PackagesWithCustom(s.deps.CacheStatus))
+	s.addons = newMultiSelect(s.data.AddonsWithCustom(s.deps.CacheStatus))
+	versionIndex := s.indexOfLatest()
+	if s.existing != nil {
+		s.preselectExistingIDs(s.packages, s.existing.Packages)
+		s.preselectExistingIDs(s.addons, s.existing.Addons)
+		versionIndex = s.indexOfVersion(s.existing.ReShade.Version)
+	} else {
+		s.preselectDefaultPackages()
+	}
+	// After preselection, not before: what is already selected is part
+	// of what the shortlist has to keep visible.
+	s.refreshLists()
+	s.versionCursor = newCursorList(len(s.data.Versions), versionIndex)
+	s.dllCursor = newCursorList(len(dllOptions), s.recommendedDLLIndex())
+	// The summary's rows depend on the build, which is only settled
+	// once the recorded install (or the configured default) has been
+	// applied above.
+	s.syncHub()
+
+	switch {
+	case msg.err != nil:
+		s.loadErr = msg.err.Error()
+		return ReportError(msg.err)
+	case len(s.data.Versions) == 0 && len(s.data.Packages) == 0 && len(s.data.Addons) == 0:
+		s.loadErr = "no catalog data available (offline, with nothing cached yet?)"
+	}
+	return nil
 }
 
 // capVersions limits the offered list to the most recent 10, plus the

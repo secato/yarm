@@ -6,6 +6,7 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // Most games are one folder with one ReShade install, and for those every
@@ -97,12 +98,14 @@ func (s *FolderPickScreen) View(env Env) string {
 	b.WriteString(env.Styles.Faint.Render(truncate(s.entry.Root, env.Width-1)))
 	b.WriteString("\n\n")
 
-	// Two lines per folder: the folder itself, then what is in it — which
-	// is the whole basis for choosing between them.
-	const perRow = 2
+	// A folder, what ReShade is already doing there, and then the
+	// executables themselves — which are the whole reason two folders of
+	// the same game are telling apart at all. "3 executable(s)" says the
+	// folders differ without saying how.
+	perRow := 2 + maxPickerExes(s.groups)
 	height := (env.Height - 5) / perRow
-	if height < 2 {
-		height = 2
+	if height < 1 {
+		height = 1
 	}
 	writeWindow(&b, env, len(s.groups), s.cursor.Cursor(), height, "", func(i int) {
 		grp := s.groups[i]
@@ -122,6 +125,18 @@ func (s *FolderPickScreen) View(env Env) string {
 		b.WriteString("\n")
 		b.WriteString(env.Styles.Faint.Render(clipTail("    "+folderSummary(grp), env.Width)))
 		b.WriteString("\n")
+
+		shown, hidden := pickerExes(grp)
+		for _, ex := range shown {
+			b.WriteString(clipTail("      "+ex.name, env.Width))
+			b.WriteString(env.Styles.Faint.Render(clipTail("  "+ex.detail, env.Width-lipgloss.Width(ex.name)-8)))
+			b.WriteString("\n")
+		}
+		if hidden > 0 {
+			b.WriteString(env.Styles.Faint.Render(
+				clipTail(fmt.Sprintf("      +%d more", hidden), env.Width)))
+			b.WriteString("\n")
+		}
 	})
 
 	b.WriteString("\n")
@@ -131,19 +146,71 @@ func (s *FolderPickScreen) View(env Env) string {
 	return b.String()
 }
 
-// folderSummary is one line saying what is in a folder: enough to choose
-// between two of them without opening either.
+// folderSummary is the one line under a folder's name: what ReShade is
+// already doing there. What is *in* the folder is listed under it rather
+// than counted here.
 func folderSummary(grp FolderGroup) string {
-	what := fmt.Sprintf("%d executable(s)", grp.playableCount())
 	switch {
 	case grp.Installed != nil:
 		in := grp.Installed
-		return fmt.Sprintf("ReShade %s (%s) · %s", in.ReShade.Version, in.ReShade.Flavor, what)
+		return fmt.Sprintf("ReShade %s (%s)", in.ReShade.Version, in.ReShade.Flavor)
 	case grp.Unmanaged != nil:
-		return fmt.Sprintf("ReShade found, untracked (%s) · %s", grp.Unmanaged.DLLName, what)
+		return fmt.Sprintf("ReShade found, untracked (%s)", grp.Unmanaged.DLLName)
 	default:
-		return "no ReShade · " + what
+		return "no ReShade"
 	}
+}
+
+// pickerExe is one executable as the picker shows it: its name, and the
+// architecture and graphics API that decide which ReShade build fits.
+type pickerExe struct{ name, detail string }
+
+// maxPickerExesPerFolder keeps one folder full of executables from
+// pushing every other folder off the screen — the picker exists to
+// compare folders, so each one has to stay visible.
+const maxPickerExesPerFolder = 3
+
+// pickerExes lists a folder's offered executables, with the folder's own
+// path trimmed off the front (it is already the heading), and says how
+// many did not fit. Skipped ones — uninstallers, redistributables — are
+// left out: ReShade would never attach to them.
+func pickerExes(grp FolderGroup) (shown []pickerExe, hidden int) {
+	stripPrefix := ""
+	if grp.Dir != "" {
+		stripPrefix = grp.Dir + "/"
+	}
+	for _, ex := range grp.Exes {
+		if ex.Skipped {
+			continue
+		}
+		if len(shown) >= maxPickerExesPerFolder {
+			hidden++
+			continue
+		}
+		shown = append(shown, pickerExe{
+			name:   strings.TrimPrefix(ex.Path, stripPrefix),
+			detail: fmt.Sprintf("%s · %s", ex.Arch, apiLabel(ex.API)),
+		})
+	}
+	return shown, hidden
+}
+
+// maxPickerExes is how many executable lines the tallest folder in the
+// list needs, so the window can size a row for the worst case rather than
+// scrolling by a different amount depending on where the cursor is.
+func maxPickerExes(groups []FolderGroup) int {
+	most := 0
+	for _, g := range groups {
+		shown, hidden := pickerExes(g)
+		n := len(shown)
+		if hidden > 0 {
+			n++
+		}
+		if n > most {
+			most = n
+		}
+	}
+	return most
 }
 
 // groupsWithInstall, groupsWithUnmanaged and installableGroups are the

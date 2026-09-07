@@ -52,8 +52,16 @@ func TestFolderPickerStaysInsideTheWindow(t *testing.T) {
 	if !strings.Contains(body, "more below") {
 		t.Errorf("a list cut short should say how much it hid:\n%s", body)
 	}
-	if !strings.Contains(body, "executable(s)") {
-		t.Errorf("each folder should say what is in it, to choose between them:\n%s", body)
+	// Naming the executables is the point: two folders of the same game
+	// are told apart by what is in them, which a count does not say.
+	if !strings.Contains(body, "tool00.exe") {
+		t.Errorf("each folder should name its executables, to choose between them:\n%s", body)
+	}
+	if !strings.Contains(body, "+1 more") {
+		t.Errorf("4 executables should list 3 and count the rest:\n%s", body)
+	}
+	if strings.Contains(body, "tool03.exe") {
+		t.Errorf("the fourth executable should have been counted, not listed:\n%s", body)
 	}
 }
 
@@ -115,20 +123,32 @@ func TestCustomScreenWindowsLongLists(t *testing.T) {
 	}
 }
 
-// The panel is the only place a game's folders, install and executables
-// are shown now, so it gets the width the table does not need — including
-// whatever the name column leaves over once it hits its cap.
-func TestSidePanelTakesTheWidthTheTableDoesNotNeed(t *testing.T) {
+// The panel and the table split the width proportionally, and neither
+// holds any of it back: whatever is not the panel is table, and whatever
+// the table's fixed columns do not use is name column. A cap on either
+// side would show up as a gap between the two.
+func TestPanelAndTableSplitTheWholeWidth(t *testing.T) {
 	entry := bigGame(1, 2)
 	for _, width := range []int{100, 160, 220} {
 		env := Env{Styles: NewStyles(true), Width: width, Height: 24}
 		s := gamesWith(t, entry, env)
 
-		if s.detailWidth < width*2/5 {
-			t.Errorf("width %d: panel is %d columns, want at least two fifths", width, s.detailWidth)
+		if want := width * 2 / 5; s.detailWidth != want {
+			t.Errorf("width %d: panel is %d columns, want %d", width, s.detailWidth, want)
 		}
-		if s.detailWidth > width-30 {
-			t.Errorf("width %d: panel is %d columns, leaving too little for the table", width, s.detailWidth)
+
+		tableWidth := width - s.detailWidth - 2
+		used := 6
+		for _, c := range gamesColumns(tableWidth) {
+			used += c.Width
+		}
+		if used != tableWidth {
+			t.Errorf("width %d: the table's columns use %d of the %d columns it was given, leaving a %d-column gap",
+				width, used, tableWidth, tableWidth-used)
+		}
+
+		if got := lipgloss.Width(s.View(env)); got > width {
+			t.Errorf("the games screen rendered %d columns into a width of %d", got, width)
 		}
 	}
 }

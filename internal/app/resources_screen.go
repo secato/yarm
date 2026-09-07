@@ -99,7 +99,7 @@ type resourceActionMsg struct{ err error }
 // disk totals, and every recorded install (to know what is "in use").
 func loadResources(deps Deps) resourcesLoadedMsg {
 	data, err := deps.WizardData.LoadWizardData(context.Background())
-	if err != nil && len(data.Versions) == 0 && len(data.Packages) == 0 && len(data.Addons) == 0 {
+	if err != nil && data.empty() {
 		return resourcesLoadedMsg{err: err}
 	}
 
