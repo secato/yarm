@@ -72,7 +72,24 @@ func NewGamesScreen(loader GamesLoader, deps Deps, firstRun bool) *GamesScreen {
 		table: table.New(
 			table.WithColumns(gamesColumns(80)),
 			table.WithFocused(true),
+			table.WithKeyMap(arrowKeyMap()),
 		),
+	}
+}
+
+// arrowKeyMap strips the table's own vim and letter bindings. Left alone
+// it also answers to j/k/f/b/u/d/g/G and space — letters this screen hands
+// to other actions, and a space that means "toggle" everywhere else.
+func arrowKeyMap() table.KeyMap {
+	return table.KeyMap{
+		LineUp:       key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", "up")),
+		LineDown:     key.NewBinding(key.WithKeys("down"), key.WithHelp("↓", "down")),
+		PageUp:       key.NewBinding(key.WithKeys("pgup"), key.WithHelp("pgup", "page up")),
+		PageDown:     key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("pgdn", "page down")),
+		GotoTop:      key.NewBinding(key.WithKeys("home"), key.WithHelp("home", "first")),
+		GotoBottom:   key.NewBinding(key.WithKeys("end"), key.WithHelp("end", "last")),
+		HalfPageUp:   key.NewBinding(key.WithDisabled()),
+		HalfPageDown: key.NewBinding(key.WithDisabled()),
 	}
 }
 

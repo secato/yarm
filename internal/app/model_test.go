@@ -350,8 +350,8 @@ func TestUninstallConfirmFlow(t *testing.T) {
 	m := loaded(t)
 	// Navigate to Ember Hollow (index 2 of sampleEntries), which has an
 	// install recorded on its first executable.
-	m = drive(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"})
-	m = drive(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"})
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 
 	gs, ok := m.Screen().(*GamesScreen)
 	if !ok {
@@ -417,8 +417,8 @@ func TestGamesScreenInstallDirectlyFromList(t *testing.T) {
 // from the list with 'e'.
 func TestGamesScreenEditDirectlyFromList(t *testing.T) {
 	m := loaded(t)
-	m = drive(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"})
-	m = drive(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"}) // -> Ember Hollow, installed
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyDown}) // -> Ember Hollow, installed
 
 	m = drive(t, m, tea.KeyPressMsg{Code: 'e', Text: "e"})
 	wiz, ok := m.Screen().(*WizardScreen)
@@ -434,8 +434,8 @@ func TestGamesScreenEditDirectlyFromList(t *testing.T) {
 // directly from the list with 'u'.
 func TestGamesScreenUninstallDirectlyFromList(t *testing.T) {
 	m := loaded(t)
-	m = drive(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"})
-	m = drive(t, m, tea.KeyPressMsg{Code: 'j', Text: "j"}) // -> Ember Hollow, installed
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m = drive(t, m, tea.KeyPressMsg{Code: tea.KeyDown}) // -> Ember Hollow, installed
 
 	m = drive(t, m, tea.KeyPressMsg{Code: 'u', Text: "u"})
 	if m.overlay == nil {

@@ -382,8 +382,8 @@ var (
 	resourceDownloadBinding = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "download"))
 	resourceDeleteBinding   = key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "delete"))
 	resourceRefreshBinding  = key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh package"))
-	resourcePaneLeft        = key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "prev pane"))
-	resourcePaneRight       = key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "next pane"))
+	resourcePaneLeft        = key.NewBinding(key.WithKeys("left"), key.WithHelp("←", "prev pane"))
+	resourcePaneRight       = key.NewBinding(key.WithKeys("right"), key.WithHelp("→", "next pane"))
 	resourceShowAllBinding  = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "show all"))
 )
 

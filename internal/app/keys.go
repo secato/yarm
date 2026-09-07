@@ -30,8 +30,11 @@ type KeyMap struct {
 // DefaultKeyMap returns the standard bindings.
 func DefaultKeyMap() KeyMap {
 	return KeyMap{
-		Up:      key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
-		Down:    key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
+		// Arrows only, everywhere: the vim aliases meant j/k/h/l could not
+		// be given to anything else, and half the app's keys are already
+		// single letters (i, e, u, a, c, x, s, d, R).
+		Up:      key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", "up")),
+		Down:    key.NewBinding(key.WithKeys("down"), key.WithHelp("↓", "down")),
 		Enter:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
 		Back:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 		Filter:  key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),

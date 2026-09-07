@@ -331,11 +331,11 @@ func TestResourcesScreenPaneFocusWraps(t *testing.T) {
 	if s.focus != paneReShadeNormal {
 		t.Fatalf("initial focus = %v, want paneReShadeNormal", s.focus)
 	}
-	s.Update(tea.KeyPressMsg{Code: 'h', Text: "h"}, wizardEnv())
+	s.Update(tea.KeyPressMsg{Code: tea.KeyLeft}, wizardEnv())
 	if s.focus != paneAddons {
 		t.Errorf("left from the first pane should wrap to the last, got %v", s.focus)
 	}
-	s.Update(tea.KeyPressMsg{Code: 'l', Text: "l"}, wizardEnv())
+	s.Update(tea.KeyPressMsg{Code: tea.KeyRight}, wizardEnv())
 	if s.focus != paneReShadeNormal {
 		t.Errorf("right from the last pane should wrap to the first, got %v", s.focus)
 	}

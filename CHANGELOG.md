@@ -46,6 +46,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Navigation is arrows only. `j`/`k`/`h`/`l` are no longer bound anywhere,
+  and the games table no longer answers to `f`, `b`, `u`, `d`, `g`, `G` or
+  space either — letters the screen gives to other actions, and a space
+  that means "toggle" in every other list. Paging is pgup/pgdn, home/end.
+- The edit summary moves between its sections with `←`/`→`, since they sit
+  side by side; `↑`/`↓` still works, and is what the footer offers when a
+  narrow terminal stacks them into a list.
+
 - The game detail screen is gone. Everything it showed is in the games
   list's side panel, and every action — install, edit, uninstall, adopt —
   runs from the list itself. A game whose executables live in several
@@ -178,6 +186,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   been handed to `bubbles` in the first place — see Fixed.
 
 ### Fixed
+
+- The edit summary highlighted the wrong panes. Focus was drawn by dimming
+  the unfocused borders, but the panel's own border color is dimmer than
+  the faint style used to dim them — so the unfocused panes were the ones
+  that stood out. The focused pane now takes the accent color, on its
+  border and its heading. Same fix on the wizard's ReShade step.
 
 - The games table is drawn with yarm's palette instead of `bubbles`'
   defaults, which hardcode a pink for the selected row and leave the header

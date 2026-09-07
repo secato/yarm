@@ -2,9 +2,11 @@ package app
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -181,5 +183,43 @@ func TestGamesTableSelectionIsOneUnbrokenHighlight(t *testing.T) {
 	}
 	if n := strings.Count(row, "\x1b[m"); n != 1 {
 		t.Errorf("the selected row resets its styling %d times; it should be one highlight:\n%q", n, row)
+	}
+}
+
+// Navigation is arrows-only: the vim aliases are gone, including the ones
+// bubbles' table brings with it, which also answered to letters this
+// screen gives to other actions (f, b, u, d, g) and to space.
+func TestNavigationIsArrowsOnly(t *testing.T) {
+	keys := DefaultKeyMap()
+	for _, tc := range []struct {
+		name string
+		b    key.Binding
+		want []string
+	}{
+		{"Up", keys.Up, []string{"up"}},
+		{"Down", keys.Down, []string{"down"}},
+		{"wizard pane left", wizardPaneLeft, []string{"left"}},
+		{"wizard pane right", wizardPaneRight, []string{"right"}},
+		{"resources pane left", resourcePaneLeft, []string{"left"}},
+		{"resources pane right", resourcePaneRight, []string{"right"}},
+	} {
+		if got := tc.b.Keys(); !slices.Equal(got, tc.want) {
+			t.Errorf("%s is bound to %v, want %v", tc.name, got, tc.want)
+		}
+	}
+
+	table := arrowKeyMap()
+	for _, tc := range []struct {
+		name string
+		b    key.Binding
+	}{{"LineUp", table.LineUp}, {"LineDown", table.LineDown}, {"PageUp", table.PageUp}, {"PageDown", table.PageDown}} {
+		for _, k := range tc.b.Keys() {
+			if len(k) == 1 {
+				t.Errorf("the table's %s still answers to the letter %q", tc.name, k)
+			}
+		}
+	}
+	if table.PageDown.Enabled() && slices.Contains(table.PageDown.Keys(), "space") {
+		t.Error("space pages the table, but means \"toggle\" everywhere else in the app")
 	}
 }

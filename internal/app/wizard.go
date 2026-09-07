@@ -68,8 +68,8 @@ func (s wizardStep) label() string {
 // browser names its own — the two screens show the same normal/addon
 // split, so they should be driven by the same keys.
 var (
-	wizardPaneLeft  = key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "normal"))
-	wizardPaneRight = key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "addon"))
+	wizardPaneLeft  = key.NewBinding(key.WithKeys("left"), key.WithHelp("←", "normal"))
+	wizardPaneRight = key.NewBinding(key.WithKeys("right"), key.WithHelp("→", "addon"))
 )
 
 // wizardShowAll widens the shaders and add-ons steps from the curated
@@ -654,9 +654,11 @@ func (s *WizardScreen) handleKey(msg tea.KeyPressMsg, env Env) (Screen, tea.Cmd)
 
 func (s *WizardScreen) handleHubKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 	switch {
-	case key.Matches(msg, s.keys.Up):
+	// ←/→ because the sections are side by side; ↑/↓ works too, since
+	// below the width where the panes fit they stack into a list.
+	case key.Matches(msg, wizardPaneLeft), key.Matches(msg, s.keys.Up):
 		s.hubCursor.up()
-	case key.Matches(msg, s.keys.Down):
+	case key.Matches(msg, wizardPaneRight), key.Matches(msg, s.keys.Down):
 		s.hubCursor.down()
 	case key.Matches(msg, s.keys.Enter):
 		rows := s.hubSections()
@@ -965,7 +967,10 @@ func (s *WizardScreen) viewFooter(env Env) string {
 	switch s.step {
 	case stepHub:
 		action = "enter opens"
-		hint = "↑↓ move · esc leaves"
+		hint = "←→ move · esc leaves"
+		if s.hubStacked(env) {
+			hint = "↑↓ move · esc leaves"
+		}
 	case stepReShade:
 		hint = "↑↓ version · ←→ normal/addon"
 	case stepAPI:
@@ -1063,7 +1068,7 @@ func (s *WizardScreen) versionPane(flavor install.Flavor, width, height int, env
 	if showHeader {
 		header := clipTail("ReShade ("+string(flavor)+")", inner)
 		if focused {
-			b.WriteString(env.Styles.Selected.Render(header))
+			b.WriteString(env.Styles.Accent.Render(header))
 		} else {
 			b.WriteString(env.Styles.Faint.Render(header))
 		}
@@ -1105,8 +1110,8 @@ func (s *WizardScreen) versionPane(flavor install.Flavor, width, height int, env
 	// wraps what does not fit rather than clipping it, which would break
 	// the box open.
 	panel := env.Styles.Panel.Width(width)
-	if !focused {
-		panel = panel.BorderForeground(env.Styles.Faint.GetForeground())
+	if focused {
+		panel = panel.BorderForeground(env.Styles.Accent.GetForeground())
 	}
 	return panel.Render(strings.TrimSuffix(b.String(), "\n"))
 }
@@ -1413,8 +1418,7 @@ func (s *WizardScreen) viewHub(b *strings.Builder, env Env, height int) {
 	apply := s.applyLine(env, applyFocused)
 
 	const gutter = 2
-	const minPaneWidth = 22
-	if env.Width < len(panes)*(minPaneWidth+gutter) {
+	if s.hubStacked(env) {
 		s.viewHubCompact(b, env, height-countLines(apply), rows)
 		b.WriteString(apply)
 		return
@@ -1454,6 +1458,16 @@ func (s *WizardScreen) viewHub(b *strings.Builder, env Env, height int) {
 	b.WriteString(apply)
 }
 
+// hubStacked reports whether the summary has had to fall back to one line
+// per section — which is also when ↑/↓ is the natural way to move, rather
+// than the ←/→ that matches a row of panes.
+func (s *WizardScreen) hubStacked(env Env) bool {
+	const gutter = 2
+	const minPaneWidth = 22
+	panes := len(s.hubSections()) - 1 // Apply is a line, not a pane
+	return env.Width < panes*(minPaneWidth+gutter)
+}
+
 // hubPane draws one section as a box listing what is in it.
 func (s *WizardScreen) hubPane(step wizardStep, width, height int, env Env, focused bool) string {
 	inner := width - 4
@@ -1468,10 +1482,13 @@ func (s *WizardScreen) hubPane(step wizardStep, width, height int, env Env, focu
 		// spells out what changed, and this only has to say where.
 		header += " •"
 	}
+	// The focused pane is the bright one. Styles.Panel's own border color
+	// is dimmer than Styles.Faint, so coloring only the *unfocused*
+	// borders faint made them the ones that stood out.
 	if focused {
-		b.WriteString(env.Styles.Selected.Render(clipTail("▸ "+header, inner)))
+		b.WriteString(env.Styles.Accent.Render(clipTail("▸ "+header, inner)))
 	} else {
-		b.WriteString(env.Styles.Subtitle.Render(clipTail("  "+header, inner)))
+		b.WriteString(env.Styles.Faint.Render(clipTail("  "+header, inner)))
 	}
 	b.WriteString("\n")
 
@@ -1493,8 +1510,8 @@ func (s *WizardScreen) hubPane(step wizardStep, width, height int, env Env, focu
 	// columns wide, of which w-4 is text — two for the border, two for the
 	// padding.
 	panel := env.Styles.Panel.Width(width).Height(height)
-	if !focused {
-		panel = panel.BorderForeground(env.Styles.Faint.GetForeground())
+	if focused {
+		panel = panel.BorderForeground(env.Styles.Accent.GetForeground())
 	}
 	return panel.Render(strings.TrimSuffix(b.String(), "\n"))
 }

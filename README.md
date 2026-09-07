@@ -55,7 +55,7 @@ in the footer, and `?` opens the full help overlay.
 
 | Key | Does |
 | --- | --- |
-| `↑` `↓` / `j` `k` | move |
+| `↑` `↓` `←` `→` | move (arrows only — every letter is an action) |
 | `enter` | open, or advance the wizard a step |
 | `esc` | back a step, or back a screen |
 | `i` / `e` / `u` | install, edit an install, uninstall |

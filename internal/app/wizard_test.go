@@ -235,8 +235,8 @@ func TestWizardFullForwardFlowBuildsRequest(t *testing.T) {
 	if s.step != stepShaders {
 		t.Fatalf("step = %v, want stepShaders", s.step)
 	}
-	s = press(t, s, 'j')        // move to SweetFX
-	s = pressSpecial(t, s, ' ') // select it alongside the required Standard effects
+	s = pressSpecial(t, s, tea.KeyDown) // move to SweetFX
+	s = pressSpecial(t, s, ' ')         // select it alongside the required Standard effects
 	s = pressSpecial(t, s, tea.KeyEnter)
 
 	if s.step != stepAddons {
@@ -326,7 +326,7 @@ func TestWizardCannotSelectManualOnlyAddon(t *testing.T) {
 	s = advance(t, s, stepAddons)
 
 	// Move to and try to toggle the manual-only add-on (index 1).
-	s = press(t, s, 'j')
+	s = pressSpecial(t, s, tea.KeyDown)
 	s = pressSpecial(t, s, ' ')
 
 	if s.addons.isSelected(1) {
@@ -453,7 +453,7 @@ func TestWizardManualDLLChoiceSurvivesRevisit(t *testing.T) {
 	s := loadWizard(t, sampleGameEntry(), 1, fakeDeps()) // Vulkan: nothing detected
 	s = advance(t, s, stepAPI)
 
-	s = press(t, s, 'j') // move off the fallback
+	s = pressSpecial(t, s, tea.KeyDown) // move off the fallback
 	picked := s.selectedDLL()
 	if picked == "dxgi.dll" {
 		t.Fatal("test setup: cursor did not move")
@@ -1531,5 +1531,71 @@ func TestEditingSummaryNamesPackagesTheCatalogNoLongerHas(t *testing.T) {
 	// And applying would indeed drop it, which the Apply line must admit.
 	if got := s.changes(); len(got) != 1 || got[0] != "-1 shader" {
 		t.Errorf("changes() = %v, want the vanished package counted as a removal", got)
+	}
+}
+
+// The focused pane must be the bright one. Styles.Panel's own border is
+// dimmer than Styles.Faint, so dimming only the unfocused borders made
+// them the ones that stood out — the inverse of what focus should mean.
+func TestEditingSummaryHighlightsTheFocusedPane(t *testing.T) {
+	s := editWizard(t)
+	env := Env{Styles: NewStyles(true), Width: 100, Height: 24}
+	accent := lipgloss.NewStyle().Foreground(env.Styles.Accent.GetForeground()).Render("─")
+	accentSeq, _, _ := strings.Cut(strings.TrimPrefix(accent, "\x1b["), "m")
+
+	body := s.View(env)
+	var borders []string
+	for _, line := range strings.Split(body, "\n") {
+		if strings.Contains(line, "╭") {
+			borders = append(borders, line)
+		}
+	}
+	if len(borders) != 1 {
+		t.Fatalf("expected one row of pane tops, found %d", len(borders))
+	}
+	// Exactly one of the three boxes carries the accent color.
+	if n := strings.Count(borders[0], accentSeq); n != 1 {
+		t.Errorf("%d of the panes are highlighted, want just the focused one:\n%q", n, borders[0])
+	}
+
+	// And the marker sits on the same pane as the highlight.
+	for _, line := range strings.Split(body, "\n") {
+		if strings.Contains(line, "▸ ReShade") && !strings.Contains(line, accentSeq) {
+			t.Errorf("the focused pane's header is not in the accent color:\n%q", line)
+		}
+	}
+}
+
+// The sections are side by side, so ←/→ is what moves between them.
+func TestEditingSummaryMovesWithLeftAndRight(t *testing.T) {
+	s := editWizard(t)
+	env := Env{Styles: NewStyles(true), Width: 100, Height: 24}
+
+	if got := s.hubCursor.Cursor(); got != 0 {
+		t.Fatalf("cursor starts at %d, want 0", got)
+	}
+	s = pressSpecial(t, s, tea.KeyRight)
+	if got := s.hubCursor.Cursor(); got != 1 {
+		t.Errorf("→ moved to %d, want 1", got)
+	}
+	s = pressSpecial(t, s, tea.KeyLeft)
+	if got := s.hubCursor.Cursor(); got != 0 {
+		t.Errorf("← moved to %d, want 0", got)
+	}
+	if !strings.Contains(s.View(env), "←→ move") {
+		t.Error("the footer should name the keys that actually move between panes")
+	}
+
+	// Stacked into a list on a narrow terminal, ↑/↓ is the natural pair —
+	// and the hint follows the layout.
+	narrow := Env{Styles: NewStyles(true), Width: 50, Height: 24}
+	if !s.hubStacked(narrow) {
+		t.Fatal("50 columns should not fit three panes")
+	}
+	if !strings.Contains(s.View(narrow), "↑↓ move") {
+		t.Error("the stacked layout should offer ↑↓")
+	}
+	if s := pressSpecial(t, s, tea.KeyDown); s.hubCursor.Cursor() != 1 {
+		t.Error("↓ should still move, whichever layout is showing")
 	}
 }
