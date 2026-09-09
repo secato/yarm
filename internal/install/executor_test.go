@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -433,7 +434,18 @@ func TestRunCancellation(t *testing.T) {
 func TestSafeDest(t *testing.T) {
 	root := filepath.Join(string(filepath.Separator), "games", "mygame")
 
-	for _, rel := range []string{"../evil.dll", "a/../../evil.dll", "/etc/passwd"} {
+	// "/etc/passwd" is absolute on unix and merely rooted on Windows, where
+	// an absolute path needs a drive letter or a UNC prefix — so the case
+	// that proves absolute paths are refused has to be spelled per OS.
+	// Windows gets both of its forms.
+	reject := []string{"../evil.dll", "a/../../evil.dll"}
+	if runtime.GOOS == "windows" {
+		reject = append(reject, `C:\Windows\System32\evil.dll`, `\\attacker\share\evil.dll`)
+	} else {
+		reject = append(reject, "/etc/passwd")
+	}
+
+	for _, rel := range reject {
 		if _, err := safeDest(root, rel); err == nil {
 			t.Errorf("safeDest(%q) = nil error, want a rejection", rel)
 		}

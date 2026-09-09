@@ -2,13 +2,22 @@ package manual
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 )
 
 func TestDiscover(t *testing.T) {
+	// Built with filepath, because the provider stores filepath.Clean of
+	// what it was given: on Windows "/games/foo" cleans to "\games\foo",
+	// and the id is derived from that cleaned form. A hardcoded POSIX
+	// fixture asserts the wrong thing there.
+	sep := string(filepath.Separator)
+	foo := filepath.Join(sep, "games", "foo")
+	bar := filepath.Join(sep, "games", "bar")
+
 	p := New([]Entry{
-		{Name: "My GOG game", Path: "/games/foo"},
-		{Name: "Another one", Path: "/games/bar/"},
+		{Name: "My GOG game", Path: foo},
+		{Name: "Another one", Path: bar + sep}, // trailing separator
 	})
 
 	if got := p.Name(); got != "manual" {
@@ -24,17 +33,20 @@ func TestDiscover(t *testing.T) {
 	}
 
 	g := games[0]
-	if g.Name != "My GOG game" || g.Root != "/games/foo" || g.Provider != "manual" {
-		t.Errorf("games[0] = %+v", g)
+	if g.Name != "My GOG game" || g.Root != foo || g.Provider != "manual" {
+		t.Errorf("games[0] = %+v, want Root %q", g, foo)
 	}
-	if g.ID != ID("/games/foo") {
-		t.Errorf("games[0].ID = %q, want %q", g.ID, ID("/games/foo"))
+	if g.ID != ID(foo) {
+		t.Errorf("games[0].ID = %q, want %q", g.ID, ID(foo))
 	}
 
-	// Trailing slash is cleaned, so the id is stable regardless of how the
-	// path was typed.
-	if games[1].Root != "/games/bar" {
-		t.Errorf("games[1].Root = %q, want %q (cleaned)", games[1].Root, "/games/bar")
+	// Trailing separator is cleaned, so the id is stable regardless of how
+	// the path was typed.
+	if games[1].Root != bar {
+		t.Errorf("games[1].Root = %q, want %q (cleaned)", games[1].Root, bar)
+	}
+	if games[1].ID != ID(bar) {
+		t.Errorf("games[1].ID = %q, want the id of the cleaned path %q", games[1].ID, bar)
 	}
 }
 

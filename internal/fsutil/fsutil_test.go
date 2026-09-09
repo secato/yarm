@@ -5,8 +5,27 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
+
+// requirePOSIXPermissions skips a test that makes a directory unwritable or
+// unreadable to prove an error path.
+//
+// Two ways that stops meaning anything: as root, which ignores the mode
+// bits entirely, and on Windows, where os.Chmod only toggles the read-only
+// attribute and does not stop a file being created inside a directory. The
+// error paths themselves are real on every OS — this is only about how to
+// provoke them — so they stay covered by the Linux job.
+func requirePOSIXPermissions(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("windows does not enforce POSIX permission bits")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("running as root ignores directory permissions")
+	}
+}
 
 func TestAtomicWrite(t *testing.T) {
 	dir := t.TempDir()
@@ -126,9 +145,7 @@ func TestAtomicWriteMkdirAllFails(t *testing.T) {
 // A directory with no write permission must fail CreateTemp, and leave
 // no partial file behind.
 func TestAtomicWriteUnwritableDir(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("running as root ignores directory permissions")
-	}
+	requirePOSIXPermissions(t)
 	dir := t.TempDir()
 	if err := os.Chmod(dir, 0o555); err != nil {
 		t.Fatalf("Chmod: %v", err)
@@ -186,9 +203,7 @@ func TestDirSizeMissingRoot(t *testing.T) {
 // A single unreadable subdirectory anywhere in the tree must surface as
 // an error, not a silently short count.
 func TestDirSizeUnreadableSubdir(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("running as root ignores directory permissions")
-	}
+	requirePOSIXPermissions(t)
 	dir := t.TempDir()
 	sub := filepath.Join(dir, "locked")
 	if err := os.MkdirAll(sub, 0o755); err != nil {

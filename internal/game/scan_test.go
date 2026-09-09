@@ -20,10 +20,15 @@ func touch(t *testing.T, root string, rel string) {
 func TestScan(t *testing.T) {
 	root := t.TempDir()
 
+	// Every directory here must agree on case with every other. A
+	// case-insensitive filesystem — Windows, and macOS by default — folds
+	// "Game/" and "game/" into one directory, so a fixture that spells the
+	// same directory two ways creates paths the assertions below cannot
+	// find.
 	kept := []string{
 		"Game.exe",                     // depth 1
 		"Game/GameBin/emberhollow.exe", // depth 3
-		"game/bin/win64/ridgeline.exe", // depth 4 (Source layout; the boundary case)
+		"Game/bin/win64/ridgeline.exe", // depth 4 (Source layout; the boundary case)
 	}
 	skippedButPresent := []string{
 		"unins000.exe",                   // skip filename
