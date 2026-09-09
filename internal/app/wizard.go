@@ -871,7 +871,8 @@ func (s *WizardScreen) handleReviewKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		if !ok {
 			return s, nil
 		}
-		return s, PushScreen(NewProgressScreen(req, s.deps.Installer))
+		ops := []folderOp{{Dir: install.ExeDir(s.exe.Path), Install: &req}}
+		return s, PushScreen(NewProgressScreen(ops, s.deps.Installer, s.deps.Uninstaller))
 	}
 	return s, nil
 }

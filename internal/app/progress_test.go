@@ -36,7 +36,7 @@ func (f *fakeInstaller) Install(ctx context.Context, req install.Request, send f
 }
 
 // drainProgress pumps a ProgressScreen through its own Init/Update cycle
-// until it reaches installDoneMsg, following the WaitForActivity command
+// until it reaches applyDoneMsg, following the WaitForActivity command
 // chain exactly as the real Bubble Tea loop would.
 func drainProgress(t *testing.T, s *ProgressScreen, env Env, onEachUpdate func()) Screen {
 	t.Helper()
@@ -54,12 +54,16 @@ func drainProgress(t *testing.T, s *ProgressScreen, env Env, onEachUpdate func()
 		if onEachUpdate != nil {
 			onEachUpdate()
 		}
-		if _, ok := msg.(installDoneMsg); ok {
+		if _, ok := msg.(applyDoneMsg); ok {
 			return scr
 		}
 	}
-	t.Fatal("progress screen never reached installDoneMsg")
+	t.Fatal("progress screen never reached applyDoneMsg")
 	return scr
+}
+
+func singleInstallOp(req install.Request) []folderOp {
+	return []folderOp{{Install: &req}}
 }
 
 func TestProgressScreenStreamsUpdatesAndFinishes(t *testing.T) {
@@ -71,7 +75,7 @@ func TestProgressScreenStreamsUpdatesAndFinishes(t *testing.T) {
 		},
 		result: install.Result{Written: []string{"Game/dxgi.dll"}},
 	}
-	s := NewProgressScreen(install.Request{Version: "6.8.0", Flavor: install.FlavorAddon}, fi)
+	s := NewProgressScreen(singleInstallOp(install.Request{Version: "6.8.0", Flavor: install.FlavorAddon}), fi, nil)
 	env := Env{Styles: NewStyles(true), Width: 80, Height: 24}
 
 	final := drainProgress(t, s, env, nil)
@@ -81,10 +85,10 @@ func TestProgressScreenStreamsUpdatesAndFinishes(t *testing.T) {
 		t.Fatalf("final screen is %T, want *ProgressScreen", final)
 	}
 	if !ps.finished {
-		t.Error("finished should be true once installDoneMsg arrives")
+		t.Error("finished should be true once applyDoneMsg arrives")
 	}
-	if ps.err != nil {
-		t.Errorf("err = %v, want nil", ps.err)
+	if ps.failed() {
+		t.Errorf("failed() = true, want false")
 	}
 	if len(ps.lines) != 2 {
 		// The duplicate "Downloading ReShade..." label collapses into one
@@ -98,7 +102,7 @@ func TestProgressScreenStreamsUpdatesAndFinishes(t *testing.T) {
 // than either finishing or rolling back.
 func TestProgressScreenEscCancelsRun(t *testing.T) {
 	fi := &fakeInstaller{blockUntilCanceled: true}
-	s := NewProgressScreen(install.Request{Version: "6.8.0"}, fi)
+	s := NewProgressScreen(singleInstallOp(install.Request{Version: "6.8.0"}), fi, nil)
 	env := Env{Styles: NewStyles(true), Width: 80, Height: 24}
 
 	cmd := s.Init()
@@ -137,17 +141,17 @@ func drainToDone(t *testing.T, s *ProgressScreen, cmd tea.Cmd, env Env) Screen {
 		var next Screen
 		next, cmd = scr.Update(msg, env)
 		scr = next
-		if _, ok := msg.(installDoneMsg); ok {
+		if _, ok := msg.(applyDoneMsg); ok {
 			return scr
 		}
 	}
-	t.Fatal("progress screen never reached installDoneMsg after cancel")
+	t.Fatal("progress screen never reached applyDoneMsg after cancel")
 	return scr
 }
 
 func TestProgressScreenReportsRealError(t *testing.T) {
 	fi := &fakeInstaller{err: errors.New("disk is full")}
-	s := NewProgressScreen(install.Request{Version: "6.8.0"}, fi)
+	s := NewProgressScreen(singleInstallOp(install.Request{Version: "6.8.0"}), fi, nil)
 	env := Env{Styles: NewStyles(true), Width: 80, Height: 24}
 
 	final := drainProgress(t, s, env, nil)
@@ -156,8 +160,11 @@ func TestProgressScreenReportsRealError(t *testing.T) {
 	if ps.canceled {
 		t.Error("a real failure must not be reported as canceled")
 	}
-	if ps.err == nil || ps.err.Error() != "disk is full" {
-		t.Errorf("err = %v, want the installer's error", ps.err)
+	if !ps.failed() {
+		t.Fatal("failed() = false, want true")
+	}
+	if err := ps.outcomes[0].Err; err == nil || err.Error() != "disk is full" {
+		t.Errorf("outcomes[0].Err = %v, want the installer's error", err)
 	}
 }
 
@@ -165,7 +172,7 @@ func TestProgressScreenReportsRealError(t *testing.T) {
 // cancel) — it should defer to the shell.
 func TestProgressScreenBackAfterFinishDefers(t *testing.T) {
 	fi := &fakeInstaller{result: install.Result{}}
-	s := NewProgressScreen(install.Request{Version: "6.8.0"}, fi)
+	s := NewProgressScreen(singleInstallOp(install.Request{Version: "6.8.0"}), fi, nil)
 	env := Env{Styles: NewStyles(true), Width: 80, Height: 24}
 
 	final := drainProgress(t, s, env, nil)

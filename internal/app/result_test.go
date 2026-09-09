@@ -17,6 +17,13 @@ func resultRequest() install.Request {
 	}
 }
 
+// singleInstallOutcome wraps one successful install.Result the way
+// ProgressScreen would after running a single op.
+func singleInstallOutcome(res install.Result) []folderOutcome {
+	req := resultRequest()
+	return []folderOutcome{{Op: folderOp{Install: &req}, Attempted: true, Result: res}}
+}
+
 // The result screen is the only place an install's footprint on disk is
 // ever stated, so the size has to survive from the plan to the screen.
 func TestInstallResultReportsHowMuchWasWritten(t *testing.T) {
@@ -24,7 +31,7 @@ func TestInstallResultReportsHowMuchWasWritten(t *testing.T) {
 		Written: []string{"Game/dxgi.dll", "Game/ReShade.ini"},
 		Bytes:   3 * 1024 * 1024,
 	}
-	body := NewInstallResultScreen(resultRequest(), res, nil, false).View(wizardEnv())
+	body := NewApplyResultScreen(singleInstallOutcome(res), false).View(wizardEnv())
 
 	if !strings.Contains(body, "2 file(s) written") {
 		t.Errorf("result does not report the file count:\n%s", body)
@@ -36,7 +43,7 @@ func TestInstallResultReportsHowMuchWasWritten(t *testing.T) {
 
 // A run that wrote nothing must not claim a size.
 func TestInstallResultOmitsAZeroSize(t *testing.T) {
-	body := NewInstallResultScreen(resultRequest(), install.Result{}, nil, false).View(wizardEnv())
+	body := NewApplyResultScreen(singleInstallOutcome(install.Result{}), false).View(wizardEnv())
 	if strings.Contains(body, "(0 B)") {
 		t.Errorf("result states a zero size:\n%s", body)
 	}

@@ -46,6 +46,16 @@ type FolderGroup struct {
 	Runtime install.RuntimeInfo
 }
 
+// folderLabel names a folder the way every screen shows it: the
+// game-relative directory with a trailing slash, and the game root spelled
+// out rather than rendered as a bare "/".
+func folderLabel(dir string) string {
+	if dir == "" {
+		return "(game root)/"
+	}
+	return dir + "/"
+}
+
 // primaryExe is the executable an install should be tied to: the first
 // one not flagged as an installer, crash handler or similar, falling back
 // to the first executable at all if every one of them was. Used both for

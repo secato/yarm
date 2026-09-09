@@ -109,10 +109,7 @@ func (s *FolderPickScreen) View(env Env) string {
 	}
 	writeWindow(&b, env, len(s.groups), s.cursor.Cursor(), height, "", func(i int) {
 		grp := s.groups[i]
-		name := grp.Dir + "/"
-		if grp.Dir == "" {
-			name = "(game root)/"
-		}
+		name := folderLabel(grp.Dir)
 		marker := "  "
 		if i == s.cursor.Cursor() {
 			marker = "▸ "

@@ -22,6 +22,51 @@ type ProgressUpdate struct {
 	Done, Total int64
 }
 
+// folderOp is one folder's share of an Apply. Install and Uninstall are
+// mutually exclusive; Dir is carried alongside so progress lines and the
+// result screen can name which folder they are talking about without
+// re-deriving it from a request.
+//
+// A single Apply can hold several of these because the folder is one of
+// the wizard's answers: a game with a 32- and a 64-bit tree can be set up
+// in one pass, and moving an install from one folder to another is an
+// install and an uninstall submitted together.
+type folderOp struct {
+	Dir       string
+	Install   *install.Request
+	Uninstall *install.UninstallRequest
+}
+
+// verb names what an op does, for progress and the result screen.
+func (o folderOp) verb() string {
+	if o.Uninstall != nil {
+		return "uninstalled"
+	}
+	return "installed"
+}
+
+// failVerb is verb's infinitive, for a title like "install failed".
+func (o folderOp) failVerb() string {
+	if o.Uninstall != nil {
+		return "uninstall"
+	}
+	return "install"
+}
+
+// folderOutcome is what one folderOp actually did.
+//
+// Attempted separates "ran and failed" from "never started", which is the
+// distinction that matters after a batch stops early: the folders behind
+// the failure are untouched, and saying so is the difference between a
+// useful report and a worrying one.
+type folderOutcome struct {
+	Op        folderOp
+	Attempted bool
+	Result    install.Result
+	Removed   install.UninstallResult
+	Err       error
+}
+
 // Installer resolves a Request's artifacts (downloading anything missing)
 // and installs them, narrating its progress. An interface so the progress
 // screen can be tested against a controllable fake instead of the real

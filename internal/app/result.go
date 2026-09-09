@@ -24,43 +24,102 @@ type ResultScreen struct {
 	lines []string
 }
 
-// NewInstallResultScreen summarizes an install.Result.
-func NewInstallResultScreen(req install.Request, res install.Result, err error, canceled bool) *ResultScreen {
+// NewApplyResultScreen summarizes a batch of folderOps. Most Applies are a
+// single install, still reported exactly as before; a game with several
+// folders, or a move (install+uninstall together), produces one outcome per
+// op and all of them get reported.
+func NewApplyResultScreen(outcomes []folderOutcome, canceled bool) *ResultScreen {
 	s := &ResultScreen{keys: DefaultKeyMap()}
+	multi := len(outcomes) > 1
+
+	failedAt := -1
+	for i, o := range outcomes {
+		if o.Attempted && o.Err != nil {
+			failedAt = i
+			break
+		}
+	}
 
 	switch {
 	case canceled:
-		s.title = "install canceled"
+		s.title = "canceled"
 		s.lines = append(s.lines, "Canceled before it finished.")
-		if len(res.Written) > 0 {
-			s.lines = append(s.lines, fmt.Sprintf("%d file(s) had already been written and were rolled back.", len(res.Written)))
+		for _, o := range outcomes {
+			if !o.Attempted || o.Op.Uninstall != nil || len(o.Result.Written) == 0 {
+				continue
+			}
+			s.lines = append(s.lines, applyLine(o, multi,
+				fmt.Sprintf("%d file(s) had already been written and were rolled back.", len(o.Result.Written))))
 		}
-	case err != nil:
-		s.title = "install failed"
-		s.lines = append(s.lines, err.Error())
+	case failedAt >= 0:
+		s.title = outcomes[failedAt].Op.failVerb() + " failed"
+		s.lines = append(s.lines, applyLine(outcomes[failedAt], multi, outcomes[failedAt].Err.Error()))
 	default:
 		s.ok = true
-		s.title = "installed"
-		s.lines = append(s.lines, fmt.Sprintf("ReShade %s (%s) → %s", req.Version, req.Flavor, req.Exe.Path))
-		written := fmt.Sprintf("%d file(s) written", len(res.Written))
-		// The size is worth a few characters here: it is the answer to
-		// "what did that cost me", and the only place the install's
-		// footprint on disk is ever stated.
-		if res.Bytes > 0 {
-			written += " (" + humanSize(res.Bytes) + ")"
+		s.title = "applied"
+		if !multi {
+			s.title = outcomes[0].Op.verb()
 		}
-		s.lines = append(s.lines, written+".")
-		if n := len(res.Skipped); n > 0 {
-			s.lines = append(s.lines, fmt.Sprintf("%d file(s) unchanged.", n))
-		}
-		if n := len(res.Removed); n > 0 {
-			s.lines = append(s.lines, fmt.Sprintf("%d file(s) from a previous install removed.", n))
-		}
-		for _, w := range res.Warnings {
-			s.lines = append(s.lines, "! "+w)
+		for _, o := range outcomes {
+			s.lines = append(s.lines, describeOutcome(o, multi)...)
 		}
 	}
 	return s
+}
+
+// applyLine prefixes a line with its folder, but only when there is more
+// than one op to tell apart.
+func applyLine(o folderOutcome, multi bool, line string) string {
+	if !multi {
+		return line
+	}
+	return folderLabel(o.Op.Dir) + " " + line
+}
+
+// describeOutcome reports what one successful op did, in the same terms
+// NewUninstallResultScreen and the old NewInstallResultScreen always used.
+func describeOutcome(o folderOutcome, multi bool) []string {
+	if o.Op.Uninstall != nil {
+		return describeUninstallOutcome(o, multi)
+	}
+	return describeInstallOutcome(o, multi)
+}
+
+func describeInstallOutcome(o folderOutcome, multi bool) []string {
+	req, res := o.Op.Install, o.Result
+	lines := []string{applyLine(o, multi, fmt.Sprintf("ReShade %s (%s) → %s", req.Version, req.Flavor, req.Exe.Path))}
+
+	written := fmt.Sprintf("%d file(s) written", len(res.Written))
+	// The size is worth a few characters here: it is the answer to "what
+	// did that cost me", and the only place the install's footprint on
+	// disk is ever stated.
+	if res.Bytes > 0 {
+		written += " (" + humanSize(res.Bytes) + ")"
+	}
+	lines = append(lines, applyLine(o, multi, written+"."))
+	if n := len(res.Skipped); n > 0 {
+		lines = append(lines, applyLine(o, multi, fmt.Sprintf("%d file(s) unchanged.", n)))
+	}
+	if n := len(res.Removed); n > 0 {
+		lines = append(lines, applyLine(o, multi, fmt.Sprintf("%d file(s) from a previous install removed.", n)))
+	}
+	for _, w := range res.Warnings {
+		lines = append(lines, applyLine(o, multi, "! "+w))
+	}
+	return lines
+}
+
+func describeUninstallOutcome(o folderOutcome, multi bool) []string {
+	res := o.Removed
+	lines := []string{applyLine(o, multi, o.Op.Uninstall.Exe)}
+	lines = append(lines, applyLine(o, multi, fmt.Sprintf("%d file(s) removed.", len(res.Removed))))
+	if n := len(res.Kept); n > 0 {
+		lines = append(lines, applyLine(o, multi, fmt.Sprintf("%d file(s) kept: modified since installation.", n)))
+	}
+	if n := len(res.Restored); n > 0 {
+		lines = append(lines, applyLine(o, multi, fmt.Sprintf("%d backed-up file(s) restored.", n)))
+	}
+	return lines
 }
 
 // NewUninstallResultScreen summarizes an install.UninstallResult.

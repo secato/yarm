@@ -527,11 +527,7 @@ func (s *GamesScreen) renderDetail(e GameEntry, env Env) (body string, warned bo
 			}
 			indent := ""
 			if multi {
-				header := grp.Dir + "/"
-				if grp.Dir == "" {
-					header = "(game root)/"
-				}
-				b.WriteString(env.Styles.Subtitle.Render(header))
+				b.WriteString(env.Styles.Subtitle.Render(folderLabel(grp.Dir)))
 				b.WriteString("\n")
 				indent = "  "
 			}
