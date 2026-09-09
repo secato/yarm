@@ -27,6 +27,15 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    # bash on every leg of the matrix, so both run the identical command.
+    # The default shell on a Windows runner is PowerShell, which delivered
+    # `-coverprofile=cover.out` to go as two arguments — `-coverprofile=cover`
+    # and `.out`, which go then tried to resolve as a package and failed on
+    # ("no required module provides package .out") while every real test
+    # passed. bash ships on all the hosted runners.
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

@@ -43,6 +43,19 @@ var curatedPackages = map[string]bool{
 	"fxshaders-by-luluco250": true,
 	// Recent, and asked for by name.
 	"lumenitefx": true,
+	// Screen-space AO, GI and reflections plus modern AA — XeGTAO, NeoSSAO,
+	// DLAA-T, neural sharpening. What people install ReShade for now, where
+	// most of the packs above are color grading. Careful with the id: the
+	// catalog carries two packs named "reshade-shaders by <author>", and
+	// this is Barbatos', not Daodan's (reshade-shaders-by-daodan).
+	"reshade-shaders-by-barbatos": true,
+	// TurboGI and ATA in its own right, and upstream calls it the "much
+	// higher quality successor to QuarkFX and ZN_FX". It also has to be
+	// here: its Zenteon_Framework.fx is the only thing in the catalog that
+	// satisfies BFBFX's dependency (see requires.go), so the wizard could
+	// tick it on the user's behalf while the pack itself stayed hidden
+	// behind the show-all toggle.
+	"zenteonfx-shaders-by-zenteon": true,
 	// Kept because presets written for ReShade 3/4 reference effects that
 	// only exist here (AmbientLight, MagicBloom).
 	"legacy-effects": true,

@@ -26,6 +26,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Two more effect packages on the wizard's shortlist: **reshade-shaders by
+  Barbatos** (XeGTAO, NeoSSAO, DLAA-T — screen-space AO, GI and reflections
+  plus modern AA, where most of the shortlist is color grading) and
+  **ZenteonFX Shaders by Zenteon**. ZenteonFX also closes an
+  inconsistency: its `Zenteon_Framework.fx` is the only thing in the
+  catalog that satisfies BFBFX's dependency, so the wizard could tick it on
+  your behalf while the pack itself was reachable only behind the show-all
+  toggle. AstrayFX was already on the shortlist.
+
 - `X` on the resources browser clears the whole download cache, which used
   to be `yarm cache clean` and had no equivalent in the interface. The
   confirmation counts what will go and how much it frees, warns when some
