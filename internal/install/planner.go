@@ -31,6 +31,9 @@ type Artifacts struct {
 	Addons map[string]string
 	// Custom maps a custom content id to the folder holding its files.
 	Custom map[string]string
+	// RenoDX is the directory holding the chosen RenoDX mod's add-on
+	// binary, or "". One value, matching Request.RenoDX.
+	RenoDX string
 }
 
 // Planner turns a Request plus resolved Artifacts into a Plan.
@@ -167,6 +170,20 @@ func (p Planner) collect(req Request, art Artifacts, exeDir string) ([]PlannedFi
 			return nil, fmt.Errorf("custom %s: %w", id, err)
 		}
 		files = append(files, customFiles...)
+	}
+
+	// A RenoDX mod is a ReShade add-on file and nothing else, so it goes
+	// through the same helper to the same place — what distinguishes it
+	// is only its origin in the manifest.
+	if req.RenoDX != "" {
+		if art.RenoDX == "" {
+			return nil, fmt.Errorf("%w: renodx %s", ErrMissingArtifact, req.RenoDX)
+		}
+		renoFiles, err := addonFiles(art.RenoDX, exeDir, state.RenoDXOrigin(req.RenoDX))
+		if err != nil {
+			return nil, fmt.Errorf("renodx %s: %w", req.RenoDX, err)
+		}
+		files = append(files, renoFiles...)
 	}
 
 	// Add-ons sit beside the ReShade DLL; ReShade scans the exe directory.

@@ -294,6 +294,7 @@ func (e *Executor) run(ctx context.Context, plan Plan, jr *journal, onProgress P
 		Packages: req.Packages,
 		Addons:   req.Addons,
 		Custom:   req.Custom,
+		RenoDX:   req.RenoDX,
 		Files:    files,
 		Backups:  jr.backups,
 	}

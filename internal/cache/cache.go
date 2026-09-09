@@ -25,6 +25,7 @@ const (
 	DirReShade     = "reshade"
 	DirPackages    = "packages"
 	DirAddons      = "addons"
+	DirRenoDX      = "renodx"
 	DirD3DCompiler = "d3dcompiler"
 	DirDownloads   = "downloads"
 	DirCatalog     = "catalog"
@@ -245,6 +246,56 @@ func (c *Cache) EnsureAddon(ctx context.Context, addon catalog.Addon, arch game.
 		SourceURL: src.URL,
 		Version:   version,
 		Name:      addon.Name,
+	})
+}
+
+// HasRenoDX reports whether any build of a RenoDX mod is already cached.
+func (c *Cache) HasRenoDX(modID string) bool {
+	return nonEmpty(c.abs(filepath.Join(DirRenoDX, modID)))
+}
+
+// EnsureRenoDX returns the directory holding one RenoDX mod's add-on
+// binary for a game architecture, downloading it if it is not there.
+//
+// Date-stamped like EnsureAddon, and for a stronger reason: RenoDX's
+// `snapshot` is a rolling tag, so the same URL serves different bytes
+// over time. A cache key without the date would pin whichever build
+// happened to be fetched first, forever.
+//
+// RenoDX assets are always the add-on binary itself, never an archive,
+// so there is no zip branch to take.
+func (c *Cache) EnsureRenoDX(ctx context.Context, mod catalog.RenoMod, arch game.Arch, onProgress fetch.ProgressFunc) (string, error) {
+	art, ok := mod.ArtifactFor(arch)
+	if !ok {
+		return "", fmt.Errorf("RenoDX %s has no build for %s", mod.ID, arch)
+	}
+
+	version := c.now().Format("20060102")
+	rel := filepath.Join(DirRenoDX, mod.ID, version+"-"+string(arch))
+	dir := c.abs(rel)
+	id := "renodx:" + mod.ID + ":" + version + ":" + string(arch)
+
+	if nonEmpty(dir) {
+		return dir, c.touch(id)
+	}
+
+	download := c.abs(filepath.Join(DirDownloads, art.Name))
+	defer func() { _ = os.Remove(download) }()
+
+	if err := c.Fetch.Download(ctx, art.URL, download, onProgress, ""); err != nil {
+		return "", err
+	}
+	if _, err := artifacts.InstallAddonFile(download, dir, arch); err != nil {
+		return "", err
+	}
+
+	return dir, c.record(Entry{
+		ID:        id,
+		Kind:      KindRenoDX,
+		Path:      rel,
+		SourceURL: art.URL,
+		Version:   version,
+		Name:      "RenoDX " + mod.Title,
 	})
 }
 

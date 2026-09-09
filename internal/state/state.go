@@ -43,6 +43,9 @@ func PackageOrigin(id string) Origin { return Origin("package:" + id) }
 // AddonOrigin returns the Origin for an add-on id.
 func AddonOrigin(id string) Origin { return Origin("addon:" + id) }
 
+// RenoDXOrigin returns the Origin for a RenoDX mod id.
+func RenoDXOrigin(id string) Origin { return Origin("renodx:" + id) }
+
 // CustomOrigin returns the Origin for a custom content id.
 func CustomOrigin(id string) Origin { return Origin("custom:" + id) }
 
@@ -81,8 +84,14 @@ type Install struct {
 	Packages    []string    `json:"packages,omitempty"`
 	Addons      []string    `json:"addons,omitempty"`
 	Custom      []string    `json:"custom,omitempty"`
-	Files       []File      `json:"files"`
-	Backups     []Backup    `json:"backups,omitempty"`
+	// RenoDX is the RenoDX mod id, or empty. Optional, so the schema
+	// stays at 1: an older yarm reading a newer registry drops it on
+	// rewrite, which costs only the wizard's preselection. The file
+	// itself stays in Files with its renodx: origin, so uninstall keeps
+	// removing it either way.
+	RenoDX  string   `json:"renodx,omitempty"`
+	Files   []File   `json:"files"`
+	Backups []Backup `json:"backups,omitempty"`
 }
 
 // Game groups the installs belonging to one game.

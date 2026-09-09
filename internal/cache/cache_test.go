@@ -546,3 +546,76 @@ func TestHasD3DCompiler(t *testing.T) {
 		t.Error("HasD3DCompiler() = true for an architecture never cached")
 	}
 }
+
+// A RenoDX mod is one add-on binary, cached per architecture and per day
+// — the day matters because `snapshot` is a rolling tag, so the same URL
+// serves different bytes over time.
+func TestEnsureRenoDX(t *testing.T) {
+	c, srv, hits := newCache(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("renodx binary"))
+	})
+	mod := catalog.RenoMod{
+		ID: "cp2077", Title: "Cyberpunk 2077",
+		Artifacts: []catalog.RenoArtifact{{
+			Name: "renodx-cp2077.addon64", Arch: game.ArchX64,
+			URL: srv.URL + "/renodx-cp2077.addon64",
+		}},
+	}
+
+	dir, err := c.EnsureRenoDX(context.Background(), mod, game.ArchX64, nil)
+	if err != nil {
+		t.Fatalf("EnsureRenoDX() error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "renodx-cp2077.addon64")); err != nil {
+		t.Errorf("the add-on file is missing: %v", err)
+	}
+	if !c.HasRenoDX(mod.ID) {
+		t.Error("HasRenoDX() = false right after EnsureRenoDX cached it")
+	}
+	if !strings.Contains(dir, "20260905-x64") {
+		t.Errorf("dir = %q, want it stamped with the date and architecture", dir)
+	}
+
+	// Recorded in the index so the resources browser can account for it.
+	entries, err := c.List(SortByName, false)
+	if err != nil {
+		t.Fatalf("List(): %v", err)
+	}
+	var found bool
+	for _, e := range entries {
+		if e.Kind == KindRenoDX {
+			found = true
+			if e.SourceURL != mod.Artifacts[0].URL {
+				t.Errorf("SourceURL = %q", e.SourceURL)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("no %s entry in the index", KindRenoDX)
+	}
+
+	// A second call the same day is a cache hit, not a second download.
+	before := *hits
+	if _, err := c.EnsureRenoDX(context.Background(), mod, game.ArchX64, nil); err != nil {
+		t.Fatalf("second EnsureRenoDX(): %v", err)
+	}
+	if *hits != before {
+		t.Errorf("downloaded again: %d hits, want %d", *hits, before)
+	}
+}
+
+// A mod with no build for this architecture must say so rather than
+// download the wrong one — a mismatched add-on is inert, not degraded.
+func TestEnsureRenoDXMissingArch(t *testing.T) {
+	c, srv, _ := newCache(t, func(http.ResponseWriter, *http.Request) {})
+	mod := catalog.RenoMod{
+		ID: "x64only", Title: "64-bit only",
+		Artifacts: []catalog.RenoArtifact{{
+			Name: "renodx-x64only.addon64", Arch: game.ArchX64, URL: srv.URL + "/x.addon64",
+		}},
+	}
+
+	if _, err := c.EnsureRenoDX(context.Background(), mod, game.ArchX86, nil); err == nil {
+		t.Fatal("EnsureRenoDX() = nil error for an architecture the mod does not build")
+	}
+}

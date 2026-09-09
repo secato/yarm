@@ -75,7 +75,7 @@ func parseTags(r io.Reader) ([]string, error) {
 		versions = append(versions, v)
 	}
 
-	slices.SortFunc(versions, func(a, b string) int { return compareSemver(b, a) })
+	slices.SortFunc(versions, func(a, b string) int { return CompareVersions(b, a) })
 	return slices.Compact(versions), nil
 }
 
@@ -96,9 +96,12 @@ func parseSemver(v string) (major, minor, patch int, ok bool) {
 	return nums[0], nums[1], nums[2], true
 }
 
-// compareSemver orders two dotted versions numerically, so 6.10.0 sorts
+// CompareVersions orders two dotted versions numerically, so 6.10.0 sorts
 // above 6.9.0 where a string comparison would not.
-func compareSemver(a, b string) int {
+//
+// Exported because it is also how the RenoDX step checks its ReShade
+// floor (RenoDXMinReShade); one comparator for both beats two.
+func CompareVersions(a, b string) int {
 	aMaj, aMin, aPat, aOK := parseSemver(a)
 	bMaj, bMin, bPat, bOK := parseSemver(b)
 	if !aOK || !bOK {

@@ -101,6 +101,16 @@ func (f *fixture) WithAddon(id string, files map[string]string) *fixture {
 	return f
 }
 
+// WithRenoDX adds a cached RenoDX mod: one add-on binary, which is all
+// a RenoDX mod ever is.
+func (f *fixture) WithRenoDX(id, file string) *fixture {
+	f.t.Helper()
+	dir := filepath.Join(f.CacheDir, "renodx", id, "20260905-x64")
+	f.write(dir, file, "renodx binary")
+	f.Art.RenoDX = dir
+	return f
+}
+
 // WithCustom adds a user-managed content folder.
 func (f *fixture) WithCustom(id string, files map[string]string) *fixture {
 	f.t.Helper()

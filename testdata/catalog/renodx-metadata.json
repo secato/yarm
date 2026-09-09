@@ -1,0 +1,178 @@
+{
+ "$schema": "./renodx-metadata-schema.json",
+ "schema_version": "1.0.0",
+ "generated_at": "2026-09-06T14:04:58.454Z",
+ "mods": [
+  {
+   "id": "1000xresist",
+   "$schema": "https://cdn.jsdelivr.net/gh/clshortfuse/renodx/renodx-metadata-schema.json",
+   "title": "1000xResist",
+   "maintainers": [
+    "Ritsu"
+   ],
+   "status": "stable",
+   "deploy": {
+    "steam_appid": 1675830
+   },
+   "artifacts": [
+    {
+     "name": "renodx-1000xresist.addon64",
+     "mod": "1000xresist",
+     "arch": "x64",
+     "size": 2293248,
+     "url": "./renodx-1000xresist.addon64",
+     "path": "./renodx-1000xresist.addon64"
+    }
+   ]
+  },
+  {
+   "id": "animalwell",
+   "$schema": "https://cdn.jsdelivr.net/gh/clshortfuse/renodx/renodx-metadata-schema.json",
+   "title": "Animal Well",
+   "maintainers": [
+    "ShortFuse"
+   ],
+   "status": "beta",
+   "deploy": {
+    "steam_appid": 813230
+   },
+   "artifacts": [
+    {
+     "name": "renodx-animalwell.addon64",
+     "mod": "animalwell",
+     "arch": "x64",
+     "size": 2172928,
+     "url": "./renodx-animalwell.addon64",
+     "path": "./renodx-animalwell.addon64"
+    }
+   ]
+  },
+  {
+   "id": "alienisolation",
+   "$schema": "https://cdn.jsdelivr.net/gh/clshortfuse/renodx/renodx-metadata-schema.json",
+   "title": "Alien: Isolation",
+   "maintainers": [
+    "Musa"
+   ],
+   "status": "stable",
+   "urls": [
+    {
+     "url": "https://www.nexusmods.com/alienisolation/mods/78",
+     "kind": "nexus_mods"
+    }
+   ],
+   "deploy": {
+    "steam_appid": 214490,
+    "architecture": [
+     "x86"
+    ]
+   },
+   "artifacts": [
+    {
+     "name": "renodx-alienisolation.addon32",
+     "mod": "alienisolation",
+     "arch": "x86",
+     "size": 3589120,
+     "url": "./renodx-alienisolation.addon32",
+     "path": "./renodx-alienisolation.addon32"
+    }
+   ]
+  },
+  {
+   "id": "dishonored",
+   "$schema": "https://cdn.jsdelivr.net/gh/clshortfuse/renodx/renodx-metadata-schema.json",
+   "title": "Dishonored",
+   "maintainers": [
+    "OopyDoopy (Jon)"
+   ],
+   "status": "stable",
+   "deploy": {
+    "steam_appid": 205100,
+    "architecture": [
+     "x86",
+     "x64"
+    ]
+   },
+   "artifacts": [
+    {
+     "name": "renodx-dishonored.addon32",
+     "mod": "dishonored",
+     "arch": "x86",
+     "size": 1854976,
+     "url": "./renodx-dishonored.addon32",
+     "path": "./renodx-dishonored.addon32"
+    },
+    {
+     "name": "renodx-dishonored.addon64",
+     "mod": "dishonored",
+     "arch": "x64",
+     "size": 2226688,
+     "url": "./renodx-dishonored.addon64",
+     "path": "./renodx-dishonored.addon64"
+    }
+   ]
+  },
+  {
+   "id": "rdr2vk",
+   "$schema": "https://cdn.jsdelivr.net/gh/clshortfuse/renodx/renodx-metadata-schema.json",
+   "title": "Red Dead Redemption 2",
+   "variant": "Vulkan",
+   "maintainers": [
+    "Musa"
+   ],
+   "summary": "Adds configurable HDR tone mapping and color grading to Red Dead Redemption 2's Vulkan renderer.",
+   "tags": [
+    "HDR",
+    "Vulkan"
+   ],
+   "status": "stable",
+   "notes": [
+    "Requires Vulkan, Exclusive Fullscreen, and HDR enabled in game."
+   ],
+   "deploy": {
+    "game_exe": "RDR2.exe",
+    "process_name": "RDR2.exe",
+    "api": "vulkan",
+    "steam_appid": 1174180,
+    "architecture": [
+     "x64"
+    ],
+    "platform": "steam"
+   },
+   "artifacts": [
+    {
+     "name": "renodx-rdr2vk.addon64",
+     "mod": "rdr2vk",
+     "arch": "x64",
+     "size": 2795520,
+     "url": "./renodx-rdr2vk.addon64",
+     "path": "./renodx-rdr2vk.addon64"
+    }
+   ]
+  },
+  {
+   "id": "acecombat7",
+   "$schema": "https://cdn.jsdelivr.net/gh/clshortfuse/renodx/renodx-metadata-schema.json",
+   "title": "Ace Combat 7",
+   "maintainers": [
+    "Maple"
+   ],
+   "notes": [
+    "Superseded by Generic Unreal Engine mod"
+   ],
+   "deploy": {
+    "steam_appid": 502500
+   },
+   "artifacts": [
+    {
+     "name": "renodx-acecombat7.addon64",
+     "mod": "acecombat7",
+     "arch": "x64",
+     "size": 2280960,
+     "url": "./renodx-acecombat7.addon64",
+     "path": "./renodx-acecombat7.addon64"
+    }
+   ]
+  }
+ ]
+}

@@ -55,6 +55,14 @@ type Request struct {
 	Packages []string
 	Addons   []string
 	Custom   []string
+	// RenoDX is the id of the one RenoDX mod to install, or "".
+	//
+	// A single value rather than a slice, because two RenoDX add-ons in
+	// one folder both hook the same swap chain and replace the same tone
+	// mapping: whichever ReShade loads second wins, and which that is is
+	// not defined. checkDuplicates cannot catch it either, since their
+	// filenames differ — so the type says it instead.
+	RenoDX string
 	// Overwrite allows replacing files YARM does not own. Without it, such
 	// files are left alone and reported.
 	Overwrite bool
@@ -97,6 +105,9 @@ func (r Request) Validate() error {
 		// ReShade's normal build does not load add-ons at all, so this
 		// would silently install files that never activate.
 		return fmt.Errorf("add-ons require the %q flavor", FlavorAddon)
+	case r.RenoDX != "" && !r.Flavor.Addon():
+		// A RenoDX mod is an add-on, and inert for the same reason.
+		return fmt.Errorf("RenoDX requires the %q flavor", FlavorAddon)
 	}
 	if !strings.EqualFold(filepath.Ext(r.DLLName), ".dll") {
 		return fmt.Errorf("dll name %q must end in .dll", r.DLLName)

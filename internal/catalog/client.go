@@ -29,6 +29,7 @@ const (
 	packagesFile = "EffectPackages.ini"
 	addonsFile   = "Addons.ini"
 	versionsFile = "reshade-versions.json"
+	renodxFile   = "renodx-metadata.json"
 	metaSuffix   = ".meta.json"
 )
 
@@ -77,6 +78,7 @@ type Client struct {
 	AddonsURL   string
 	ReShadeURL  string
 	TagsURL     string
+	RenoDXURL   string
 
 	// Now is overridable so tests can age the cache without sleeping.
 	Now func() time.Time
@@ -94,6 +96,7 @@ func New(httpClient Doer, dir string, ttl time.Duration, userAgent string) *Clie
 		AddonsURL:   AddonsURL,
 		ReShadeURL:  ReShadeURL,
 		TagsURL:     TagsURL,
+		RenoDXURL:   RenoDXMetadataURL,
 		Now:         time.Now,
 	}
 }
@@ -119,6 +122,21 @@ func (c *Client) Addons(ctx context.Context) ([]Addon, error) {
 		return nil, err
 	}
 	return ParseAddons(bytes.NewReader(data))
+}
+
+// RenoDX returns the RenoDX mod catalog.
+//
+// Worth knowing: this file is about 200 KB against maxCatalogBytes, an
+// order of magnitude of headroom. If upstream ever crosses that cap the
+// mods disappear from the wizard rather than erroring loudly, because
+// WizardData deliberately does not count them when deciding whether a
+// catalog load was empty.
+func (c *Client) RenoDX(ctx context.Context) ([]RenoMod, error) {
+	data, err := c.load(ctx, c.RenoDXURL, renodxFile)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRenoDX(bytes.NewReader(data))
 }
 
 // Versions returns the installable ReShade versions, newest first, with

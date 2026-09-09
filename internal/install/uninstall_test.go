@@ -477,3 +477,46 @@ func TestUninstallLeavesPreExistingINI(t *testing.T) {
 		t.Errorf("a pre-existing ini was modified or removed: %q", got)
 	}
 }
+
+// The whole point of recording a RenoDX mod like any other file: it comes
+// back out again. Nothing reads the origin to do it — the manifest's path
+// and hash are enough — which is exactly why a new origin was safe to add.
+func TestUninstallRemovesARenoDXMod(t *testing.T) {
+	f := newFixture(t).WithReShade().WithRenoDX("cp2077", "renodx-cp2077.addon64")
+
+	req := f.Request()
+	req.RenoDX = "cp2077"
+	if _, err := planAndRun(t, f, req, state.Registry{}); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if !f.exists("Game/renodx-cp2077.addon64") {
+		t.Fatal("setup: the mod was never installed")
+	}
+
+	// It is recorded against the install, so the wizard can preselect it
+	// when the install is edited later.
+	reg, err := state.Load(f.StateDir)
+	if err != nil {
+		t.Fatalf("state.Load(): %v", err)
+	}
+	in, ok := reg.FindInstall(req.Game.ID, "Game/emberhollow.exe")
+	if !ok {
+		t.Fatal("no install recorded")
+	}
+	if in.RenoDX != "cp2077" {
+		t.Errorf("recorded RenoDX = %q, want cp2077", in.RenoDX)
+	}
+
+	out, err := NewUninstaller(f.StateDir).Run(UninstallRequest{
+		GameID: req.Game.ID, Exe: "Game/emberhollow.exe",
+	})
+	if err != nil {
+		t.Fatalf("uninstall: %v", err)
+	}
+	if !slices.Contains(out.Removed, "Game/renodx-cp2077.addon64") {
+		t.Errorf("Removed = %v, want the RenoDX mod", out.Removed)
+	}
+	if f.exists("Game/renodx-cp2077.addon64") {
+		t.Error("the mod is still in the game folder after uninstall")
+	}
+}

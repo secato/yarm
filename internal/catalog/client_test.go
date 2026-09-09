@@ -44,6 +44,7 @@ func newTestServer(t *testing.T) *testServer {
 	}
 	mux.HandleFunc("/EffectPackages.ini", serve("EffectPackages.ini"))
 	mux.HandleFunc("/Addons.ini", serve("Addons.ini"))
+	mux.HandleFunc("/renodx.json", serve("renodx-metadata.json"))
 	mux.HandleFunc("/tags", func(w http.ResponseWriter, r *http.Request) {
 		ts.hits.Add(1)
 		if ts.fail.Load() {
@@ -71,6 +72,7 @@ func newTestClient(t *testing.T, ts *testServer, now *time.Time) *Client {
 	c := New(ts.Client(), t.TempDir(), time.Hour, "yarm/test")
 	c.PackagesURL = ts.URL + "/EffectPackages.ini"
 	c.AddonsURL = ts.URL + "/Addons.ini"
+	c.RenoDXURL = ts.URL + "/renodx.json"
 	c.TagsURL = ts.URL + "/tags"
 	c.ReShadeURL = ts.URL + "/reshade"
 	c.Now = func() time.Time { return *now }
@@ -295,5 +297,44 @@ func TestClientStatusError(t *testing.T) {
 				t.Errorf("RateLimited() = %v, want %v", got, tt.wantRateLimit)
 			}
 		})
+	}
+}
+
+// The RenoDX catalog rides the same TTL and the same offline fallback as
+// the others: fresh once, then cached, then the stale copy when upstream
+// cannot be reached.
+func TestClientRenoDX(t *testing.T) {
+	ts := newTestServer(t)
+	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	c := newTestClient(t, ts, &now)
+
+	mods, err := c.RenoDX(context.Background())
+	if err != nil {
+		t.Fatalf("RenoDX() error = %v", err)
+	}
+	if len(mods) == 0 {
+		t.Fatal("RenoDX() returned nothing")
+	}
+	before := ts.hits.Load()
+
+	// Within the TTL, from disk.
+	if _, err := c.RenoDX(context.Background()); err != nil {
+		t.Fatalf("second RenoDX(): %v", err)
+	}
+	if got := ts.hits.Load(); got != before {
+		t.Errorf("refetched within the TTL: %d hits, want %d", got, before)
+	}
+
+	// Upstream down and the copy stale: the cached list is still better
+	// than no list, because RenoDX being unreachable must not take the
+	// step away.
+	now = now.Add(48 * time.Hour)
+	ts.fail.Store(true)
+	stale, err := c.RenoDX(context.Background())
+	if err != nil {
+		t.Fatalf("RenoDX() with the server down = %v, want the cached copy", err)
+	}
+	if len(stale) != len(mods) {
+		t.Errorf("stale copy has %d mods, want %d", len(stale), len(mods))
 	}
 }

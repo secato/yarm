@@ -503,3 +503,45 @@ func hasWarningContaining(warnings []string, sub string) bool {
 	}
 	return false
 }
+
+// A RenoDX mod lands beside the proxy DLL, exactly where an add-on does,
+// because that is exactly what it is — what differs is only the origin
+// recorded against it.
+func TestPlanRenoDX(t *testing.T) {
+	f := newFixture(t).WithReShade().WithRenoDX("cp2077", "renodx-cp2077.addon64")
+
+	req := f.Request()
+	req.RenoDX = "cp2077"
+
+	plan, err := (Planner{}).Plan(req, f.Art)
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+
+	var found *PlannedFile
+	for i := range plan.Files {
+		if plan.Files[i].Dest == "Game/renodx-cp2077.addon64" {
+			found = &plan.Files[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("the mod was not planned into the exe directory; got %v", dests(plan))
+	}
+	if got, want := found.Origin, state.RenoDXOrigin("cp2077"); got != want {
+		t.Errorf("Origin = %q, want %q", got, want)
+	}
+}
+
+// A request naming a mod whose artifact was never resolved is a bug in
+// the caller, and has to be caught before anything is written.
+func TestPlanRenoDXMissingArtifact(t *testing.T) {
+	f := newFixture(t).WithReShade()
+
+	req := f.Request()
+	req.RenoDX = "cp2077"
+
+	_, err := (Planner{}).Plan(req, f.Art)
+	if !errors.Is(err, ErrMissingArtifact) {
+		t.Fatalf("Plan() error = %v, want ErrMissingArtifact", err)
+	}
+}

@@ -77,8 +77,8 @@ func TestCompareSemver(t *testing.T) {
 		{"6.8.1", "6.8.0", 1},
 	}
 	for _, tt := range tests {
-		if got := compareSemver(tt.a, tt.b); got != tt.want {
-			t.Errorf("compareSemver(%q, %q) = %d, want %d", tt.a, tt.b, got, tt.want)
+		if got := CompareVersions(tt.a, tt.b); got != tt.want {
+			t.Errorf("CompareVersions(%q, %q) = %d, want %d", tt.a, tt.b, got, tt.want)
 		}
 	}
 }

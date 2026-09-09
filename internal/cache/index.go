@@ -30,6 +30,7 @@ const (
 	KindReShade     Kind = "reshade"
 	KindPackage     Kind = "package"
 	KindAddon       Kind = "addon"
+	KindRenoDX      Kind = "renodx"
 	KindD3DCompiler Kind = "d3dcompiler"
 	KindCatalog     Kind = "catalog"
 )
