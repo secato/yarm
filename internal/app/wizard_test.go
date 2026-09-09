@@ -1558,9 +1558,12 @@ func TestEditingSummaryHighlightsTheFocusedPane(t *testing.T) {
 	accentSeq, _, _ := strings.Cut(strings.TrimPrefix(accent, "\x1b["), "m")
 
 	body := s.View(env)
+	// The Apply button is a box of its own now, so its border line also
+	// contains "╭" — the pane tops are told apart as the one row with
+	// more than one box opening.
 	var borders []string
 	for _, line := range strings.Split(body, "\n") {
-		if strings.Contains(line, "╭") {
+		if strings.Count(line, "╭") > 1 {
 			borders = append(borders, line)
 		}
 	}
@@ -1699,13 +1702,15 @@ func TestReviewNamesWhatAnEditChanges(t *testing.T) {
 
 	s.step = stepReview
 	body := s.View(wizardEnv())
-	for _, want := range []string{"Changes", "- SweetFX by CeeJay.dk"} {
+	for _, want := range []string{"Changes", "Removing", "SweetFX by CeeJay.dk"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("review should contain %q:\n%s", want, body)
 		}
 	}
-	if strings.Contains(body, "Standard effects") && strings.Contains(body, "- Standard effects") {
-		t.Error("a package that was kept must not be listed as removed")
+	// A package that was kept is not a change at all, so it must not show
+	// up in either pane.
+	if strings.Contains(body, "Standard effects") {
+		t.Error("a package that was kept must not be listed as a change")
 	}
 }
 

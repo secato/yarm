@@ -1395,13 +1395,8 @@ func (s *WizardScreen) viewReview(b *strings.Builder, env Env, height int) {
 			diff.WriteString(env.Styles.Accent.Render(clipTail("  "+reshadeLine, env.Width)))
 			diff.WriteString("\n")
 		}
-		for _, name := range added {
-			diff.WriteString(env.Styles.Good.Render(clipTail("  + "+name, env.Width)))
-			diff.WriteString("\n")
-		}
-		for _, name := range removed {
-			diff.WriteString(env.Styles.Bad.Render(clipTail("  - "+name, env.Width)))
-			diff.WriteString("\n")
+		if len(added)+len(removed) > 0 {
+			diff.WriteString(diffPanes(added, removed, env))
 		}
 		diff.WriteString("\n")
 	}
@@ -1524,6 +1519,57 @@ func (s *WizardScreen) viewReview(b *strings.Builder, env Env, height int) {
 	// overflows would push the footer — the anti-cheat warning included —
 	// off the screen entirely.
 	b.WriteString(clipLines(page.String(), height))
+}
+
+// diffPanes lays what an edit removes and adds side by side, a colored box
+// each, rather than interleaved +/- lines that make a reviewer look twice
+// to tell which column a name belongs to. Falls back to one stacked list
+// on a terminal too narrow for two boxes, the same rule the hub's own
+// panes use.
+func diffPanes(added, removed []string, env Env) string {
+	const gutter = 2
+	const minPaneWidth = 20
+	if env.Width < 2*(minPaneWidth+gutter) {
+		var b strings.Builder
+		for _, name := range removed {
+			b.WriteString(env.Styles.Bad.Render(clipTail("  - "+name, env.Width)))
+			b.WriteString("\n")
+		}
+		for _, name := range added {
+			b.WriteString(env.Styles.Good.Render(clipTail("  + "+name, env.Width)))
+			b.WriteString("\n")
+		}
+		return b.String()
+	}
+
+	paneWidth := env.Width/2 - gutter
+	left := diffPane("Removing", removed, env.Styles.Bad, paneWidth, env)
+	right := diffPane("Adding", added, env.Styles.Good, paneWidth, env)
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, strings.Repeat(" ", gutter), right) + "\n"
+}
+
+// diffPane draws one side of diffPanes: a titled box in the side's own
+// color, one name per line, or a faint "none" when that side is empty —
+// a blank box would otherwise read as though the layout had broken. Built
+// on Styles.Panel, the same box the hub's own panes use, so a colored
+// border reads as "a pane" rather than as a one-off decoration.
+func diffPane(title string, names []string, style lipgloss.Style, width int, env Env) string {
+	inner := width - 4
+	if inner < 8 {
+		inner = 8
+	}
+	var b strings.Builder
+	b.WriteString(style.Bold(true).Render(clipTail(title, inner)))
+	if len(names) == 0 {
+		b.WriteString("\n")
+		b.WriteString(style.Render(clipTail("  none", inner)))
+	}
+	for _, name := range names {
+		b.WriteString("\n")
+		b.WriteString(style.Render(clipTail("  "+name, inner)))
+	}
+	panel := env.Styles.Panel.Width(width).BorderForeground(style.GetForeground())
+	return panel.Render(b.String())
 }
 
 // addonsForDownload returns the selected add-on ids, or none when the
@@ -1795,8 +1841,10 @@ func (s *WizardScreen) existingAddons() []string {
 	return s.existing.Addons
 }
 
-// applyLine is the action under the panes: what applying would change, or
-// that it would change nothing.
+// applyLine is the action under the panes, drawn as a full-width button
+// rather than a plain line of text: it is the one thing on this page that
+// must never be missed, since leaving the hub without noticing it is the
+// same as never applying at all.
 func (s *WizardScreen) applyLine(env Env, focused bool) string {
 	changes := s.changes()
 	text := "Apply — no changes yet; this would reinstall the same files"
@@ -1804,20 +1852,31 @@ func (s *WizardScreen) applyLine(env Env, focused bool) string {
 		text = "Apply — " + strings.Join(changes, ", ")
 	}
 
-	marker := "  "
-	if focused {
-		marker = "▸ "
+	width := env.Width - 2
+	inner := width - 4
+	if inner < 8 {
+		inner = 8
 	}
-	line := clipTail(marker+text, env.Width)
+	label := clipTail(text, inner)
+	// Centered, so the label reads as a button's caption rather than as
+	// text that happens to sit inside a border.
+	if pad := (inner - lipgloss.Width(label)) / 2; pad > 0 {
+		label = strings.Repeat(" ", pad) + label
+	}
+
+	button := env.Styles.Panel.Width(width)
 	switch {
 	case focused:
-		line = env.Styles.Selected.Render(line)
+		button = button.BorderForeground(env.Styles.Accent.GetForeground())
+		label = env.Styles.Selected.Bold(true).Render(label)
 	case len(changes) == 0:
-		line = env.Styles.Faint.Render(line)
+		button = button.BorderForeground(env.Styles.Faint.GetForeground())
+		label = env.Styles.Faint.Render(label)
 	default:
-		line = env.Styles.Accent.Render(line)
+		button = button.BorderForeground(env.Styles.Accent.GetForeground())
+		label = env.Styles.Accent.Bold(true).Render(label)
 	}
-	return line + "\n"
+	return button.Render(label) + "\n"
 }
 
 // viewHubCompact is the narrow fallback: one line per section, the same
