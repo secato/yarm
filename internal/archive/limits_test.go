@@ -97,6 +97,48 @@ func TestBudgetStopsTotalExpansion(t *testing.T) {
 	t.Logf("stopped after %d/%d entries, %d bytes on disk", extracted, entries, written)
 }
 
+// A refused entry must leave nothing at its destination.
+//
+// This earns its own test even though it can only fail on Windows:
+// unlinking a file that still has an open handle works on Unix and is
+// refused on Windows, so a close-in-a-defer passes locally while leaving
+// every rejected partial file on disk — on the platform yarm exists for.
+// The Windows CI job is what enforces this one.
+func TestRefusedEntryLeavesNothingBehind(t *testing.T) {
+	const entrySize = 64 * 1024
+	all := bombZip(t, 4, entrySize)
+	dst := t.TempDir()
+	// Room for exactly one entry, so the second is refused.
+	budget := NewBudget(Limits{
+		MaxEntrySize:  entrySize * 2,
+		MaxTotalSize:  entrySize,
+		MaxEntryCount: 100,
+	})
+
+	var refused string
+	for i, e := range all {
+		if e.IsDir() {
+			continue
+		}
+		out := filepath.Join(dst, fmt.Sprintf("out-%03d.bin", i))
+		err := budget.ExtractEntry(e, out)
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, ErrTooLarge) {
+			t.Fatalf("ExtractEntry(%s): %v", e.Name(), err)
+		}
+		refused = out
+		break
+	}
+	if refused == "" {
+		t.Fatal("nothing was refused; the budget did not bite")
+	}
+	if _, err := os.Stat(refused); !os.IsNotExist(err) {
+		t.Errorf("%s survived being refused (stat error = %v)", filepath.Base(refused), err)
+	}
+}
+
 // Precheck should refuse an obvious bomb without extracting anything.
 func TestPrecheckRejectsBombs(t *testing.T) {
 	all := bombZip(t, 20, 256*1024)

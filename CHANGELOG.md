@@ -44,6 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- On Windows, a rejected archive entry left its partial file on disk. The
+  extractor removed the file while its own handle was still open, which
+  Unix permits and Windows refuses — so the truncated artifact the entry
+  budget exists to refuse survived, silently, on the platform yarm is
+  mainly for. The handle is closed before the unlink now.
+
 - The status bar is clipped to the window instead of wrapping. On screens
   with many key bindings it ran past the terminal width, and the extra
   rows made the frame taller than the window — which scrolled the header

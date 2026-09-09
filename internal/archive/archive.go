@@ -210,10 +210,22 @@ func (b *Budget) ExtractEntry(e Entry, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = f.Close() }()
 
 	written, err := io.Copy(f, io.LimitReader(rc, allowed+1))
+	if err == nil {
+		err = f.Sync()
+	}
+	// The handle is closed here, before any os.Remove below, and not in a
+	// defer. Windows refuses to unlink a file that still has an open
+	// handle, so with a deferred close every rejected partial file would
+	// survive on disk — precisely the truncated artifact this function
+	// exists not to hand on. Unix hides the mistake, because unlinking an
+	// open file works there; the Windows CI run is what caught it.
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
 	if err != nil {
+		_ = os.Remove(dst)
 		return err
 	}
 
@@ -229,7 +241,7 @@ func (b *Budget) ExtractEntry(e Entry, dst string) error {
 	}
 
 	b.used += written
-	return f.Sync()
+	return nil
 }
 
 // FindDir returns the archive-relative path of the first directory named
