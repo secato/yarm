@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -33,6 +34,7 @@ const (
 	stepAPI
 	stepShaders
 	stepAddons
+	stepRenoDX
 	stepReview
 	// stepHub is the edit-mode landing page: every section with what is
 	// currently installed in it, each openable on its own. Declared after
@@ -42,7 +44,7 @@ const (
 )
 
 // wizardSteps is every step in order, for the breadcrumb.
-var wizardSteps = []wizardStep{stepReShade, stepAPI, stepShaders, stepAddons, stepReview}
+var wizardSteps = []wizardStep{stepReShade, stepAPI, stepShaders, stepAddons, stepRenoDX, stepReview}
 
 // label names a step for the breadcrumb.
 func (s wizardStep) label() string {
@@ -55,6 +57,8 @@ func (s wizardStep) label() string {
 		return "Shaders"
 	case stepAddons:
 		return "Add-ons"
+	case stepRenoDX:
+		return "RenoDX"
 	case stepReview:
 		return "Review"
 	case stepHub:
@@ -179,6 +183,17 @@ type WizardScreen struct {
 	addons   multiSelect
 	showAll  bool
 
+	// Step: RenoDX. One mod at most, searched rather than shortlisted:
+	// there are ~200 of them and which one you want is decided by which
+	// game you are installing into, not by taste.
+	renodx          multiSelect
+	renodxFilter    textinput.Model
+	renodxFiltering bool
+	// renodxChoice is the answer. Deliberately not read back from
+	// renodx.selectedIDs(): that walks the *visible* rows, so typing a
+	// search that hid the chosen mod would silently unanswer the step.
+	renodxChoice string
+
 	// Step: review — an options checklist (currently just "overwrite"),
 	// navigated the same way shaders/add-ons are.
 	options multiSelect
@@ -210,8 +225,17 @@ func NewWizardScreen(entry GameEntry, exe Executable, deps Deps) *WizardScreen {
 		step = stepHub
 	}
 
+	// bubbles/textinput sizes its placeholder buffer from Width(), so a
+	// field left at the zero value renders only the placeholder's first
+	// character. Update's WindowSizeMsg arm re-sizes it to the terminal.
+	filter := textinput.New()
+	filter.Placeholder = "search RenoDX mods"
+	filter.Prompt = "/"
+	filter.SetWidth(30)
+
 	return &WizardScreen{
 		keys:         DefaultKeyMap(),
+		renodxFilter: filter,
 		step:         step,
 		editing:      existing != nil,
 		entry:        entry,
@@ -296,6 +320,9 @@ func (s *WizardScreen) KeyBindings() []key.Binding {
 		return []key.Binding{s.keys.Up, s.keys.Down, wizardPaneLeft, wizardPaneRight, s.keys.Enter, s.keys.Back}
 	case stepShaders, stepAddons:
 		return []key.Binding{s.keys.Up, s.keys.Down, s.keys.Toggle, wizardShowAll, s.keys.Enter, s.keys.Back}
+	case stepRenoDX:
+		// No "show all": there is no shortlist here, only the search.
+		return []key.Binding{s.keys.Up, s.keys.Down, s.keys.Toggle, s.keys.Filter, s.keys.Enter, s.keys.Back}
 	case stepReview:
 		return []key.Binding{
 			s.keys.Up, s.keys.Down, s.keys.Toggle,
@@ -336,13 +363,30 @@ func (s *WizardScreen) afterStep(from wizardStep) wizardStep {
 	return s.nextStep(from)
 }
 
-// hubSections lists the summary's rows, in order. Add-ons only appear for
-// a build that can load them, and Review is last because it is the one row
-// that leaves the summary rather than returning to it.
+// stepEnabled reports whether a step applies to the answers so far.
+//
+// The two add-on steps are the only conditional ones, and the condition
+// used to be spelled out at five separate call sites — one of them
+// arithmetic that walked exactly one step. Two conditional steps make
+// that wrong, so they all ask here now.
+func (s *WizardScreen) stepEnabled(step wizardStep) bool {
+	switch step {
+	case stepAddons, stepRenoDX:
+		return s.flavor.Addon()
+	default:
+		return true
+	}
+}
+
+// hubSections lists the summary's rows, in order. The add-on steps only
+// appear for a build that can load them, and Review is last because it is
+// the one row that leaves the summary rather than returning to it.
 func (s *WizardScreen) hubSections() []wizardStep {
-	rows := []wizardStep{stepReShade, stepAPI, stepShaders}
-	if s.flavor.Addon() {
-		rows = append(rows, stepAddons)
+	rows := make([]wizardStep, 0, len(wizardSteps))
+	for _, st := range wizardSteps {
+		if st != stepReview && s.stepEnabled(st) {
+			rows = append(rows, st)
+		}
 	}
 	return append(rows, stepReview)
 }
@@ -351,24 +395,28 @@ func (s *WizardScreen) hubSections() []wizardStep {
 // changed, which is any time the build changed.
 func (s *WizardScreen) syncHub() { s.hubCursor.setCount(len(s.hubSections())) }
 
-// prevStep steps backward, skipping Add-ons when the build cannot load
-// them.
+// prevStep steps backward over any step the current answers skip.
+//
+// A loop rather than one decrement with a special case: there are two
+// skippable steps and they are adjacent, so a single step back can have
+// to cross both.
 func (s *WizardScreen) prevStep(from wizardStep) wizardStep {
-	prev := from - 1
-	if prev == stepAddons && !s.flavor.Addon() {
-		prev--
+	for prev := from - 1; prev > stepReShade; prev-- {
+		if s.stepEnabled(prev) {
+			return prev
+		}
 	}
-	return prev
+	return stepReShade
 }
 
-// nextStep steps forward, skipping Add-ons when the build cannot load them
-// ("skipped when flavor = normal").
+// nextStep steps forward over any step the current answers skip.
 func (s *WizardScreen) nextStep(from wizardStep) wizardStep {
-	next := from + 1
-	if next == stepAddons && !s.flavor.Addon() {
-		next++
+	for next := from + 1; next < stepReview; next++ {
+		if s.stepEnabled(next) {
+			return next
+		}
 	}
-	return next
+	return stepReview
 }
 
 // folder is the directory the install lands in — what the user actually
@@ -383,6 +431,17 @@ func (s *WizardScreen) Update(msg tea.Msg, env Env) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
 	case wizardDataLoadedMsg:
 		return s, s.applyWizardData(msg)
+
+	case tea.WindowSizeMsg:
+		// Set here rather than in View so rendering stays a pure function
+		// of state. Model.sized hands every pushed screen the current
+		// size, so this arrives before the step can be reached.
+		w := msg.Width - 6
+		if w < 10 {
+			w = 10
+		}
+		s.renodxFilter.SetWidth(w)
+		return s, nil
 
 	case tea.KeyPressMsg:
 		return s.handleKey(msg, env)
@@ -406,10 +465,14 @@ func (s *WizardScreen) applyWizardData(msg wizardDataLoadedMsg) tea.Cmd {
 
 	s.packages = newMultiSelect(s.data.PackagesWithCustom(s.deps.CacheStatus))
 	s.addons = newMultiSelect(s.data.AddonsWithCustom(s.deps.CacheStatus))
+	// Built here, not left to refreshLists: setItems replaces the rows
+	// but never creates the selection map, and chooseOnly writes to it.
+	s.renodx = newMultiSelect(nil)
 	versionIndex := s.indexOfLatest()
 	if s.existing != nil {
 		s.preselectExistingIDs(s.packages, s.existing.Packages)
 		s.preselectExistingIDs(s.addons, s.existing.Addons)
+		s.renodxChoice = s.existing.RenoDX
 		versionIndex = s.indexOfVersion(s.existing.ReShade.Version)
 	} else {
 		s.preselectDefaultPackages()
@@ -466,6 +529,8 @@ func (s *WizardScreen) refreshLists() {
 	sel := s.selection()
 	s.packages.setItems(curate(s.annotate(s.fullPackages(), sel), curatedPackages, s.showAll, s.packages.selected))
 	s.addons.setItems(curate(s.annotate(s.fullAddons(), sel), curatedAddons, s.showAll, s.addons.selected))
+	s.renodx.setItems(filterRenoDX(s.renodxRows(), s.renodxFilter.Value()))
+	s.renodx.chooseOnly(s.renodxChoice)
 }
 
 // selection is everything checked across both steps, which is what a
@@ -553,7 +618,7 @@ func (s *WizardScreen) itemNames() map[string]string {
 func (s *WizardScreen) unmet() []string {
 	sel := s.selection()
 	ids := append(s.packages.selectedIDs(), addonsForDownload(s.flavor, s.addons)...)
-	return unmetRequirements(ids, s.itemNames(), sel)
+	return append(unmetRequirements(ids, s.itemNames(), sel), s.renodxUnmet()...)
 }
 
 func (s *WizardScreen) fullPackages() []selectItem {
@@ -561,7 +626,18 @@ func (s *WizardScreen) fullPackages() []selectItem {
 }
 
 func (s *WizardScreen) fullAddons() []selectItem {
-	return s.data.AddonsWithCustom(s.deps.CacheStatus)
+	items := s.data.AddonsWithCustom(s.deps.CacheStatus)
+	// RenoDX is in the catalog with no download URL, so it renders as
+	// manual-only — but the wizard does install it, one step later.
+	// Retargeted here rather than in AddonsWithCustom, which the
+	// resources browser shares and where "manual install only" is still
+	// the truth.
+	for i := range items {
+		if items[i].ID == renodxCatalogAddonID {
+			items[i].DisabledNote = "installed on the RenoDX step"
+		}
+	}
+	return items
 }
 
 // showAllHint is the footer's half of the shortlist: a list that hides
@@ -688,6 +764,8 @@ func (s *WizardScreen) handleKey(msg tea.KeyPressMsg, env Env) (Screen, tea.Cmd)
 		return s.handleMultiSelectKey(msg, &s.packages, stepShaders)
 	case stepAddons:
 		return s.handleMultiSelectKey(msg, &s.addons, stepAddons)
+	case stepRenoDX:
+		return s.handleRenoDXKey(msg)
 	case stepReview:
 		return s.handleReviewKey(msg)
 	}
@@ -825,6 +903,7 @@ func (s *WizardScreen) buildRequest() (install.Request, bool) {
 		// so a stale selection here would silently block the install
 		// rather than merely not installing an add-on.
 		Addons:    addonsForDownload(s.flavor, s.addons),
+		RenoDX:    renodxForDownload(s.flavor, s.renodxChoice),
 		Overwrite: s.overwrite(),
 		NoBackup:  !s.backup(),
 		TargetOS:  s.targetOS,
@@ -839,6 +918,7 @@ func (s *WizardScreen) missing() []string {
 	}
 	return describeMissing(s.deps.CacheStatus, version.Version, s.flavor.Addon(),
 		s.packages.selectedIDs(), addonsForDownload(s.flavor, s.addons),
+		renodxForDownload(s.flavor, s.renodxChoice),
 		s.exe.Arch, artifacts.NeedsD3DCompiler(s.targetOS))
 }
 
@@ -874,6 +954,8 @@ func (s *WizardScreen) View(env Env) string {
 		writeSelectList(&b, env, s.packages, body)
 	case stepAddons:
 		writeSelectList(&b, env, s.addons, body)
+	case stepRenoDX:
+		s.viewRenoDX(&b, env, body)
 	case stepReview:
 		s.viewReview(&b, env, body)
 	}
@@ -919,7 +1001,7 @@ func (s *WizardScreen) breadcrumb(env Env) string {
 	for _, st := range wizardSteps {
 		label := fmt.Sprintf("%d %s", s.stepNumber(st), st.label())
 		switch {
-		case st == stepAddons && !s.flavor.Addon():
+		case !s.stepEnabled(st):
 			parts = append(parts, env.Styles.Faint.Render(label+" (skipped)"))
 		case st == s.step:
 			parts = append(parts, env.Styles.Accent.Render(label))
@@ -960,8 +1042,11 @@ func (s *WizardScreen) decided(env Env) string {
 	if s.step > stepShaders {
 		add(countSummary(s.packages, "shader"))
 	}
-	if s.step > stepAddons && s.flavor.Addon() {
+	if s.step > stepAddons && s.stepEnabled(stepAddons) {
 		add(countSummary(s.addons, "add-on"))
+	}
+	if s.step > stepRenoDX && s.stepEnabled(stepRenoDX) {
+		add(s.renodxSummary())
 	}
 	if len(parts) == 0 {
 		return ""
@@ -1019,6 +1104,8 @@ func (s *WizardScreen) viewFooter(env Env) string {
 		hint = "↑↓ move"
 	case stepShaders, stepAddons:
 		hint = "↑↓ move · space toggles · " + s.showAllHint()
+	case stepRenoDX:
+		hint = "↑↓ move · space chooses · / search"
 	case stepReview:
 		action = "enter " + s.verb()
 		hint = "↑↓ move · space toggles"
@@ -1247,12 +1334,14 @@ func writeSelectList(b *strings.Builder, env Env, m multiSelect, height int) {
 		note, noteStyle := "", env.Styles.Faint
 		switch {
 		case it.Disabled:
-			// A manual-only add-on says both things: that yarm cannot
-			// install it, which is why the row is greyed, and where to get
-			// it by hand when the catalog knows.
-			note = "manual install only"
-			if it.DisabledNote != "" {
-				note += ": " + it.DisabledNote
+			// The row is greyed because yarm cannot install it; the note
+			// says why, and is written by whoever built the row. There is
+			// more than one reason now — a manual-only add-on, a RenoDX
+			// mod with no build for this architecture — so the renderer
+			// does not get to assume which.
+			note = it.DisabledNote
+			if note == "" {
+				note = "cannot be installed"
 			}
 		case it.Note != "":
 			note = it.Note
@@ -1620,6 +1709,9 @@ func (s *WizardScreen) hubLines(step wizardStep, env Env, width int) []string {
 	case stepAddons:
 		lines := s.hubSelectionLines(s.addons, env, "no add-ons selected", width)
 		return append(lines, s.hubOrphanLines(s.existingAddons(), s.addons, env, width)...)
+
+	case stepRenoDX:
+		return s.hubRenoDXLines(env, width)
 	}
 	return nil
 }
@@ -1753,6 +1845,8 @@ func (s *WizardScreen) sectionChanged(step wizardStep) bool {
 		return countDiff(s.existing.Packages, s.packages.selectedIDs()) != ""
 	case stepAddons:
 		return countDiff(s.existing.Addons, addonsForDownload(s.flavor, s.addons)) != ""
+	case stepRenoDX:
+		return renodxForDownload(s.flavor, s.renodxChoice) != s.existing.RenoDX
 	}
 	return false
 }
@@ -1769,6 +1863,8 @@ func (s *WizardScreen) hubValue(step wizardStep, changes []string) string {
 		return namesOrCount(s.packages)
 	case stepAddons:
 		return namesOrCount(s.addons)
+	case stepRenoDX:
+		return s.renodxSummary()
 	case stepReview:
 		if len(changes) == 0 {
 			return "no changes — reinstalls the same files"

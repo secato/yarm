@@ -158,6 +158,40 @@ func sampleWizardData() WizardData {
 			},
 			{ID: "renodx-by-shortfuse", Name: "RenoDX by ShortFuse"}, // manual-only: no URLs at all
 		},
+		// One mod matching sampleGameEntry's steam:700110, one 32-bit
+		// only, one beta, and one that yarm cannot install at all.
+		RenoDX: []catalog.RenoMod{
+			{
+				ID: "emberhollow", Title: "Ember Hollow", Status: "stable",
+				SteamAppID: 700110, Maintainers: []string{"Ritsu"},
+				Artifacts: []catalog.RenoArtifact{{
+					Name: "renodx-emberhollow.addon64", Arch: game.ArchX64, Size: 2 << 20,
+					URL: catalog.RenoDXAssetBase + "renodx-emberhollow.addon64",
+				}},
+			},
+			{
+				ID: "oldgame", Title: "Old Game", Status: "stable", SteamAppID: 4242,
+				Artifacts: []catalog.RenoArtifact{{
+					Name: "renodx-oldgame.addon32", Arch: game.ArchX86, Size: 1 << 20,
+					URL: catalog.RenoDXAssetBase + "renodx-oldgame.addon32",
+				}},
+			},
+			{
+				ID: "wobbly", Title: "Wobbly Life", Status: "beta", SteamAppID: 5150,
+				Artifacts: []catalog.RenoArtifact{{
+					Name: "renodx-wobbly.addon64", Arch: game.ArchX64, Size: 1 << 20,
+					URL: catalog.RenoDXAssetBase + "renodx-wobbly.addon64",
+				}},
+			},
+			{
+				ID: "vulkangame", Title: "Vulkan Game", Status: "stable", API: "vulkan",
+				SteamAppID: 6060,
+				Artifacts: []catalog.RenoArtifact{{
+					Name: "renodx-vulkangame.addon64", Arch: game.ArchX64, Size: 1 << 20,
+					URL: catalog.RenoDXAssetBase + "renodx-vulkangame.addon64",
+				}},
+			},
+		},
 	}
 }
 
@@ -167,6 +201,7 @@ type fakeCacheStatus struct {
 	reshade     map[string]bool
 	packages    map[string]bool
 	addons      map[string]bool
+	renodx      map[string]bool
 	d3dcompiler bool
 }
 
@@ -179,6 +214,7 @@ func (f fakeCacheStatus) HasReShade(version string, addon bool) bool {
 }
 func (f fakeCacheStatus) HasPackage(id string) bool     { return f.packages[id] }
 func (f fakeCacheStatus) HasAddon(id string) bool       { return f.addons[id] }
+func (f fakeCacheStatus) HasRenoDX(id string) bool      { return f.renodx[id] }
 func (f fakeCacheStatus) HasD3DCompiler(game.Arch) bool { return f.d3dcompiler }
 
 // fakeUninstaller lets tests control an uninstall's outcome without

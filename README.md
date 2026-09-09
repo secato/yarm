@@ -50,6 +50,12 @@ shortlist — SweetFX, iMMERSE, qUINT, METEOR, LumeniteFX and the rest — inste
 of a wall of a hundred packages. One key widens it to the full catalog when you
 want something specific.
 
+**Installs RenoDX for you.** [RenoDX](https://github.com/clshortfuse/renodx)
+rewrites a game's shaders to upgrade its HDR, and has mods for around 200 games.
+yarm knows which one belongs to the game you picked and offers it by name — the
+rest are a keystroke of search away. It is one file, and yarm removes it with
+everything else when you uninstall.
+
 **Handles dependencies for you.** Some add-ons need a particular shader to work
 at all. Pick the AutoHDR add-on and YARM selects the tone-mapping shader it
 needs, and tells you why it did.

@@ -188,6 +188,16 @@ func (m multiSelect) isSelected(i int) bool {
 	return m.selected[m.items[i].ID]
 }
 
+// chooseOnly turns on exactly one row and clears the rest — a radio over
+// the same machinery the checkbox lists use, for a step where two answers
+// is never what anyone means. An empty id selects nothing.
+func (m *multiSelect) chooseOnly(id string) {
+	clear(m.selected)
+	if id != "" {
+		m.selected[id] = true
+	}
+}
+
 // selectedIDs returns every checked item's ID, in list order, excluding
 // header rows.
 func (m multiSelect) selectedIDs() []string {

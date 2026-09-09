@@ -245,6 +245,13 @@ func TestWizardFullForwardFlowBuildsRequest(t *testing.T) {
 	}
 	s = pressSpecial(t, s, ' ') // the cursor starts on the installable add-on
 	s = pressSpecial(t, s, tea.KeyEnter)
+
+	// RenoDX comes between add-ons and review on the add-on build. The
+	// cursor starts on "No RenoDX mod", so enter alone leaves it unchosen.
+	if s.step != stepRenoDX {
+		t.Fatalf("step = %v, want stepRenoDX", s.step)
+	}
+	s = pressSpecial(t, s, tea.KeyEnter)
 	if s.step != stepReview {
 		t.Fatalf("step = %v, want stepReview", s.step)
 	}
@@ -633,6 +640,7 @@ func TestDescribeMissing(t *testing.T) {
 	got := describeMissing(cache, "6.8.0", true,
 		[]string{"standard-effects", "sweetfx-by-ceejay-dk"},
 		[]string{"swap-chain-override-by-crosire"},
+		"",
 		game.ArchX64, true)
 
 	want := []string{
@@ -655,7 +663,7 @@ func TestDescribeMissingNothingMissing(t *testing.T) {
 		reshade:     map[string]bool{"6.8.0:normal": true},
 		d3dcompiler: true,
 	}
-	got := describeMissing(cache, "6.8.0", false, nil, nil, game.ArchX64, true)
+	got := describeMissing(cache, "6.8.0", false, nil, nil, "", game.ArchX64, true)
 	if len(got) != 0 {
 		t.Errorf("describeMissing() = %v, want none (everything already cached)", got)
 	}
@@ -664,7 +672,7 @@ func TestDescribeMissingNothingMissing(t *testing.T) {
 // A nil CacheStatus (no cache wired up at all) must report everything as
 // missing rather than panicking or, worse, claiming nothing is needed.
 func TestDescribeMissingNilCache(t *testing.T) {
-	got := describeMissing(nil, "6.8.0", true, []string{"standard-effects"}, nil, game.ArchX64, true)
+	got := describeMissing(nil, "6.8.0", true, []string{"standard-effects"}, nil, "", game.ArchX64, true)
 	want := []string{"ReShade 6.8.0 (addon)", "package standard-effects", "d3dcompiler_47.dll (~40 MB, once)"}
 	if len(got) != len(want) {
 		t.Fatalf("describeMissing(nil cache) = %v, want %v", got, want)
@@ -743,8 +751,8 @@ func TestWizardFitsNarrowTerminals(t *testing.T) {
 	for _, size := range sizes {
 		for _, step := range wizardSteps {
 			for _, normal := range []bool{false, true} {
-				if normal && step == stepAddons {
-					continue // skipped for the normal build
+				if normal && (step == stepAddons || step == stepRenoDX) {
+					continue // both add-on steps are skipped for the normal build
 				}
 				s := loadWizard(t, sampleGameEntry(), 0, fakeDeps())
 				if normal {

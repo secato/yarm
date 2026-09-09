@@ -14,12 +14,17 @@ type WizardData struct {
 	Versions      []catalog.Version
 	Packages      []catalog.Package
 	Addons        []catalog.Addon
+	RenoDX        []catalog.RenoMod
 	CustomShaders []catalog.Custom
 	CustomAddons  []catalog.Custom
 }
 
 // empty reports whether a load produced nothing at all — the state
 // LoadWizardData treats as a failure.
+//
+// RenoDX is deliberately not counted. It comes from a different project
+// on a different host, and its being unreachable must not stop the wizard
+// from installing ReShade.
 func (d WizardData) empty() bool {
 	return len(d.Versions) == 0 && len(d.Packages) == 0 && len(d.Addons) == 0
 }
@@ -55,6 +60,9 @@ func (l CatalogWizardData) LoadWizardData(ctx context.Context) (WizardData, erro
 	addons, aErr := l.Client.Addons(ctx)
 	data.Addons = addons
 
+	mods, rErr := l.Client.RenoDX(ctx)
+	data.RenoDX = mods
+
 	custom, cErr := catalog.ScanCustom(l.CustomDir)
 	for _, c := range custom {
 		switch c.Kind {
@@ -66,7 +74,7 @@ func (l CatalogWizardData) LoadWizardData(ctx context.Context) (WizardData, erro
 	}
 
 	if data.empty() {
-		return data, firstErr(vErr, pErr, aErr, cErr)
+		return data, firstErr(vErr, pErr, aErr, rErr, cErr)
 	}
 	return data, nil
 }
@@ -118,7 +126,7 @@ func (d WizardData) AddonsWithCustom(cache CacheStatus) []selectItem {
 			Name:         a.Name,
 			Description:  a.Description,
 			Disabled:     !a.Installable(),
-			DisabledNote: a.RepositoryURL,
+			DisabledNote: manualNote(a.RepositoryURL),
 			Cached:       cache != nil && cache.HasAddon(a.ID),
 		})
 	}
@@ -133,6 +141,15 @@ func (d WizardData) AddonsWithCustom(cache CacheStatus) []selectItem {
 	return items
 }
 
+// manualNote is the note on an add-on yarm cannot install: that it is
+// manual, and where to get it by hand when the catalog says where.
+func manualNote(repoURL string) string {
+	if repoURL == "" {
+		return "manual install only"
+	}
+	return "manual install only: " + repoURL
+}
+
 // CacheStatus answers whether an artifact is already cached, so the
 // wizard can show a badge without triggering a download. Implemented by
 // *cache.Cache.
@@ -140,12 +157,13 @@ type CacheStatus interface {
 	HasReShade(version string, addon bool) bool
 	HasPackage(id string) bool
 	HasAddon(id string) bool
+	HasRenoDX(id string) bool
 	HasD3DCompiler(arch game.Arch) bool
 }
 
 // describeMissing names what an install still needs to download, for the
 // review step's warning list.
-func describeMissing(cache CacheStatus, version string, addon bool, packages, addons []string, arch game.Arch, needsD3D bool) []string {
+func describeMissing(cache CacheStatus, version string, addon bool, packages, addons []string, renodx string, arch game.Arch, needsD3D bool) []string {
 	var missing []string
 	if cache == nil || !cache.HasReShade(version, addon) {
 		flavor := "normal"
@@ -163,6 +181,11 @@ func describeMissing(cache CacheStatus, version string, addon bool, packages, ad
 		if cache == nil || !cache.HasAddon(id) {
 			missing = append(missing, "add-on "+id)
 		}
+	}
+	// Named with its size: a RenoDX mod is a couple of megabytes, which
+	// is worth saying when the rest of the list is shader packs.
+	if renodx != "" && (cache == nil || !cache.HasRenoDX(renodx)) {
+		missing = append(missing, "RenoDX "+renodx+" (~2.5 MB)")
 	}
 	if needsD3D && (cache == nil || !cache.HasD3DCompiler(arch)) {
 		missing = append(missing, "d3dcompiler_47.dll (~40 MB, once)")

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/secato/yarm/internal/artifacts"
 	"github.com/secato/yarm/internal/cache"
@@ -154,6 +155,28 @@ func (r *RealInstaller) resolve(ctx context.Context, req *install.Request, send 
 			}
 			art.Addons[id] = dir
 		}
+	}
+
+	if req.RenoDX != "" {
+		mods, err := r.Catalog.RenoDX(ctx)
+		if err != nil {
+			return install.Artifacts{}, err
+		}
+		i := slices.IndexFunc(mods, func(m catalog.RenoMod) bool { return m.ID == req.RenoDX })
+		if i < 0 {
+			return install.Artifacts{}, fmt.Errorf("unknown RenoDX mod %q", req.RenoDX)
+		}
+		mod := mods[i]
+		if _, ok := mod.ArtifactFor(req.Exe.Arch); !ok {
+			return install.Artifacts{}, fmt.Errorf(
+				"RenoDX %s has no %s build for this game", mod.Title, req.Exe.Arch)
+		}
+		send(ProgressUpdate{Label: "Downloading RenoDX " + mod.Title})
+		dir, err := r.Cache.EnsureRenoDX(ctx, mod, req.Exe.Arch, progress("RenoDX "+mod.Title))
+		if err != nil {
+			return install.Artifacts{}, fmt.Errorf("renodx %s: %w", mod.ID, err)
+		}
+		art.RenoDX = dir
 	}
 
 	if len(req.Custom) > 0 {

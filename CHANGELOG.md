@@ -26,6 +26,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **RenoDX.** The wizard has a step for it whenever the add-on build is
+  chosen: it reads RenoDX's own release index, matches the mod to the game
+  you are installing into by Steam app id, and offers that one first.
+  Roughly 200 more are behind `/` search. One mod at a time — two would
+  hook the same swap chain and replace the same tone mapping, and which
+  won would be undefined.
+
+  RenoDX needs no core, runtime or framework: a mod is a single
+  self-contained add-on file, which is why it installs through the same
+  path as any other add-on and comes back out the same way. Rows say when
+  a mod has no build for the game's architecture, when it is flagged beta,
+  and when yarm cannot install it at all; the review page says when the
+  chosen ReShade is older than the 6.8.0 RenoDX requires, or when AutoHDR
+  is selected alongside it and would fight it for the tone mapping.
+
+  Previously RenoDX appeared only in the add-ons list as "manual install
+  only", because crosire's catalog lists it with no download URL.
+
 - Two more effect packages on the wizard's shortlist: **reshade-shaders by
   Barbatos** (XeGTAO, NeoSSAO, DLAA-T — screen-space AO, GI and reflections
   plus modern AA, where most of the shortlist is color grading) and
