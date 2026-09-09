@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/secato/yarm/internal/game"
 	"github.com/secato/yarm/internal/install"
@@ -662,5 +663,21 @@ func TestTooSmallTerminalShowsHonestMessage(t *testing.T) {
 	m = drive(t, m, tea.WindowSizeMsg{Width: termWidth, Height: termHeight})
 	if strings.Contains(m.render(), "terminal too small") {
 		t.Error("growing back above the floor should stop showing the too-small message")
+	}
+}
+
+// The status bar is one row. The resources screen has enough bindings to
+// overflow a normal terminal, and a wrapped status line makes the whole
+// frame taller than the window — which scrolls the header out of view.
+func TestStatusLineNeverWraps(t *testing.T) {
+	m := New(NewResourcesScreen(Deps{}))
+	for _, width := range []int{40, 60, 80, 100, 160} {
+		next, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
+		got := next.(Model).render()
+		for _, line := range strings.Split(got, "\n") {
+			if w := lipgloss.Width(line); w > width {
+				t.Errorf("at width %d a line is %d columns wide: %q", width, w, line)
+			}
+		}
 	}
 }

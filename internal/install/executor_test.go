@@ -88,6 +88,16 @@ func TestRunFreshInstall(t *testing.T) {
 	if len(res.Written) != 5 {
 		t.Errorf("Result.Written has %d entries, want 5", len(res.Written))
 	}
+	// The byte total is what the result screen reports back to the user,
+	// so it has to be the size of the files actually on disk rather than
+	// a count or an estimate.
+	var onDisk int64
+	for _, fl := range in.Files {
+		onDisk += fl.Size
+	}
+	if res.Bytes != onDisk {
+		t.Errorf("Result.Bytes = %d, want %d (the manifest's own sizes)", res.Bytes, onDisk)
+	}
 }
 
 func TestRunWritesDefaultINI(t *testing.T) {

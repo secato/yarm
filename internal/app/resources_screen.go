@@ -381,6 +381,7 @@ func (s *ResourcesScreen) Title() string {
 var (
 	resourceDownloadBinding = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "download"))
 	resourceDeleteBinding   = key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "delete"))
+	resourceCleanBinding    = key.NewBinding(key.WithKeys("X"), key.WithHelp("X", "clear cache"))
 	resourceRefreshBinding  = key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh package"))
 	resourcePaneLeft        = key.NewBinding(key.WithKeys("left"), key.WithHelp("←", "prev pane"))
 	resourcePaneRight       = key.NewBinding(key.WithKeys("right"), key.WithHelp("→", "next pane"))
@@ -391,8 +392,8 @@ var (
 func (s *ResourcesScreen) KeyBindings() []key.Binding {
 	return []key.Binding{
 		s.keys.Up, s.keys.Down, resourcePaneLeft, resourcePaneRight,
-		resourceDownloadBinding, resourceDeleteBinding, resourceRefreshBinding,
-		resourceShowAllBinding, s.keys.Back,
+		resourceDownloadBinding, resourceDeleteBinding, resourceCleanBinding,
+		resourceRefreshBinding, resourceShowAllBinding, s.keys.Back,
 	}
 }
 
@@ -442,6 +443,8 @@ func (s *ResourcesScreen) handleKey(msg tea.KeyPressMsg, env Env) (Screen, tea.C
 		return s.startDownload()
 	case key.Matches(msg, resourceDeleteBinding):
 		return s.confirmDelete()
+	case key.Matches(msg, resourceCleanBinding):
+		return s.confirmClean()
 	case key.Matches(msg, resourceRefreshBinding):
 		return s.startRefresh()
 	case key.Matches(msg, resourceShowAllBinding):
@@ -590,6 +593,61 @@ func (s *ResourcesScreen) confirmDelete() (Screen, tea.Cmd) {
 	}
 
 	return s, Confirm("Delete "+row.Name+"?", detail, action)
+}
+
+// confirmClean empties the download cache. Deliberately a separate
+// binding from x on a single row rather than a "delete all" mode: this is
+// the reclaim-the-disk action, it is the one thing on this screen that
+// touches rows the cursor is nowhere near, and undoing it means
+// downloading everything again.
+func (s *ResourcesScreen) confirmClean() (Screen, tea.Cmd) {
+	items, size, inUse := s.cachedTotals()
+	if items == 0 {
+		return s, SetStatus("nothing cached to clear")
+	}
+	deps := s.deps
+
+	// What the user is actually risking is stated first, because the rest
+	// of it is reassurance and reassurance read first is not read at all.
+	detail := ""
+	if inUse > 0 {
+		detail = fmt.Sprintf(
+			"⚠ %d of them back a recorded install — those installs keep working, but updating or "+
+				"reinstalling from them means downloading again. ", inUse)
+	}
+	detail += "Frees about " + humanSize(size) + ". Games keep every file yarm copied into them; " +
+		"only the downloads go, and they come back the next time something needs them. " +
+		"Custom content lives outside the cache and is untouched."
+
+	return s, Confirm(
+		fmt.Sprintf("Clear the download cache — %d item(s), %s?", items, humanSize(size)),
+		detail,
+		func() tea.Msg {
+			if _, err := deps.Cache.Clean(); err != nil {
+				return resourceActionMsg{err: err}
+			}
+			return loadResources(deps)
+		})
+}
+
+// cachedTotals counts what a clean would remove: every cached row across
+// every pane, custom content excluded because the cache does not hold it.
+// The figure is a floor — Clean also drops partial downloads, which are
+// not indexed and so appear in no pane.
+func (s *ResourcesScreen) cachedTotals() (items int, size int64, inUse int) {
+	for p := resourcePane(0); p < paneCount; p++ {
+		for _, r := range s.panes[p] {
+			if !r.Cached || r.Custom {
+				continue
+			}
+			items++
+			size += r.Size
+			if r.InUse {
+				inUse++
+			}
+		}
+	}
+	return items, size, inUse
 }
 
 // startRefresh re-fetches a cached package, picking up any upstream

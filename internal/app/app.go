@@ -240,7 +240,12 @@ func (m Model) render() string {
 	frame := lipgloss.JoinVertical(lipgloss.Left,
 		header,
 		body,
-		m.styles.StatusBar.Render(status),
+		// Clipped, and clipped before styling: the chrome is one row by
+		// definition, and a status line long enough to wrap makes the
+		// frame taller than the window, which scrolls the header off the
+		// top. A screen with more bindings than fit loses the tail of the
+		// list rather than the layout — `?` still lists all of them.
+		m.styles.StatusBar.Render(clipTail(status, m.width)),
 	)
 
 	if m.overlay == nil {

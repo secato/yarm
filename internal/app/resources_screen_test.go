@@ -572,3 +572,117 @@ func visibleNames(s *ResourcesScreen, p resourcePane) []string {
 	}
 	return out
 }
+
+// pressClear sends X and returns the confirm overlay it must open.
+func pressClear(t *testing.T, s *ResourcesScreen) confirmOverlay {
+	t.Helper()
+	_, cmd := s.Update(tea.KeyPressMsg{Code: 'X', Text: "X"}, wizardEnv())
+	if cmd == nil {
+		t.Fatal("'X' should return a command")
+	}
+	overlayMsg, ok := cmd().(showOverlayMsg)
+	if !ok {
+		t.Fatalf("message = %T, want showOverlayMsg", cmd())
+	}
+	confirm, ok := overlayMsg.overlay.(confirmOverlay)
+	if !ok {
+		t.Fatalf("overlay = %T, want confirmOverlay", overlayMsg.overlay)
+	}
+	return confirm
+}
+
+// X empties the whole cache, not just the row under the cursor.
+func TestResourcesScreenClearCacheRemovesEverythingCached(t *testing.T) {
+	deps, _ := resourcesTestDeps(t)
+	if _, err := deps.Cache.EnsureReShade(context.Background(), "6.8.0", false, nil); err != nil {
+		t.Fatalf("EnsureReShade: %v", err)
+	}
+	if _, err := deps.Cache.EnsurePackage(context.Background(), deps.WizardData.(fakeWizardData).data.Packages[0], nil); err != nil {
+		t.Fatalf("EnsurePackage: %v", err)
+	}
+	s := loadResourcesScreen(t, deps)
+	// The cursor sits on a ReShade row; the package must go too.
+	s.focus = paneReShadeNormal
+
+	result := pressClear(t, s).onYes()
+	if _, ok := result.(resourcesLoadedMsg); !ok {
+		t.Fatalf("confirmed clear produced %T, want resourcesLoadedMsg", result)
+	}
+	next, _ := s.Update(result, wizardEnv())
+	s = next.(*ResourcesScreen)
+
+	for p := resourcePane(0); p < paneCount; p++ {
+		for _, r := range s.panes[p] {
+			if r.Cached && !r.Custom {
+				t.Errorf("%q still shows as cached after clearing", r.Name)
+			}
+		}
+	}
+	if items, size, _ := s.cachedTotals(); items != 0 || size != 0 {
+		t.Errorf("cachedTotals() = %d items, %d bytes, want 0, 0", items, size)
+	}
+}
+
+// Nothing cached is not a confirmation worth asking for.
+func TestResourcesScreenClearCacheSaysSoWhenThereIsNothingToClear(t *testing.T) {
+	deps, _ := resourcesTestDeps(t)
+	s := loadResourcesScreen(t, deps)
+
+	_, cmd := s.Update(tea.KeyPressMsg{Code: 'X', Text: "X"}, wizardEnv())
+	if cmd == nil {
+		t.Fatal("'X' should still say something when the cache is empty")
+	}
+	if _, ok := cmd().(showOverlayMsg); ok {
+		t.Fatal("an empty cache should not open a confirm dialog")
+	}
+	msg, ok := cmd().(statusMsg)
+	if !ok {
+		t.Fatalf("message = %T, want statusMsg", cmd())
+	}
+	if !strings.Contains(msg.text, "nothing cached") {
+		t.Errorf("status = %q, want it to say there is nothing cached", msg.text)
+	}
+}
+
+// The count and size go in the question, so the decision can be made
+// without reading the paragraph under it.
+func TestClearCacheQuestionCountsWhatItWillRemove(t *testing.T) {
+	deps, _ := resourcesTestDeps(t)
+	if _, err := deps.Cache.EnsureReShade(context.Background(), "6.8.0", false, nil); err != nil {
+		t.Fatalf("EnsureReShade: %v", err)
+	}
+	s := loadResourcesScreen(t, deps)
+
+	confirm := pressClear(t, s)
+	if !strings.Contains(confirm.question, "1 item(s)") {
+		t.Errorf("question = %q, want the item count in it", confirm.question)
+	}
+	if !strings.Contains(confirm.detail, "Custom content") {
+		t.Errorf("detail = %q, want it to say custom content is untouched", confirm.detail)
+	}
+}
+
+// Clearing something a recorded install was made from is safe but worth
+// saying out loud, the same way deleting one such row is.
+func TestClearCacheWarnsAboutEntriesAnInstallUses(t *testing.T) {
+	deps, _ := resourcesTestDeps(t)
+	if _, err := deps.Cache.EnsureReShade(context.Background(), "6.8.0", false, nil); err != nil {
+		t.Fatalf("EnsureReShade: %v", err)
+	}
+	reg := state.Registry{Schema: state.SchemaVersion, Games: map[string]state.Game{}}
+	reg.Record("steam:1", state.Game{Name: "X", Provider: "steam", Root: "/games/x"}, state.Install{
+		Exe:     "x.exe",
+		ReShade: state.ReShadeInfo{Version: "6.8.0", Flavor: "normal"},
+	})
+	if err := state.Save(deps.StateDir, reg); err != nil {
+		t.Fatalf("state.Save: %v", err)
+	}
+
+	s := loadResourcesScreen(t, deps)
+	if _, _, inUse := s.cachedTotals(); inUse != 1 {
+		t.Fatalf("setup: cachedTotals() reports %d in use, want 1", inUse)
+	}
+	if detail := pressClear(t, s).detail; !strings.Contains(detail, "back a recorded install") {
+		t.Errorf("detail = %q, want a warning about installs using it", detail)
+	}
+}

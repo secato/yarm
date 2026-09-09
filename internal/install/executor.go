@@ -63,7 +63,12 @@ type Result struct {
 	// because they were foreign and Overwrite was not given.
 	Skipped []string
 	// Removed lists files deleted from a previous install.
-	Removed  []string
+	Removed []string
+	// Bytes is how much was written, taken from the plan: on a run that
+	// returns without error, everything the plan meant to write was
+	// written. A failed run returns the zero Result, so this is never a
+	// partial figure.
+	Bytes    int64
 	Warnings []string
 }
 
@@ -108,7 +113,7 @@ func (e *Executor) Run(ctx context.Context, plan Plan, onProgress ProgressFunc) 
 func (e *Executor) run(ctx context.Context, plan Plan, jr *journal, onProgress ProgressFunc) (Result, error) {
 	req := plan.Request
 	root := req.Game.Root
-	result := Result{Warnings: plan.Warnings}
+	result := Result{Warnings: plan.Warnings, Bytes: plan.TotalBytes()}
 
 	emit := func(ev Event) {
 		if onProgress != nil {

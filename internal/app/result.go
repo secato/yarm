@@ -42,7 +42,14 @@ func NewInstallResultScreen(req install.Request, res install.Result, err error, 
 		s.ok = true
 		s.title = "installed"
 		s.lines = append(s.lines, fmt.Sprintf("ReShade %s (%s) → %s", req.Version, req.Flavor, req.Exe.Path))
-		s.lines = append(s.lines, fmt.Sprintf("%d file(s) written.", len(res.Written)))
+		written := fmt.Sprintf("%d file(s) written", len(res.Written))
+		// The size is worth a few characters here: it is the answer to
+		// "what did that cost me", and the only place the install's
+		// footprint on disk is ever stated.
+		if res.Bytes > 0 {
+			written += " (" + humanSize(res.Bytes) + ")"
+		}
+		s.lines = append(s.lines, written+".")
 		if n := len(res.Skipped); n > 0 {
 			s.lines = append(s.lines, fmt.Sprintf("%d file(s) unchanged.", n))
 		}
