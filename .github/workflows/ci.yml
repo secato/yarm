@@ -13,9 +13,14 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: golangci/golangci-lint-action@v6
+      # v9 of the action for golangci-lint v2, which .golangci.yml is
+      # written against (`version: "2"`). The v6 action installs the latest
+      # v1 instead — 1.64.8, built with Go 1.24, which refuses a go.mod
+      # targeting 1.25 outright. Pinned rather than `latest` so a linter
+      # release cannot fail CI on a commit that did not change.
+      - uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.13.2
 
   test:
     strategy:
