@@ -51,9 +51,9 @@ var adoptBinding = key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "adopt Re
 // yarm has not adopted an unmanaged install in yet is not a fresh-install
 // candidate: attempting one would collide with the files already there,
 // so this hands off to the adopt confirmation instead, same as pressing
-// the adopt binding directly. Shared between GameDetailScreen (any
-// folder) and GamesScreen (a game with exactly one, acted on directly
-// from the list without drilling in).
+// the adopt binding directly. Shared by the games list, which acts on a
+// game's only eligible folder directly, and the folder picker it opens
+// instead when there are several.
 func startInstallForGroup(entry GameEntry, grp FolderGroup, deps Deps) tea.Cmd {
 	if grp.Unmanaged != nil {
 		return startAdoptForGroup(entry, grp, deps)

@@ -1187,7 +1187,7 @@ func (s *WizardScreen) versionPane(flavor install.Flavor, width, height int, env
 func (s *WizardScreen) viewAPI(b *strings.Builder, env Env, height int) {
 	if !s.exe.API.Supported() {
 		b.WriteString(env.Styles.Warn.Render(wrap(fmt.Sprintf(
-			"%s is not supported in v1 — pick a DLL yourself.", apiLabel(s.exe.API)), env.Width-1)))
+			"%s is not supported yet — pick a DLL yourself.", apiLabel(s.exe.API)), env.Width-1)))
 		b.WriteString("\n\n")
 		height -= 2
 	}

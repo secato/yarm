@@ -41,8 +41,8 @@ const (
 	APIVulkan  API = "vulkan"
 )
 
-// Supported reports whether YARM can install ReShade for this API in v1.
-// D3D8 and Vulkan are recognized but out of scope for v1.
+// Supported reports whether YARM can install ReShade for this API.
+// D3D8 and Vulkan are recognized but not supported yet.
 func (a API) Supported() bool {
 	switch a {
 	case APID3D8, APIVulkan:

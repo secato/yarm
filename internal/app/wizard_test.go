@@ -440,7 +440,7 @@ func TestWizardAPIStepExplainsItsRecommendation(t *testing.T) {
 	}
 	unsupported = advance(t, unsupported, stepAPI)
 	body = unsupported.View(wizardEnv())
-	if !strings.Contains(strings.ToLower(body), "not supported in v1") {
+	if !strings.Contains(strings.ToLower(body), "not supported yet") {
 		t.Errorf("the API step should say vulkan is unsupported:\n%s", body)
 	}
 	if got := unsupported.selectedDLL(); got != "dxgi.dll" {
