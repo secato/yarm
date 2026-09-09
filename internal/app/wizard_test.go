@@ -61,21 +61,57 @@ func pressEsc(t *testing.T, s *WizardScreen) (*WizardScreen, bool) {
 	return next.(*WizardScreen), handled
 }
 
+// singleGroup wraps exe in the one FolderGroup a test needs to construct a
+// wizard when it is not itself exercising the Paths step or a multi-folder
+// Apply.
+func singleGroup(exe Executable) []FolderGroup {
+	return []FolderGroup{{Dir: install.ExeDir(exe.Path), Exes: []Executable{exe}, Installed: exe.Installed}}
+}
+
 // loadWizard drives a freshly constructed wizard through Init so its
 // catalog-derived state (version rows, packages, addons, dll cursor) is
 // populated, exactly as the real Bubble Tea loop would before the user can
-// press anything. preselected indexes entry.PlayableExes(), matching how a
-// caller resolves a target folder before ever opening the form — the form
-// itself has no exe-picking step of its own.
+// press anything, then past its Paths step — preselected indexes
+// entry.PlayableExes(), matching how a caller resolves a target folder
+// before ever opening the wizard, so most tests have nothing left to
+// decide there. Tests of the Paths step itself use the constructor
+// directly instead.
 func loadWizard(t *testing.T, entry GameEntry, preselected int, deps Deps) *WizardScreen {
 	t.Helper()
-	s := NewWizardScreen(entry, entry.PlayableExes()[preselected], deps)
+	exe := entry.PlayableExes()[preselected]
+	groups := entry.Groups
+	if groups == nil {
+		groups = groupByFolder(entry.Root, entry.Exes)
+	}
+	s := NewWizardScreen(entry, exe, groups, deps)
 	cmd := s.Init()
 	if cmd == nil {
 		t.Fatal("Init() returned a nil command; nothing would ever load")
 	}
 	msg := cmd()
 	next, _ := s.Update(msg, wizardEnv())
+	w := next.(*WizardScreen)
+	if w.step == stepPaths {
+		w = pressSpecial(t, w, tea.KeyEnter)
+	}
+	return w
+}
+
+// loadWizardAtPaths is loadWizard without skipping past the Paths step —
+// for tests that want to drive or render that step itself.
+func loadWizardAtPaths(t *testing.T, entry GameEntry, preselected int, deps Deps) *WizardScreen {
+	t.Helper()
+	exe := entry.PlayableExes()[preselected]
+	groups := entry.Groups
+	if groups == nil {
+		groups = groupByFolder(entry.Root, entry.Exes)
+	}
+	s := NewWizardScreen(entry, exe, groups, deps)
+	cmd := s.Init()
+	if cmd == nil {
+		t.Fatal("Init() returned a nil command; nothing would ever load")
+	}
+	next, _ := s.Update(cmd(), wizardEnv())
 	return next.(*WizardScreen)
 }
 
@@ -421,9 +457,25 @@ func TestWizardWarnsAboutAddonAntiCheatRisk(t *testing.T) {
 // HandleBack at the very first step must defer to the shell (pop back to
 // the game detail screen), not try to step further back.
 func TestWizardBackAtFirstStepDefers(t *testing.T) {
-	s := loadWizard(t, sampleGameEntry(), 0, fakeDeps())
+	entry := sampleGameEntry()
+	exe := entry.PlayableExes()[0]
+	s := NewWizardScreen(entry, exe, singleGroup(exe), fakeDeps())
+	if s.step != stepPaths {
+		t.Fatalf("a fresh wizard should open on stepPaths, got %v", s.step)
+	}
 	if _, _, handled := s.HandleBack(); handled {
-		t.Error("HandleBack() at stepReShade should return handled=false")
+		t.Error("HandleBack() at stepPaths should return handled=false")
+	}
+
+	// One step in, back is handled internally instead — it returns to
+	// Paths rather than leaving the wizard.
+	s = loadWizard(t, sampleGameEntry(), 0, fakeDeps())
+	next, _, handled := s.HandleBack()
+	if !handled {
+		t.Error("HandleBack() at stepReShade should return handled=true")
+	}
+	if next.(*WizardScreen).step != stepPaths {
+		t.Errorf("step after back = %v, want stepPaths", next.(*WizardScreen).step)
 	}
 }
 
@@ -598,7 +650,8 @@ func TestWizardCatalogLoadErrorDoesNotBreakWizard(t *testing.T) {
 	deps := fakeDeps()
 	deps.WizardData = fakeWizardData{err: errors.New("network unreachable")}
 	entry := sampleGameEntry()
-	s := NewWizardScreen(entry, entry.PlayableExes()[0], deps)
+	exe0 := entry.PlayableExes()[0]
+	s := NewWizardScreen(entry, exe0, singleGroup(exe0), deps)
 
 	cmd := s.Init()
 	msg := cmd()
@@ -622,8 +675,8 @@ func TestWizardCatalogLoadErrorDoesNotBreakWizard(t *testing.T) {
 	if s.loading {
 		t.Error("loading should be false once the (failed) load has been handled")
 	}
-	if s.step != stepReShade {
-		t.Errorf("step = %v, want stepReShade (still usable) after a load error", s.step)
+	if s.step != stepPaths {
+		t.Errorf("step = %v, want stepPaths (still usable) after a load error", s.step)
 	}
 }
 
@@ -754,9 +807,12 @@ func TestWizardFitsNarrowTerminals(t *testing.T) {
 				if normal && (step == stepAddons || step == stepRenoDX) {
 					continue // both add-on steps are skipped for the normal build
 				}
-				s := loadWizard(t, sampleGameEntry(), 0, fakeDeps())
-				if normal {
-					s = pressSpecial(t, s, tea.KeyLeft)
+				s := loadWizardAtPaths(t, sampleGameEntry(), 0, fakeDeps())
+				if step != stepPaths {
+					s = advance(t, s, stepReShade)
+					if normal {
+						s = pressSpecial(t, s, tea.KeyLeft)
+					}
 				}
 				s = advance(t, s, step)
 
@@ -1347,8 +1403,9 @@ func TestEditingOpensOnASummaryOfWhatIsInstalled(t *testing.T) {
 		t.Fatalf("step = %v, want the summary", s.step)
 	}
 	// Each section is a pane listing what is actually in it, not a label
-	// with a truncated value beside it.
-	body := s.View(wizardEnv())
+	// with a truncated value beside it. Wide enough for four panes (Paths
+	// joined the original three) to still show a full package name.
+	body := s.View(Env{Styles: NewStyles(true), Width: 130, Height: 30})
 	for _, want := range []string{
 		"Editing install", "ReShade", "6.7.3", "normal build",
 		"API", "dxgi.dll", "Shaders", "Standard effects", "SweetFX by CeeJay.dk",
@@ -1485,7 +1542,7 @@ func TestEditingFitsNarrowTerminals(t *testing.T) {
 func TestEditingSummaryListsSelectionsInPanes(t *testing.T) {
 	s := editWizard(t, "standard-effects", "sweetfx-by-ceejay-dk")
 
-	body := s.View(Env{Styles: NewStyles(true), Width: 100, Height: 26})
+	body := s.View(Env{Styles: NewStyles(true), Width: 130, Height: 26})
 	for _, want := range []string{"Standard effects", "SweetFX by CeeJay.dk"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the shaders pane should list %q rather than count it:\n%s", want, body)
@@ -1629,8 +1686,9 @@ func TestReShadeStepSaysWhereAPreselectedBuildCameFrom(t *testing.T) {
 	t.Run("from config", func(t *testing.T) {
 		deps := fakeDeps()
 		deps.Defaults = config.DefaultsConfig{ReshadeFlavor: "addon"}
-		w := NewWizardScreen(entry, entry.Exes[0], deps)
+		w := NewWizardScreen(entry, entry.Exes[0], singleGroup(entry.Exes[0]), deps)
 		w.applyWizardData(wizardDataLoadedMsg{data: sampleWizardData()})
+		w.step = stepReShade
 
 		body := w.View(env)
 		if !strings.Contains(body, "defaults.reshade_flavor") {
@@ -1644,8 +1702,9 @@ func TestReShadeStepSaysWhereAPreselectedBuildCameFrom(t *testing.T) {
 	t.Run("the safe default explains itself", func(t *testing.T) {
 		deps := fakeDeps()
 		deps.Defaults = config.DefaultsConfig{ReshadeFlavor: "normal"}
-		w := NewWizardScreen(entry, entry.Exes[0], deps)
+		w := NewWizardScreen(entry, entry.Exes[0], singleGroup(entry.Exes[0]), deps)
 		w.applyWizardData(wizardDataLoadedMsg{data: sampleWizardData()})
+		w.step = stepReShade
 
 		if body := w.View(env); strings.Contains(body, "reshade_flavor") {
 			t.Errorf("the default build needs no note:\n%s", body)
@@ -1659,7 +1718,7 @@ func TestReShadeStepSaysWhereAPreselectedBuildCameFrom(t *testing.T) {
 			Exe:     exe.Path,
 			ReShade: state.ReShadeInfo{Version: "6.8.0", Flavor: "addon", DLL: "dxgi.dll"},
 		}
-		w := NewWizardScreen(installed, exe, fakeDeps())
+		w := NewWizardScreen(installed, exe, singleGroup(exe), fakeDeps())
 		w.applyWizardData(wizardDataLoadedMsg{data: sampleWizardData()})
 		w.step = stepReShade
 
@@ -1676,7 +1735,7 @@ func TestReShadeStepFitsWithTheNote(t *testing.T) {
 	entry := sampleEntries()[0]
 	deps := fakeDeps()
 	deps.Defaults = config.DefaultsConfig{ReshadeFlavor: "addon"}
-	w := NewWizardScreen(entry, entry.Exes[0], deps)
+	w := NewWizardScreen(entry, entry.Exes[0], singleGroup(entry.Exes[0]), deps)
 	w.applyWizardData(wizardDataLoadedMsg{data: sampleWizardData()})
 
 	for _, height := range []int{16, 20, 30} {

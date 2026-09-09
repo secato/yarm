@@ -23,14 +23,15 @@ import (
 // the earlier ones already answered — the reason a step sequence is
 // workable here at all, since the cost of paging is not being able to see
 // what you already chose.
-//
-// There is no Exe step: which executable (and therefore which folder) is
-// resolved by the screen that opened the wizard — the games list or the
-// game detail screen — before it ever appears.
 type wizardStep int
 
 const (
-	stepReShade wizardStep = iota
+	// stepPaths is which of the game's folders this run applies to. First,
+	// because everything else is a property of *what* to install — this is
+	// the only step that says *where*, and several folders can be checked
+	// at once (a 32- and a 64-bit tree of the same game, set up together).
+	stepPaths wizardStep = iota
+	stepReShade
 	stepAPI
 	stepShaders
 	stepAddons
@@ -44,11 +45,13 @@ const (
 )
 
 // wizardSteps is every step in order, for the breadcrumb.
-var wizardSteps = []wizardStep{stepReShade, stepAPI, stepShaders, stepAddons, stepRenoDX, stepReview}
+var wizardSteps = []wizardStep{stepPaths, stepReShade, stepAPI, stepShaders, stepAddons, stepRenoDX, stepReview}
 
 // label names a step for the breadcrumb.
 func (s wizardStep) label() string {
 	switch s {
+	case stepPaths:
+		return "Paths"
 	case stepReShade:
 		return "ReShade"
 	case stepAPI:
@@ -75,6 +78,10 @@ var (
 	wizardPaneLeft  = key.NewBinding(key.WithKeys("left"), key.WithHelp("←", "normal"))
 	wizardPaneRight = key.NewBinding(key.WithKeys("right"), key.WithHelp("→", "addon"))
 )
+
+// wizardExpand shows a Paths row's executable list — collapsed by default
+// so a game with several folders still fits on one screen.
+var wizardExpand = key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→", "expand"))
 
 // wizardShowAll widens the shaders and add-ons steps from the curated
 // shortlist to the whole catalog. Not a global binding: it means nothing
@@ -132,11 +139,11 @@ type wizardDataLoadedMsg struct {
 	err  error
 }
 
-// WizardScreen walks the user through installing ReShade: which version
-// and build, which proxy DLL, which effect shaders and add-ons, then a
-// review before running. The folder it targets is fixed at construction —
-// decided by whichever screen opened the wizard. ReShade intercepts by
-// directory, so there is nothing per-executable to ask about here.
+// WizardScreen walks the user through installing ReShade: which folder (or
+// folders) it applies to, which version and build, which proxy DLL, which
+// effect shaders and add-ons, then a review before running. ReShade
+// intercepts by directory, so there is nothing per-executable to ask about
+// beyond which folder.
 //
 // It is one Screen implementation holding a step index and one field group
 // per step, rather than several pushed screens, so the in-progress Request
@@ -144,12 +151,20 @@ type wizardDataLoadedMsg struct {
 type WizardScreen struct {
 	keys     KeyMap
 	entry    GameEntry
-	exe      Executable
 	deps     Deps
 	targetOS artifacts.TargetOS
 
-	// existing is the install already recorded for this folder, if any —
-	// the wizard starts every step's selection from it instead of the
+	// paths is every folder this run could apply to, and which of them are
+	// actually checked — the Paths step's own state. exe is the reference
+	// folder's own executable: the one every other step's selection (build,
+	// version, DLL, packages) is shown and diffed against. A folder added
+	// alongside it gets the same answers, just its own executable in the
+	// request the batch executor runs.
+	paths pathsList
+	exe   Executable
+
+	// existing is the install already recorded for the reference folder, if
+	// any — the wizard starts every step's selection from it instead of the
 	// configured defaults, so re-running the wizard to add an add-on or
 	// switch build does not silently reset everything else.
 	existing *state.Install
@@ -199,11 +214,14 @@ type WizardScreen struct {
 	options multiSelect
 }
 
-// NewWizardScreen returns a wizard targeting the folder exe lives in. When
-// that folder already has a recorded install, the wizard edits it: every
-// step starts from what is already installed (build, version, DLL,
-// packages, add-ons) instead of the configured defaults.
-func NewWizardScreen(entry GameEntry, exe Executable, deps Deps) *WizardScreen {
+// NewWizardScreen returns a wizard targeting exe — every step but Paths
+// starts from what is already installed there (build, version, DLL,
+// packages, add-ons) when it has a recorded install, or the configured
+// defaults when it does not. targets is every folder the calling action
+// found eligible, for the Paths step's own list; exe's own folder starts
+// out checked there, and everything else about the request is free to
+// reach into the rest.
+func NewWizardScreen(entry GameEntry, exe Executable, targets []FolderGroup, deps Deps) *WizardScreen {
 	existing := exe.Installed
 
 	// The normal build unless something says otherwise: the add-on build
@@ -220,7 +238,7 @@ func NewWizardScreen(entry GameEntry, exe Executable, deps Deps) *WizardScreen {
 		source = flavorFromConfig
 	}
 
-	step := stepReShade
+	step := stepPaths
 	if existing != nil {
 		step = stepHub
 	}
@@ -239,6 +257,7 @@ func NewWizardScreen(entry GameEntry, exe Executable, deps Deps) *WizardScreen {
 		step:         step,
 		editing:      existing != nil,
 		entry:        entry,
+		paths:        newPathsList(targets, []string{install.ExeDir(exe.Path)}, true),
 		exe:          exe,
 		deps:         deps,
 		targetOS:     artifacts.CurrentTargetOS(),
@@ -316,6 +335,10 @@ func (s *WizardScreen) KeyBindings() []key.Binding {
 	switch s.step {
 	case stepHub:
 		return []key.Binding{s.keys.Up, s.keys.Down, s.keys.Enter, s.keys.Back}
+	case stepPaths:
+		return []key.Binding{
+			s.keys.Up, s.keys.Down, s.keys.Toggle, wizardExpand, s.keys.Enter, s.keys.Back,
+		}
 	case stepReShade:
 		return []key.Binding{s.keys.Up, s.keys.Down, wizardPaneLeft, wizardPaneRight, s.keys.Enter, s.keys.Back}
 	case stepShaders, stepAddons:
@@ -347,7 +370,7 @@ func (s *WizardScreen) HandleBack() (Screen, tea.Cmd, bool) {
 		s.step = stepHub
 		return s, nil, true
 	}
-	if s.step == stepReShade {
+	if s.step == stepPaths {
 		return s, nil, false
 	}
 	s.step = s.prevStep(s.step)
@@ -401,12 +424,12 @@ func (s *WizardScreen) syncHub() { s.hubCursor.setCount(len(s.hubSections())) }
 // skippable steps and they are adjacent, so a single step back can have
 // to cross both.
 func (s *WizardScreen) prevStep(from wizardStep) wizardStep {
-	for prev := from - 1; prev > stepReShade; prev-- {
+	for prev := from - 1; prev > stepPaths; prev-- {
 		if s.stepEnabled(prev) {
 			return prev
 		}
 	}
-	return stepReShade
+	return stepPaths
 }
 
 // nextStep steps forward over any step the current answers skip.
@@ -756,6 +779,8 @@ func (s *WizardScreen) handleKey(msg tea.KeyPressMsg, env Env) (Screen, tea.Cmd)
 	switch s.step {
 	case stepHub:
 		return s.handleHubKey(msg)
+	case stepPaths:
+		return s.handlePathsKey(msg)
 	case stepReShade:
 		return s.handleReShadeKey(msg)
 	case stepAPI:
@@ -785,6 +810,22 @@ func (s *WizardScreen) handleHubKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		if i := s.hubCursor.Cursor(); i >= 0 && i < len(rows) {
 			s.step = rows[i]
 		}
+	}
+	return s, nil
+}
+
+func (s *WizardScreen) handlePathsKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
+	switch {
+	case key.Matches(msg, s.keys.Up):
+		s.paths.up()
+	case key.Matches(msg, s.keys.Down):
+		s.paths.down()
+	case key.Matches(msg, s.keys.Toggle):
+		s.paths.toggle()
+	case key.Matches(msg, wizardExpand):
+		s.paths.toggleExpand()
+	case key.Matches(msg, s.keys.Enter):
+		s.step = s.afterStep(stepPaths)
 	}
 	return s, nil
 }
@@ -867,21 +908,27 @@ func (s *WizardScreen) handleReviewKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 			s.options.selected["backup"] = true
 		}
 	case key.Matches(msg, s.keys.Enter):
-		req, ok := s.buildRequest()
+		ops, ok := s.buildOps()
 		if !ok {
 			return s, nil
 		}
-		ops := []folderOp{{Dir: install.ExeDir(s.exe.Path), Install: &req}}
 		return s, PushScreen(NewProgressScreen(ops, s.deps.Installer, s.deps.Uninstaller))
 	}
 	return s, nil
 }
 
-// buildRequest assembles the install.Request from every step's selection.
-// ok is false if something required is missing — the caller should not be
-// able to reach Review without everything set, but this is the one place
-// that would notice if it happened anyway.
+// buildRequest assembles the install.Request for the reference folder from
+// every step's selection. ok is false if something required is missing —
+// the caller should not be able to reach Review without everything set,
+// but this is the one place that would notice if it happened anyway.
 func (s *WizardScreen) buildRequest() (install.Request, bool) {
+	return s.buildRequestFor(s.exe)
+}
+
+// buildRequestFor is buildRequest against a specific folder's own
+// executable — every step's answer is shared, but the request still has to
+// name whichever executable that folder actually installs against.
+func (s *WizardScreen) buildRequestFor(exe Executable) (install.Request, bool) {
 	version, ok := s.selectedVersion()
 	if !ok {
 		return install.Request{}, false
@@ -893,7 +940,7 @@ func (s *WizardScreen) buildRequest() (install.Request, bool) {
 
 	return install.Request{
 		Game:     s.entry.Game,
-		Exe:      s.exe.Executable,
+		Exe:      exe.Executable,
 		Version:  version.Version,
 		Flavor:   s.flavor,
 		DLLName:  dll,
@@ -911,7 +958,32 @@ func (s *WizardScreen) buildRequest() (install.Request, bool) {
 	}, true
 }
 
-// missing names what finishing the wizard would still have to download.
+// buildOps assembles one folderOp per folder checked on the Paths step,
+// each an install.Request built from the wizard's shared answers but that
+// folder's own executable — the reason a 32- and a 64-bit tree of the same
+// game can be set up in one pass rather than run through the wizard twice.
+func (s *WizardScreen) buildOps() ([]folderOp, bool) {
+	groups := s.paths.selectedGroups()
+	ops := make([]folderOp, 0, len(groups))
+	for _, g := range groups {
+		target := g.primaryExe()
+		if installed, ok := g.installedExe(); ok {
+			target = installed
+		}
+		req, ok := s.buildRequestFor(target)
+		if !ok {
+			return nil, false
+		}
+		ops = append(ops, folderOp{Dir: g.Dir, Install: &req})
+	}
+	return ops, len(ops) > 0
+}
+
+// missing names what finishing the wizard would still have to download,
+// based on the reference folder's own architecture — accurate for a
+// single folder, and still the right shortlist when several are checked,
+// since every one of them shares the same version, build and package
+// selection and differs at most in bitness.
 func (s *WizardScreen) missing() []string {
 	version, ok := s.selectedVersion()
 	if !ok {
@@ -947,6 +1019,8 @@ func (s *WizardScreen) View(env Env) string {
 	switch s.step {
 	case stepHub:
 		s.viewHub(&b, env, body)
+	case stepPaths:
+		writePathsList(&b, env, s.paths, body)
 	case stepReShade:
 		s.viewReShade(&b, env, body)
 	case stepAPI:
@@ -982,12 +1056,14 @@ func (s *WizardScreen) viewHeader(env Env) string {
 		b.WriteString(env.Styles.Accent.Render(clipTail(trail, env.Width)))
 		b.WriteString("\n")
 		b.WriteString(env.Styles.Faint.Render(truncate(s.folder(), env.Width-1)))
+		b.WriteString(s.othersNote(env))
 		b.WriteString("\n\n")
 		return b.String()
 	}
 	b.WriteString(s.breadcrumb(env))
 	b.WriteString("\n")
 	b.WriteString(env.Styles.Faint.Render(truncate(s.folder(), env.Width-1)))
+	b.WriteString(s.othersNote(env))
 	b.WriteString("\n")
 	if summary := s.decided(env); summary != "" {
 		b.WriteString(summary)
@@ -995,6 +1071,17 @@ func (s *WizardScreen) viewHeader(env Env) string {
 	}
 	b.WriteString("\n")
 	return b.String()
+}
+
+// othersNote says how many more folders this run also applies to, right
+// after the reference folder's own path — the one place every step's
+// header is shown, so a folder added on the Paths step is never a
+// surprise on Review.
+func (s *WizardScreen) othersNote(env Env) string {
+	if n := len(s.paths.selectedGroups()); n > 1 {
+		return env.Styles.Faint.Render(fmt.Sprintf("  (+%d more folder(s))", n-1))
+	}
+	return ""
 }
 
 func (s *WizardScreen) breadcrumb(env Env) string {
@@ -1029,6 +1116,11 @@ func (s *WizardScreen) decided(env Env) string {
 		parts = append(parts, env.Styles.Good.Render("✓")+" "+text)
 	}
 
+	if s.step > stepPaths {
+		if n := len(s.paths.selectedGroups()); n > 1 {
+			add(fmt.Sprintf("%d folders", n))
+		}
+	}
 	if s.step > stepReShade {
 		if v, ok := s.selectedVersion(); ok {
 			add(fmt.Sprintf("ReShade %s (%s)", v.Version, s.flavor))
@@ -1756,6 +1848,9 @@ func (s *WizardScreen) hubLines(step wizardStep, env Env, width int) []string {
 	faint := func(text string) string { return env.Styles.Faint.Render(plain(text)) }
 
 	switch step {
+	case stepPaths:
+		return pathsHubLines(s.paths, width)
+
 	case stepReShade:
 		v, _ := s.selectedVersion()
 		lines := []string{plain(v.Version), faint(string(s.flavor) + " build")}
@@ -1923,6 +2018,8 @@ func (s *WizardScreen) sectionChanged(step wizardStep) bool {
 		return false
 	}
 	switch step {
+	case stepPaths:
+		return len(s.paths.selectedGroups()) > 1
 	case stepReShade:
 		v, ok := s.selectedVersion()
 		return (ok && v.Version != s.existing.ReShade.Version) || string(s.flavor) != s.existing.ReShade.Flavor
@@ -1988,7 +2085,11 @@ func (s *WizardScreen) changes() []string {
 	if s.existing == nil {
 		return nil
 	}
-	out := s.reshadeChanges()
+	var out []string
+	if n := len(s.paths.selectedGroups()); n > 1 {
+		out = append(out, fmt.Sprintf("%d folders", n))
+	}
+	out = append(out, s.reshadeChanges()...)
 	names := s.itemNames()
 	if p := diffPhrase(namedDiff(s.existing.Packages, s.packages.selectedIDs(), names)); p != "" {
 		out = append(out, p)

@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -12,11 +11,12 @@ import (
 	"github.com/secato/yarm/internal/state"
 )
 
-// Actions a game's folder can be the target of — install, uninstall,
+// Actions a game's folders can be the target of — install, edit, uninstall,
 // adopt — and the plumbing that carries their results back. They live
 // apart from any one screen because the games list is now the only screen
-// that starts them, and the folder picker is the only thing that stands
-// between a key press and a folder when a game has more than one.
+// that starts them: which folder (or folders) a key press applies to is
+// answered inside the wizard's own Paths step, or inline in the
+// confirmation these open directly, never by a screen in between.
 
 // uninstallDoneMsg carries an uninstall run's result back to the screen
 // that started it, so it can hand off to a result screen.
@@ -45,90 +45,134 @@ var editInstallBinding = key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "ed
 // means "add folder" on the games list.
 var adoptBinding = key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "adopt ReShade"))
 
-// startInstallForGroup opens the wizard on grp — or, when it already has
-// an install, on whichever executable that install is actually recorded
-// against, since it may not be the folder's usual "primary" one. A folder
-// yarm has not adopted an unmanaged install in yet is not a fresh-install
-// candidate: attempting one would collide with the files already there,
-// so this hands off to the adopt confirmation instead, same as pressing
-// the adopt binding directly. Shared by the games list, which acts on a
-// game's only eligible folder directly, and the folder picker it opens
-// instead when there are several.
-func startInstallForGroup(entry GameEntry, grp FolderGroup, deps Deps) tea.Cmd {
-	if grp.Unmanaged != nil {
-		return startAdoptForGroup(entry, grp, deps)
+// startInstallOrEdit opens the wizard on every wizard-eligible folder among
+// targets — one Paths pane, checked by default on whichever of them
+// already has an install, or on all of them when none does. A folder yarm
+// has not adopted an unmanaged install in yet is not a fresh-install
+// candidate: attempting one would collide with the files already there, so
+// when every target turns out to be one of those, this hands off to the
+// adopt confirmation instead of opening a wizard with nothing to show.
+// Does nothing with no eligible folder at all.
+func startInstallOrEdit(entry GameEntry, targets []FolderGroup, deps Deps) tea.Cmd {
+	var wizardable, unmanaged []FolderGroup
+	for _, g := range targets {
+		if g.Unmanaged != nil {
+			unmanaged = append(unmanaged, g)
+		} else {
+			wizardable = append(wizardable, g)
+		}
 	}
-
-	target := grp.primaryExe()
-	if installed, ok := grp.installedExe(); ok {
-		target = installed
+	switch {
+	case len(wizardable) == 0:
+		return startAdopt(entry, unmanaged, deps)
+	case len(unmanaged) == 0:
+		return openWizard(entry, wizardable, deps)
+	default:
+		// A folder yarm has not adopted an unmanaged install in yet is not
+		// a fresh-install candidate — it gets its own confirmation rather
+		// than silently sitting out of the wizard opened for the rest.
+		return tea.Batch(openWizard(entry, wizardable, deps), startAdopt(entry, unmanaged, deps))
 	}
-	return PushScreen(NewWizardScreen(entry, target, deps))
 }
 
-// startUninstallForGroup confirms, then removes, the install covering
-// grp — resolved to whichever executable it is actually recorded against,
-// which may not be the one a fresh install would default to.
-func startUninstallForGroup(entry GameEntry, grp FolderGroup, deps Deps) tea.Cmd {
-	if grp.Installed == nil || deps.Uninstaller == nil {
+// openWizard opens the wizard on wizardable, whose reference folder —
+// whichever step-by-step answer the wizard's other steps start from — is
+// the first of them with a recorded install, or simply the first when none
+// has one.
+func openWizard(entry GameEntry, wizardable []FolderGroup, deps Deps) tea.Cmd {
+	reference := wizardable[0]
+	for _, g := range wizardable {
+		if g.Installed != nil {
+			reference = g
+			break
+		}
+	}
+	exe := reference.primaryExe()
+	if installed, ok := reference.installedExe(); ok {
+		exe = installed
+	}
+	return PushScreen(NewWizardScreen(entry, exe, wizardable, deps))
+}
+
+// startUninstall confirms, then removes, every install covering targets —
+// each resolved to whichever executable it is actually recorded against,
+// which may not be the one a fresh install would default to. One
+// confirmation, one batch run: an uninstall has no options to weigh
+// per-folder the way an edit does, so there is nothing a folder-by-folder
+// pass would let the user decide that listing every path up front does
+// not already cover.
+func startUninstall(entry GameEntry, targets []FolderGroup, deps Deps) tea.Cmd {
+	if deps.Uninstaller == nil {
 		return nil
 	}
-	target, ok := grp.installedExe()
-	if !ok {
+	var ops []folderOp
+	var paths []string
+	for _, g := range targets {
+		target, ok := g.installedExe()
+		if !ok {
+			continue
+		}
+		paths = append(paths, target.Path)
+		ops = append(ops, folderOp{
+			Dir:       g.Dir,
+			Uninstall: &install.UninstallRequest{GameID: entry.ID, Exe: target.Path},
+		})
+	}
+	if len(ops) == 0 {
 		return nil
 	}
 
-	exePath := target.Path
-	action := Async(context.Background(),
-		func(ctx context.Context) (install.UninstallResult, error) {
-			return deps.Uninstaller.Uninstall(install.UninstallRequest{
-				GameID: entry.ID,
-				Exe:    exePath,
-			})
-		},
-		func(res install.UninstallResult) tea.Msg {
-			return uninstallDoneMsg{exePath: exePath, result: res}
-		},
-	)
-
+	run := PushScreen(NewProgressScreen(ops, deps.Installer, deps.Uninstaller))
 	return Confirm(
-		"Uninstall ReShade from "+exePath+"?",
+		"Uninstall ReShade from "+strings.Join(paths, ", ")+"?",
 		"This removes only the files yarm created; anything you edited afterward is kept.",
-		action,
+		run,
 	)
 }
 
-// startAdoptForGroup confirms, then records, the unmanaged install found
-// in grp. The install is tied to the folder's primary executable —
-// ReShade intercepts by directory, so this is not necessarily whichever
-// executable a user might expect, but it is the one yarm will report
-// against from now on.
-func startAdoptForGroup(entry GameEntry, grp FolderGroup, deps Deps) tea.Cmd {
-	if grp.Unmanaged == nil || deps.Adopter == nil {
+// startAdopt confirms, then records, the unmanaged install found in every
+// target — each tied to its own folder's primary executable, since ReShade
+// intercepts by directory rather than by which executable a user might
+// expect. One confirmation covers all of them: adopting changes nothing on
+// disk, so there is no per-folder decision to make first.
+func startAdopt(entry GameEntry, targets []FolderGroup, deps Deps) tea.Cmd {
+	if deps.Adopter == nil {
 		return nil
 	}
-	candidate := *grp.Unmanaged
-	target := grp.primaryExe()
 
-	exePath := target.Path
-	g, executable := entry.Game, target.Executable
-	action := Async(context.Background(),
-		func(ctx context.Context) (state.Install, error) {
-			return deps.Adopter.Adopt(g, executable, candidate)
-		},
-		func(in state.Install) tea.Msg {
-			return adoptDoneMsg{exePath: exePath, install: in}
-		},
+	var paths []string
+	var cmds []tea.Cmd
+	for _, g := range targets {
+		if g.Unmanaged == nil {
+			continue
+		}
+		candidate := *g.Unmanaged
+		target := g.primaryExe()
+		exePath := target.Path
+		paths = append(paths, exePath)
+
+		gm, executable := entry.Game, target.Executable
+		cmds = append(cmds, Async(context.Background(),
+			func(ctx context.Context) (state.Install, error) {
+				return deps.Adopter.Adopt(gm, executable, candidate)
+			},
+			func(in state.Install) tea.Msg {
+				return adoptDoneMsg{exePath: exePath, install: in}
+			},
+		))
+	}
+	if len(cmds) == 0 {
+		return nil
+	}
+
+	detail := "This records the ReShade already found in each folder — the proxy DLL, ReShade.ini, " +
+		"and any shaders, textures or add-ons already there — as yarm's own. Nothing on disk changes " +
+		"now; yarm can update or uninstall each from then on, the same as one it created itself."
+	return Confirm(
+		"Adopt the existing ReShade install in "+strings.Join(paths, ", ")+"?",
+		detail,
+		tea.Batch(cmds...),
 	)
-
-	detail := fmt.Sprintf(
-		"This folder already has ReShade (%s) installed, with %d file(s): the proxy DLL, "+
-			"ReShade.ini, and any shaders, textures or add-ons already there. Adopting it records "+
-			"those files as yarm's own — nothing on disk changes now — so yarm can update or "+
-			"uninstall this install for you from then on, the same as one it created itself.",
-		candidate.DLLName, candidate.FileCount())
-
-	return Confirm("Adopt the existing ReShade install on "+exePath+"?", detail, action)
 }
 
 // indentLines prefixes every line of s with prefix, including the first —

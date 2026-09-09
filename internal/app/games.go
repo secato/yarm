@@ -172,10 +172,9 @@ func (s *GamesScreen) KeyBindings() []key.Binding {
 	}
 
 	// Every action runs from this list now. A game with several folders
-	// needs one more question answered first — which folder — and the
-	// picker asks it; the key is offered either way, because offering it
-	// only for one-folder games reads as the action being unavailable
-	// rather than as needing one more step.
+	// asks which one(s) inside the wizard itself — a game with just one is
+	// offered exactly the same key, so the shortcut never seems to vanish
+	// depending on how many folders happen to be there.
 	e, ok := s.selected()
 	if !ok {
 		return bindings
@@ -276,19 +275,19 @@ func (s *GamesScreen) handleKey(msg tea.KeyPressMsg, env Env) (Screen, tea.Cmd) 
 
 	case key.Matches(msg, s.keys.Install):
 		if e, ok := s.selected(); ok {
-			return s, pickFolder(e, s.deps, verbInstall, installableGroups(e), startInstallForGroup)
+			return s, startInstallOrEdit(e, installableGroups(e), s.deps)
 		}
 		return s, nil
 
 	case key.Matches(msg, editInstallBinding):
 		if e, ok := s.selected(); ok {
-			return s, pickFolder(e, s.deps, verbEdit, groupsWithInstall(e), startInstallForGroup)
+			return s, startInstallOrEdit(e, groupsWithInstall(e), s.deps)
 		}
 		return s, nil
 
 	case key.Matches(msg, s.keys.Uninstall):
 		if e, ok := s.selected(); ok {
-			return s, pickFolder(e, s.deps, verbUninstall, groupsWithInstall(e), startUninstallForGroup)
+			return s, startUninstall(e, groupsWithInstall(e), s.deps)
 		}
 		return s, nil
 
@@ -296,8 +295,14 @@ func (s *GamesScreen) handleKey(msg tea.KeyPressMsg, env Env) (Screen, tea.Cmd) 
 	// has, adopt what was found on disk, or install when it has neither.
 	case key.Matches(msg, s.keys.Enter):
 		if e, ok := s.selected(); ok {
-			verb, groups := installOrEdit(e)
-			return s, pickFolder(e, s.deps, verb, groups, startInstallForGroup)
+			switch {
+			case len(groupsWithInstall(e)) > 0:
+				return s, startInstallOrEdit(e, groupsWithInstall(e), s.deps)
+			case len(groupsWithUnmanaged(e)) > 0:
+				return s, startAdopt(e, groupsWithUnmanaged(e), s.deps)
+			default:
+				return s, startInstallOrEdit(e, installableGroups(e), s.deps)
+			}
 		}
 		return s, nil
 	}

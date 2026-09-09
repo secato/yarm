@@ -31,31 +31,39 @@ func bigGame(folders, exesPerFolder int) GameEntry {
 	return withGroups([]GameEntry{e})[0]
 }
 
-// The folder picker is a list like any other and must stay inside the
-// window, however many folders a game has.
-func TestFolderPickerStaysInsideTheWindow(t *testing.T) {
+// The Paths pane is a list like any other and must stay inside the window,
+// however many folders a game has.
+func TestPathsListStaysInsideTheWindow(t *testing.T) {
 	e := bigGame(12, 4)
-	s := &FolderPickScreen{
-		entry:  e,
-		groups: e.Groups,
-		deps:   fakeDeps(),
-		keys:   DefaultKeyMap(),
-		cursor: newCursorList(len(e.Groups), 0),
-		verb:   verbInstall,
-	}
+	p := newPathsList(e.Groups, []string{e.Groups[0].Dir}, true)
 	env := Env{Styles: NewStyles(true), Width: 80, Height: 21}
 
-	body := s.View(env)
+	var b strings.Builder
+	writePathsList(&b, env, p, env.Height)
+	body := b.String()
 	if got := countLines(body); got > env.Height {
-		t.Errorf("the picker rendered %d lines into a height of %d:\n%s", got, env.Height, body)
+		t.Errorf("the list rendered %d lines into a height of %d:\n%s", got, env.Height, body)
 	}
 	if !strings.Contains(body, "more below") {
 		t.Errorf("a list cut short should say how much it hid:\n%s", body)
 	}
-	// Naming the executables is the point: two folders of the same game
-	// are told apart by what is in them, which a count does not say.
+	// Collapsed by default: a game with many folders would otherwise push
+	// most of them off screen just to list executables nobody asked to see.
+	if !strings.Contains(body, "4 executables") {
+		t.Errorf("a folder's executables should collapse to a count until expanded:\n%s", body)
+	}
+	if strings.Contains(body, "tool00.exe") {
+		t.Errorf("an unexpanded folder should not list its executables:\n%s", body)
+	}
+
+	// Expanding the folder under the cursor lists its executables, capped
+	// the same way the old picker capped them.
+	p.toggleExpand()
+	b.Reset()
+	writePathsList(&b, env, p, env.Height)
+	body = b.String()
 	if !strings.Contains(body, "tool00.exe") {
-		t.Errorf("each folder should name its executables, to choose between them:\n%s", body)
+		t.Errorf("expanding a folder should name its executables, to tell folders apart:\n%s", body)
 	}
 	if !strings.Contains(body, "+1 more") {
 		t.Errorf("4 executables should list 3 and count the rest:\n%s", body)

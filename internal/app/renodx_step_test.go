@@ -441,14 +441,14 @@ func TestHubStacksBelow120ColumnsOnTheAddonBuild(t *testing.T) {
 	if s.step != stepHub {
 		t.Fatalf("step = %v, want the edit-mode summary", s.step)
 	}
-	if got := len(s.hubSections()); got != 6 {
-		t.Fatalf("hubSections = %d, want 6 on the add-on build", got)
+	if got := len(s.hubSections()); got != 7 {
+		t.Fatalf("hubSections = %d, want 7 on the add-on build", got)
 	}
 
 	for _, tt := range []struct {
 		width   int
 		stacked bool
-	}{{100, true}, {119, true}, {120, false}, {130, false}} {
+	}{{130, true}, {143, true}, {144, false}, {150, false}} {
 		got := s.hubStacked(Env{Styles: NewStyles(true), Width: tt.width, Height: 24})
 		if got != tt.stacked {
 			t.Errorf("hubStacked at %d columns = %v, want %v", tt.width, got, tt.stacked)

@@ -299,18 +299,40 @@ func TestMultiFolderGameOffersEveryActionItsFoldersAllow(t *testing.T) {
 		t.Errorf("wizard targets %q, want the installed folder's exe", wiz.exe.Path)
 	}
 
-	// Installing could mean either folder, so that one does ask.
+	// Install opens the wizard on the folder it can actually install into,
+	// and — since the other folder's ReShade was found rather than
+	// recorded — raises its own adopt confirmation at the same time,
+	// rather than silently leaving that folder out.
 	_, cmd = gs.Update(tea.KeyPressMsg{Code: 'i', Text: "i"}, env)
-	push, ok = cmd().(pushScreenMsg)
+	batch, ok := cmd().(tea.BatchMsg)
 	if !ok {
-		t.Fatalf("message = %T, want pushScreenMsg", cmd())
+		t.Fatalf("message = %T, want tea.BatchMsg", cmd())
 	}
-	pick, ok := push.screen.(*FolderPickScreen)
-	if !ok {
-		t.Fatalf("screen = %T, want *FolderPickScreen", push.screen)
+
+	var sawWizard, sawAdopt bool
+	for _, c := range batch {
+		switch msg := c().(type) {
+		case pushScreenMsg:
+			wiz, ok := msg.screen.(*WizardScreen)
+			if !ok {
+				t.Fatalf("pushed screen = %T, want *WizardScreen", msg.screen)
+			}
+			if wiz.exe.Path != "Release/Game.exe" {
+				t.Errorf("wizard targets %q, want the installed folder's exe", wiz.exe.Path)
+			}
+			sawWizard = true
+		case showOverlayMsg:
+			if _, ok := msg.overlay.(confirmOverlay); !ok {
+				t.Fatalf("overlay = %T, want confirmOverlay", msg.overlay)
+			}
+			sawAdopt = true
+		}
 	}
-	if len(pick.groups) != 2 {
-		t.Errorf("picker offers %d folder(s), want both", len(pick.groups))
+	if !sawWizard {
+		t.Error("install should still open the wizard on the installable folder")
+	}
+	if !sawAdopt {
+		t.Error("install should also offer to adopt the unmanaged folder")
 	}
 }
 

@@ -129,7 +129,7 @@ func TestWizardOpensWithoutLoadingWhenTheCatalogIsWarm(t *testing.T) {
 	}
 
 	entry := sampleEntries()[0]
-	w := NewWizardScreen(entry, entry.Exes[0], Deps{WizardData: loader})
+	w := NewWizardScreen(entry, entry.Exes[0], singleGroup(entry.Exes[0]), Deps{WizardData: loader})
 	w.Init()
 
 	if w.loading {

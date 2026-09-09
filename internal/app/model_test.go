@@ -39,7 +39,8 @@ func drive(t *testing.T, m Model, msgs ...tea.Msg) Model {
 			for _, c := range msg {
 				apply(c, depth+1)
 			}
-		case pushScreenMsg, popScreenMsg, popToRootMsg, statusMsg, errorMsg, showOverlayMsg, uninstallDoneMsg, adoptDoneMsg:
+		case pushScreenMsg, popScreenMsg, popToRootMsg, statusMsg, errorMsg, showOverlayMsg, uninstallDoneMsg, adoptDoneMsg,
+			progressUpdateMsg, applyDoneMsg:
 			next, follow := cur.Update(msg)
 			cur = next
 			apply(follow, depth+1)
@@ -486,10 +487,15 @@ func TestGamesScreenMultiFolderGameOffersInstallButNotEditOrUninstall(t *testing
 		}
 	}
 
-	// Pressing one asks which folder rather than guessing.
+	// Pressing one opens the wizard directly — which folder(s) it applies
+	// to is the wizard's own first step, not a screen in front of it.
 	m = drive(t, m, tea.KeyPressMsg{Code: 'i', Text: "i"})
-	if _, ok := m.Screen().(*FolderPickScreen); !ok {
-		t.Fatalf("screen after i = %T, want *FolderPickScreen", m.Screen())
+	wiz, ok := m.Screen().(*WizardScreen)
+	if !ok {
+		t.Fatalf("screen after i = %T, want *WizardScreen", m.Screen())
+	}
+	if len(wiz.paths.groups) != 2 {
+		t.Errorf("wizard's Paths step lists %d folder(s), want 2", len(wiz.paths.groups))
 	}
 }
 
