@@ -20,9 +20,7 @@ import (
 // problem) must surface why, not just look like an empty game — the
 // plan's "friendly errors: permission denied on game dir" case.
 func TestLoadGamesSurfacesScanError(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("running as root ignores directory permissions")
-	}
+	requirePOSIXPermissions(t)
 
 	dir := t.TempDir()
 	locked := filepath.Join(dir, "LockedGame")

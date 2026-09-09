@@ -530,8 +530,12 @@ func TestWizardShowsTargetFolderNotExecutable(t *testing.T) {
 	s := loadWizard(t, sampleGameEntry(), 0, fakeDeps())
 	body := s.View(wizardEnv())
 
-	if !strings.Contains(body, "/games/EH/Game") {
-		t.Errorf("the wizard should name the target folder:\n%s", body)
+	// Joined the way the screen joins it: the fixture root is written with
+	// forward slashes, and filepath.Join renders it with the host's
+	// separator — "\\games\\EH\\Game" on Windows.
+	want := filepath.Join("/games/EH", "Game")
+	if !strings.Contains(body, want) {
+		t.Errorf("the wizard should name the target folder %q:\n%s", want, body)
 	}
 	if strings.Contains(body, "emberhollow.exe") {
 		t.Errorf("the wizard should not present an executable as the target:\n%s", body)

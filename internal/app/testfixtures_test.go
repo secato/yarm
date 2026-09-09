@@ -3,6 +3,9 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
+	"runtime"
+	"testing"
 
 	"github.com/secato/yarm/internal/catalog"
 	"github.com/secato/yarm/internal/config"
@@ -10,6 +13,24 @@ import (
 	"github.com/secato/yarm/internal/install"
 	"github.com/secato/yarm/internal/state"
 )
+
+// requirePOSIXPermissions skips a test that makes a directory unreadable to
+// provoke an error path.
+//
+// Two ways that stops meaning anything: as root, which ignores the mode
+// bits, and on Windows, where os.Chmod only toggles a read-only attribute
+// and never makes a directory unreadable. The error handling itself is real
+// on every OS — this is only about how to provoke it — so it stays covered
+// by the Linux job.
+func requirePOSIXPermissions(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("windows does not enforce POSIX permission bits")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("running as root ignores directory permissions")
+	}
+}
 
 // fakeLoader supplies a fixed games list, so screen tests never touch a
 // real Steam library and always render the same thing.

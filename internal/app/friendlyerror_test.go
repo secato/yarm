@@ -73,9 +73,7 @@ func TestFriendlyErrorNil(t *testing.T) {
 // A real permission-denied error, produced by the actual filesystem, must
 // be classified the same way as the constructed one above.
 func TestFriendlyErrorRealPermissionDenied(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("running as root ignores directory permissions")
-	}
+	requirePOSIXPermissions(t)
 	dir := t.TempDir()
 	locked := filepath.Join(dir, "locked")
 	if err := os.MkdirAll(locked, 0o755); err != nil {

@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -57,6 +58,15 @@ func TestCustomScreenMissingDirIsNotAnError(t *testing.T) {
 // A genuine scan failure must still clear loading and surface the error,
 // not leave "scanning…" on screen forever.
 func TestCustomScreenScanFailureClearsLoading(t *testing.T) {
+	// Windows reports reading a file as a directory as ERROR_PATH_NOT_FOUND,
+	// which maps to fs.ErrNotExist — and ScanCustom deliberately treats "not
+	// exist" as "this user has no custom content", so there is no error left
+	// to surface. Provoking a non-ENOENT ReadDir failure there needs a
+	// different trick than a file in the way, and the handling being tested
+	// is not platform-specific.
+	if runtime.GOOS == "windows" {
+		t.Skip("windows reports a file-where-a-directory-belongs as not-exist")
+	}
 	// A file where a directory is expected: os.ReadDir on it fails with
 	// something other than "not exist".
 	dir := t.TempDir()

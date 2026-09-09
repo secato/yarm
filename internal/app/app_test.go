@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -191,7 +192,14 @@ func TestAddFolderScreenRejectsMissingPath(t *testing.T) {
 	s.send(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	waitForText(t, s, "add a game folder")
 
-	s.typeText("/definitely/not/a/real/path")
+	// Absolute for the host: on Windows a leading slash alone is not, and
+	// the screen would answer "enter an absolute path" — a different (and
+	// correct) complaint than the one under test.
+	missing := "/definitely/not/a/real/path"
+	if runtime.GOOS == "windows" {
+		missing = `C:\definitely\not\a\real\path`
+	}
+	s.typeText(missing)
 	waitForText(t, s, "no such folder")
 
 	finish(t, s)

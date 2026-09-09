@@ -3,6 +3,7 @@ package paths
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -192,6 +193,14 @@ func TestCopyTreePreservesTheTree(t *testing.T) {
 // the user still ends up with it in the new location. Simulated here by
 // taking write permission off the parent, which is what stops a rename.
 func TestMigrateFallsBackToCopyingWhenItCannotRename(t *testing.T) {
+	// Skipped rather than run on Windows, where os.Chmod only toggles a
+	// read-only attribute and does not stop a rename. The test would still
+	// pass there — by taking the rename fast path, which is the one thing it
+	// is not meant to exercise — and a test that passes without testing
+	// anything is worse than one that says it was skipped.
+	if runtime.GOOS == "windows" {
+		t.Skip("windows does not enforce POSIX permission bits, so the rename would succeed")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory permissions")
 	}
