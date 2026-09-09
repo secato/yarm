@@ -75,6 +75,7 @@ type resourceRow struct {
 	reshadeAddon   bool
 	pkg            catalog.Package
 	addon          catalog.Addon
+	renodx         catalog.RenoMod
 }
 
 // resourcesLoadedMsg carries a full (re)load of every pane, success or
@@ -252,6 +253,28 @@ func buildAddonRows(data WizardData, c *cache.Cache, entries []cache.Entry, inst
 			addon:        a,
 		})
 	}
+	// RenoDX mods share this pane rather than getting a fifth: they are
+	// add-on files, and a fifth pane would push the four-pane layout's
+	// floor from 88 columns to 110. There are ~200 of them, so the
+	// shortlist rule does the work — only the ones already downloaded or
+	// in use show until `a` widens the pane.
+	for _, m := range data.RenoDX {
+		matches := entriesForPrefix(entries, "renodx:"+m.ID+":")
+		rows = append(rows, resourceRow{
+			ID: m.ID,
+			// Named apart from the catalog add-ons they sit beside: they
+			// come from a different project, and a bare game title in this
+			// pane would read as an add-on of that name.
+			Name:         "RenoDX: " + m.Title,
+			Downloadable: true,
+			Cached:       c.HasRenoDX(m.ID),
+			Size:         sumSize(matches),
+			DownloadedAt: latestDownload(matches),
+			InUse:        inUseRenoDX(installs, m.ID),
+			Description:  renodxDescription(m),
+			renodx:       m,
+		})
+	}
 	for _, cst := range data.CustomAddons {
 		rows = append(rows, resourceRow{
 			ID: cst.ID, Name: cst.Name,
@@ -261,6 +284,34 @@ func buildAddonRows(data WizardData, c *cache.Cache, entries []cache.Entry, inst
 		})
 	}
 	return rows
+}
+
+// renodxDescription says what a RenoDX row is, since upstream publishes
+// no per-mod description of its own.
+func renodxDescription(m catalog.RenoMod) string {
+	parts := []string{"RenoDX mod"}
+	if m.Description != "" {
+		parts = []string{m.Description}
+	}
+	if m.Beta() {
+		parts = append(parts, "beta")
+	}
+	if len(m.Maintainers) > 0 {
+		parts = append(parts, "by "+strings.Join(m.Maintainers, ", "))
+	}
+	return strings.Join(parts, " — ")
+}
+
+// inUseRenoDX reports whether any recorded install uses this mod. Kept
+// apart from inUseID because a RenoDX mod is recorded in its own field
+// rather than in the add-on list, and the two id spaces are unrelated.
+func inUseRenoDX(installs []state.GameInstall, id string) bool {
+	for _, gi := range installs {
+		if gi.Install.RenoDX == id {
+			return true
+		}
+	}
+	return false
 }
 
 // reshadeFlavorDescription says what the two builds differ in, which is
@@ -514,13 +565,38 @@ func (s *ResourcesScreen) startDownload() (Screen, tea.Cmd) {
 		case panePackages:
 			_, err = deps.Cache.EnsurePackage(context.Background(), row.pkg, nil)
 		case paneAddons:
-			err = ensureAddonAllArches(deps.Cache, row.addon)
+			if row.renodx.ID != "" {
+				err = ensureRenoDXAllArches(deps.Cache, row.renodx)
+			} else {
+				err = ensureAddonAllArches(deps.Cache, row.addon)
+			}
 		}
 		if err != nil {
 			return resourceActionMsg{err: err}
 		}
 		return loadResources(deps)
 	}
+}
+
+// ensureRenoDXAllArches downloads every architecture a RenoDX mod
+// publishes, so the mod is ready whichever game it is later installed
+// into. Most publish exactly one.
+func ensureRenoDXAllArches(c *cache.Cache, m catalog.RenoMod) error {
+	tried := 0
+	var lastErr error
+	for _, arch := range []game.Arch{game.ArchX64, game.ArchX86} {
+		if _, ok := m.ArtifactFor(arch); !ok {
+			continue
+		}
+		tried++
+		if _, err := c.EnsureRenoDX(context.Background(), m, arch, nil); err != nil {
+			lastErr = err
+		}
+	}
+	if tried == 0 {
+		return fmt.Errorf("RenoDX %s publishes nothing installable", m.ID)
+	}
+	return lastErr
 }
 
 // ensureAddonAllArches downloads whichever architectures an add-on
@@ -576,6 +652,9 @@ func (s *ResourcesScreen) confirmDelete() (Screen, tea.Cmd) {
 			prefix = "package:" + row.ID + ":"
 		case paneAddons:
 			prefix = "addon:" + row.ID + ":"
+			if row.renodx.ID != "" {
+				prefix = "renodx:" + row.ID + ":"
+			}
 		}
 		entries, err := deps.Cache.List(cache.SortByName, false)
 		if err != nil {

@@ -26,6 +26,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The edit wizard names what an edit changes instead of counting it. The
+  Apply row said "+3 shaders", which is not something anyone can confirm;
+  it now names them, and the review page gains a **Changes** block listing
+  every addition and removal in full, led by the ReShade swap since that
+  is the change that rewrites every other file in the folder.
+
+- RenoDX mods appear in the resources browser's add-ons pane, so they can
+  be downloaded ahead, seen with their size, and deleted like anything
+  else. They share that pane rather than getting a fifth — a fifth pane
+  would push the four-pane layout's floor from 88 columns to 110 — and the
+  shortlist keeps it readable: with ~200 mods, only the ones already
+  downloaded or in use show until `a` widens it.
+
 - **RenoDX.** The wizard has a step for it whenever the add-on build is
   chosen: it reads RenoDX's own release index, matches the mod to the game
   you are installing into by Steam app id, and offers that one first.

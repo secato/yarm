@@ -18,6 +18,7 @@ import (
 	"github.com/secato/yarm/internal/cache"
 	"github.com/secato/yarm/internal/catalog"
 	"github.com/secato/yarm/internal/fetch"
+	"github.com/secato/yarm/internal/game"
 	"github.com/secato/yarm/internal/state"
 )
 
@@ -685,4 +686,145 @@ func TestClearCacheWarnsAboutEntriesAnInstallUses(t *testing.T) {
 	if detail := pressClear(t, s).detail; !strings.Contains(detail, "back a recorded install") {
 		t.Errorf("detail = %q, want a warning about installs using it", detail)
 	}
+}
+
+// renodxDeps adds two RenoDX mods to the resources fixture, one of which
+// is cacheable from the test server.
+func renodxDeps(t *testing.T) (Deps, []catalog.RenoMod) {
+	t.Helper()
+	deps, srv := resourcesTestDeps(t)
+	mods := []catalog.RenoMod{
+		{
+			ID: "cp2077", Title: "Cyberpunk 2077", Status: "stable",
+			Maintainers: []string{"ShortFuse"},
+			Artifacts: []catalog.RenoArtifact{{
+				Name: "renodx-cp2077.addon64", Arch: game.ArchX64, URL: srv.URL + "/r.addon64",
+			}},
+		},
+		{
+			ID: "wobbly", Title: "Wobbly Life", Status: "beta",
+			Artifacts: []catalog.RenoArtifact{{
+				Name: "renodx-wobbly.addon64", Arch: game.ArchX64, URL: srv.URL + "/r.addon64",
+			}},
+		},
+	}
+	d := deps.WizardData.(fakeWizardData).data
+	d.RenoDX = mods
+	deps.WizardData = fakeWizardData{data: d}
+	return deps, mods
+}
+
+// RenoDX mods share the add-ons pane rather than getting a fifth: a fifth
+// pane would push the four-pane floor from 88 columns to 110. There are
+// ~200 of them, so the shortlist keeps the pane readable — only the ones
+// already downloaded or in use show until `a` widens it.
+func TestResourcesScreenListsRenoDXMods(t *testing.T) {
+	deps, mods := renodxDeps(t)
+	if _, err := deps.Cache.EnsureRenoDX(context.Background(), mods[0], game.ArchX64, nil); err != nil {
+		t.Fatalf("EnsureRenoDX: %v", err)
+	}
+
+	s := loadResourcesScreen(t, deps)
+
+	shortlisted := visibleNames(s, paneAddons)
+	if !slices.Contains(shortlisted, "RenoDX: Cyberpunk 2077") {
+		t.Errorf("a cached RenoDX mod should show in the shortlist: %v", shortlisted)
+	}
+	if slices.Contains(shortlisted, "RenoDX: Wobbly Life") {
+		t.Errorf("an uncached RenoDX mod should stay behind show-all: %v", shortlisted)
+	}
+
+	s.showAll = true
+	all := visibleNames(s, paneAddons)
+	if !slices.Contains(all, "RenoDX: Wobbly Life") {
+		t.Errorf("show-all should reveal every RenoDX mod: %v", all)
+	}
+}
+
+func TestResourcesScreenDownloadsARenoDXMod(t *testing.T) {
+	deps, _ := renodxDeps(t)
+	s := loadResourcesScreen(t, deps)
+	s.focus = paneAddons
+	// Through the binding, not the field: toggling show-all re-syncs every
+	// pane's cursor count, and setting the field alone leaves the cursor
+	// clamped to the shortlisted length.
+	next, _ := s.Update(tea.KeyPressMsg{Code: 'a', Text: "a"}, wizardEnv())
+	s = next.(*ResourcesScreen)
+	s.cursors[paneAddons].setCursor(indexOfVisible(t, s, paneAddons, "RenoDX: Cyberpunk 2077"))
+
+	_, cmd := s.Update(tea.KeyPressMsg{Code: 'd', Text: "d"}, wizardEnv())
+	if cmd == nil {
+		t.Fatal("'d' should start a download")
+	}
+	if _, ok := cmd().(resourcesLoadedMsg); !ok {
+		t.Fatalf("download produced %T, want a reload", cmd())
+	}
+	if !deps.Cache.HasRenoDX("cp2077") {
+		t.Error("the mod was not cached")
+	}
+}
+
+func TestResourcesScreenDeletesARenoDXMod(t *testing.T) {
+	deps, mods := renodxDeps(t)
+	if _, err := deps.Cache.EnsureRenoDX(context.Background(), mods[0], game.ArchX64, nil); err != nil {
+		t.Fatalf("EnsureRenoDX: %v", err)
+	}
+	s := loadResourcesScreen(t, deps)
+	s.focus = paneAddons
+	s.cursors[paneAddons].setCursor(indexOfVisible(t, s, paneAddons, "RenoDX: Cyberpunk 2077"))
+
+	_, cmd := s.Update(tea.KeyPressMsg{Code: 'x', Text: "x"}, wizardEnv())
+	if cmd == nil {
+		t.Fatal("'x' should open the confirm dialog")
+	}
+	overlayMsg, ok := cmd().(showOverlayMsg)
+	if !ok {
+		t.Fatalf("message = %T, want showOverlayMsg", cmd())
+	}
+	confirm := overlayMsg.overlay.(confirmOverlay)
+	if _, ok := confirm.onYes().(resourcesLoadedMsg); !ok {
+		t.Fatal("confirming should reload the panes")
+	}
+	if deps.Cache.HasRenoDX("cp2077") {
+		t.Error("the mod is still cached after deleting it")
+	}
+}
+
+// A RenoDX mod is recorded in its own field rather than in the add-on
+// list, so "in use" has to look there.
+func TestResourcesScreenDetectsARenoDXModInUse(t *testing.T) {
+	deps, mods := renodxDeps(t)
+	if _, err := deps.Cache.EnsureRenoDX(context.Background(), mods[0], game.ArchX64, nil); err != nil {
+		t.Fatalf("EnsureRenoDX: %v", err)
+	}
+	reg := state.Registry{Schema: state.SchemaVersion, Games: map[string]state.Game{}}
+	reg.Record("steam:1", state.Game{Name: "X", Provider: "steam", Root: "/games/x"}, state.Install{
+		Exe: "x.exe", ReShade: state.ReShadeInfo{Version: "6.8.0", Flavor: "addon"}, RenoDX: "cp2077",
+	})
+	if err := state.Save(deps.StateDir, reg); err != nil {
+		t.Fatalf("state.Save: %v", err)
+	}
+
+	s := loadResourcesScreen(t, deps)
+	for _, r := range s.visible(paneAddons) {
+		if r.ID == "cp2077" {
+			if !r.InUse {
+				t.Error("a mod a recorded install uses should show as in use")
+			}
+			return
+		}
+	}
+	t.Errorf("no cp2077 row: %v", visibleNames(s, paneAddons))
+}
+
+// indexOfVisible finds a row by name in what a pane currently shows.
+func indexOfVisible(t *testing.T, s *ResourcesScreen, p resourcePane, name string) int {
+	t.Helper()
+	for i, r := range s.visible(p) {
+		if r.Name == name {
+			return i
+		}
+	}
+	t.Fatalf("no row %q in %v", name, visibleNames(s, p))
+	return -1
 }

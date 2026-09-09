@@ -1399,8 +1399,8 @@ func TestEditingSummaryShowsWhatWouldChange(t *testing.T) {
 	s = pressSpecial(t, s, tea.KeyDown)
 	s = pressSpecial(t, s, tea.KeySpace)
 	s = pressSpecial(t, s, tea.KeyEnter)
-	if got := s.changes(); len(got) != 1 || got[0] != "-1 shader" {
-		t.Errorf("changes() = %v, want one removed shader", got)
+	if got := s.changes(); len(got) != 1 || got[0] != "-SweetFX by CeeJay.dk" {
+		t.Errorf("changes() = %v, want the removed shader named", got)
 	}
 
 	// And a different version, from the other build.
@@ -1410,7 +1410,7 @@ func TestEditingSummaryShowsWhatWouldChange(t *testing.T) {
 	s = pressSpecial(t, s, tea.KeyEnter)
 
 	body := s.View(wizardEnv())
-	for _, want := range []string{"6.7.3 → 6.8.0", "addon build", "-1 shader"} {
+	for _, want := range []string{"6.7.3 → 6.8.0", "addon build", "-SweetFX by CeeJay.dk"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the summary should report %q:\n%s", want, body)
 		}
@@ -1541,9 +1541,10 @@ func TestEditingSummaryNamesPackagesTheCatalogNoLongerHas(t *testing.T) {
 		t.Errorf("the shaders pane should name what it cannot account for: %v",
 			s.hubLines(stepShaders, wizardEnv(), 80))
 	}
-	// And applying would indeed drop it, which the Apply line must admit.
-	if got := s.changes(); len(got) != 1 || got[0] != "-1 shader" {
-		t.Errorf("changes() = %v, want the vanished package counted as a removal", got)
+	// And applying would indeed drop it, which the Apply line must admit —
+	// by name, since that is the only way to recognize what is going.
+	if got := s.changes(); len(got) != 1 || got[0] != "-some-pack-that-vanished" {
+		t.Errorf("changes() = %v, want the vanished package named as a removal", got)
 	}
 }
 
@@ -1680,5 +1681,56 @@ func TestReShadeStepFitsWithTheNote(t *testing.T) {
 		if got := countLines(w.View(env)); got > height {
 			t.Errorf("height %d: rendered %d lines", height, got)
 		}
+	}
+}
+
+// Editing is confirmed on the review page, and "+3 shaders" is not
+// something anyone can confirm — so the page names what goes and what
+// arrives. A fresh install has no Changes block at all: it creates rather
+// than changes.
+func TestReviewNamesWhatAnEditChanges(t *testing.T) {
+	s := editWizard(t, "standard-effects", "sweetfx-by-ceejay-dk")
+
+	// Drop SweetFX, keep Standard effects.
+	s = openSection(t, s, stepShaders)
+	s = pressSpecial(t, s, tea.KeyDown)
+	s = pressSpecial(t, s, tea.KeySpace)
+	s = pressSpecial(t, s, tea.KeyEnter)
+
+	s.step = stepReview
+	body := s.View(wizardEnv())
+	for _, want := range []string{"Changes", "- SweetFX by CeeJay.dk"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("review should contain %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "Standard effects") && strings.Contains(body, "- Standard effects") {
+		t.Error("a package that was kept must not be listed as removed")
+	}
+}
+
+// A version bump changes every file in the folder without adding or
+// removing a single selection, so the Changes block has to appear for it
+// too rather than only for list edits.
+func TestReviewNamesAVersionOnlyChange(t *testing.T) {
+	s := editWizard(t)
+	s = openSection(t, s, stepReShade)
+	s = pressSpecial(t, s, tea.KeyUp) // a different version
+	s = pressSpecial(t, s, tea.KeyEnter)
+
+	s.step = stepReview
+	body := s.View(wizardEnv())
+	if !strings.Contains(body, "Changes") || !strings.Contains(body, "→") {
+		t.Errorf("review should report the version swap:\n%s", body)
+	}
+}
+
+// A fresh install is not an edit: there is nothing to diff against.
+func TestReviewHasNoChangesBlockForAFreshInstall(t *testing.T) {
+	s := loadWizard(t, sampleGameEntry(), 0, fakeDeps())
+	s = advance(t, s, stepReview)
+
+	if body := s.View(wizardEnv()); strings.Contains(body, "Changes") {
+		t.Errorf("a fresh install should have no Changes block:\n%s", body)
 	}
 }

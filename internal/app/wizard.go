@@ -1380,6 +1380,31 @@ func (s *WizardScreen) viewReview(b *strings.Builder, env Env, height int) {
 		into.WriteString("\n")
 	}
 
+	// What this edit actually changes, named. An edit is confirmed on
+	// this page, and "+3 shaders" is not something anyone can confirm.
+	// Only when editing: a fresh install changes nothing, it creates.
+	var diff strings.Builder
+	added, removed := s.changeLines()
+	reshadeLine := s.reshadeChangeLine()
+	if len(added)+len(removed) > 0 || reshadeLine != "" {
+		section(&diff, "Changes")
+		// The ReShade swap leads: it is the one change that alters every
+		// other file in the folder, not just its own.
+		if reshadeLine != "" {
+			diff.WriteString(env.Styles.Accent.Render(clipTail("  "+reshadeLine, env.Width)))
+			diff.WriteString("\n")
+		}
+		for _, name := range added {
+			diff.WriteString(env.Styles.Good.Render(clipTail("  + "+name, env.Width)))
+			diff.WriteString("\n")
+		}
+		for _, name := range removed {
+			diff.WriteString(env.Styles.Bad.Render(clipTail("  - "+name, env.Width)))
+			diff.WriteString("\n")
+		}
+		diff.WriteString("\n")
+	}
+
 	// What is already in the folder, and what will happen to it. This is
 	// the one thing on this page that can make the install run to
 	// completion and still leave ReShade not loading — and the one the
@@ -1469,6 +1494,7 @@ func (s *WizardScreen) viewReview(b *strings.Builder, env Env, height int) {
 	// wizard header: only this page's own content can be measured against
 	// the height it was given, and only it may be clipped to fit.
 	var page strings.Builder
+	page.WriteString(diff.String())
 	page.WriteString(files.String())
 	page.WriteString(check.String())
 
@@ -1480,7 +1506,8 @@ func (s *WizardScreen) viewReview(b *strings.Builder, env Env, height int) {
 	}
 	// -2 for this section's own header and the blank line before Options;
 	// whatever the Check block above already took comes off too.
-	room := height - countLines(opts.String()) - countLines(check.String()) - countLines(files.String()) - 2
+	room := height - countLines(opts.String()) - countLines(check.String()) -
+		countLines(files.String()) - countLines(diff.String()) - 2
 	if room < 1 {
 		room = 1
 	}
@@ -1901,8 +1928,123 @@ func (s *WizardScreen) changes() []string {
 	if s.existing == nil {
 		return nil
 	}
-	var out []string
+	out := s.reshadeChanges()
+	names := s.itemNames()
+	if p := diffPhrase(namedDiff(s.existing.Packages, s.packages.selectedIDs(), names)); p != "" {
+		out = append(out, p)
+	}
+	if p := diffPhrase(namedDiff(s.existing.Addons, addonsForDownload(s.flavor, s.addons), names)); p != "" {
+		out = append(out, p)
+	}
+	if p := diffPhrase(s.renodxDiff()); p != "" {
+		out = append(out, p)
+	}
+	return out
+}
 
+// namedDiff returns what an edit adds and removes, as display names
+// rather than ids — an edit is about what you recognize, not about what
+// the catalog calls it. An id the catalog no longer offers falls back to
+// the id, so a mod that disappeared upstream is still named.
+func namedDiff(before, after []string, names map[string]string) (added, removed []string) {
+	name := func(id string) string {
+		if n, ok := names[id]; ok && n != "" {
+			return n
+		}
+		return id
+	}
+	had := make(map[string]bool, len(before))
+	for _, id := range before {
+		had[id] = true
+	}
+	has := make(map[string]bool, len(after))
+	for _, id := range after {
+		has[id] = true
+	}
+	// Ordered by the caller's slices, not by map iteration, so the same
+	// edit always reads the same way.
+	for _, id := range after {
+		if !had[id] {
+			added = append(added, name(id))
+		}
+	}
+	for _, id := range before {
+		if !has[id] {
+			removed = append(removed, name(id))
+		}
+	}
+	return added, removed
+}
+
+// diffPhrase renders a diff for a single line, capped so the Apply row
+// stays one line on a normal terminal. The full list is on Review.
+func diffPhrase(added, removed []string) string {
+	var parts []string
+	if len(added) > 0 {
+		parts = append(parts, "+"+capNames(added))
+	}
+	if len(removed) > 0 {
+		parts = append(parts, "-"+capNames(removed))
+	}
+	return strings.Join(parts, " ")
+}
+
+// capNames lists up to two names and counts the rest.
+func capNames(names []string) string {
+	if len(names) <= 2 {
+		return strings.Join(names, ", ")
+	}
+	return fmt.Sprintf("%s, +%d more", strings.Join(names[:2], ", "), len(names)-2)
+}
+
+// renodxDiff is the RenoDX half of the edit, in the same shape as the
+// multi-select steps so it renders the same way.
+func (s *WizardScreen) renodxDiff() (added, removed []string) {
+	before, after := s.existing.RenoDX, renodxForDownload(s.flavor, s.renodxChoice)
+	if before == after {
+		return nil, nil
+	}
+	name := func(id string) string {
+		if m, ok := s.renodxMod(id); ok {
+			return m.Title
+		}
+		return id
+	}
+	if after != "" {
+		added = []string{"RenoDX " + name(after)}
+	}
+	if before != "" {
+		removed = []string{"RenoDX " + name(before)}
+	}
+	return added, removed
+}
+
+// changeLines is the full diff, one item per line, for the review page —
+// where there is room to name everything rather than cap it.
+func (s *WizardScreen) changeLines() (added, removed []string) {
+	if s.existing == nil {
+		return nil, nil
+	}
+	names := s.itemNames()
+
+	a, r := namedDiff(s.existing.Packages, s.packages.selectedIDs(), names)
+	added, removed = append(added, a...), append(removed, r...)
+
+	a, r = namedDiff(s.existing.Addons, addonsForDownload(s.flavor, s.addons), names)
+	added, removed = append(added, a...), append(removed, r...)
+
+	a, r = s.renodxDiff()
+	return append(added, a...), append(removed, r...)
+}
+
+// reshadeChanges lists the ReShade-side differences: version, build and
+// proxy DLL. Each is a swap rather than an addition, so they read as
+// "before → after" instead of joining the +/− list.
+func (s *WizardScreen) reshadeChanges() []string {
+	if s.existing == nil {
+		return nil
+	}
+	var out []string
 	if v, ok := s.selectedVersion(); ok && v.Version != s.existing.ReShade.Version {
 		out = append(out, fmt.Sprintf("%s → %s", displayVersion(s.existing.ReShade.Version), v.Version))
 	}
@@ -1912,13 +2054,12 @@ func (s *WizardScreen) changes() []string {
 	if dll := s.selectedDLL(); dll != "" && dll != s.existing.ReShade.DLL {
 		out = append(out, s.existing.ReShade.DLL+" → "+dll)
 	}
-	if n := countDiff(s.existing.Packages, s.packages.selectedIDs()); n != "" {
-		out = append(out, n+" shader")
-	}
-	if n := countDiff(s.existing.Addons, addonsForDownload(s.flavor, s.addons)); n != "" {
-		out = append(out, n+" add-on")
-	}
 	return out
+}
+
+// reshadeChangeLine is reshadeChanges as one line for the review page.
+func (s *WizardScreen) reshadeChangeLine() string {
+	return strings.Join(s.reshadeChanges(), ", ")
 }
 
 // displayVersion renders a recorded version for a change line. An adopted
