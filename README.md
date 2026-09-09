@@ -90,6 +90,11 @@ from a game that starts without ReShade.
 | **Arch Linux** | `yay -S yarm-bin` |
 | **From source** | `go install github.com/secato/yarm/cmd/yarm@latest` |
 
+### Requirements
+
+Any modern terminal with UTF-8 and a font that covers box-drawing and arrows. On Windows
+that means **Windows Terminal** — the legacy `cmd.exe` will not work.
+
 ## Using it
 
 Run `yarm`. Every screen lists its keys along the bottom and `?` opens the full
