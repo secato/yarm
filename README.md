@@ -78,8 +78,9 @@ they appear in the wizard next to the catalog ones.
 YARM says so, in red, on every screen where it matters — never install it into
 a game you play online.
 
-**Says no when it cannot help.** Vulkan and D3D8 games are not supported yet.
-YARM tells you rather than installing something that cannot work.
+**Tells you what it cannot do.** Vulkan and D3D8 are not supported yet. YARM
+says so while you are still choosing, rather than leaving you to work it out
+from a game that starts without ReShade.
 
 ## Installing YARM
 
@@ -96,7 +97,8 @@ help, so there is nothing to memorise: arrows move, `enter` goes in, `esc` goes
 back.
 
 Nothing is written to a game folder until you confirm on the review page, which
-lists every file that is about to change.
+shows what is already in the folder and what will happen to it, along with
+anything still to download.
 
 ## Adding your own shaders and add-ons
 
@@ -117,9 +119,8 @@ By default that is:
 | **Windows** | `%LOCALAPPDATA%\yarm\custom\` |
 
 It lives with your data rather than in the cache, so clearing yarm's downloads
-— or your `~/.cache` — never touches it.
-
-`yarm paths` prints the exact locations on your system.
+— or your `~/.cache` — never touches it. If you have set `YARM_HOME`, the folder
+is `$YARM_HOME/data/custom/` instead.
 
 ## Documentation
 

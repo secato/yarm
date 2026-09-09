@@ -12,7 +12,7 @@ make lint test
 ```
 
 Both must pass before opening a PR. `make cover` prints per-package coverage;
-`internal/` non-TUI packages should stay at or above 75%.
+every `internal/` package should stay at or above 75%.
 
 ## Commit messages
 
@@ -38,7 +38,10 @@ Steam is the only provider in v1. To add another (GOG/Heroic/Epic/Lutris):
 
 1. Implement the `platform.Provider` interface in a new
    `internal/platform/<name>/` package.
-2. Register it alongside `steam` and `manual` in `internal/platform`.
+2. Add it to `buildProviders` in `cmd/yarm/main.go`, alongside `steam` and
+   `manual`. That function is the single place providers are registered;
+   `internal/platform` holds only the interface and `DiscoverAll`, not a
+   registry.
 3. Add fixtures under `testdata/` for whatever manifest format the launcher
    uses, and unit tests exercising provider discovery against them.
 
@@ -50,7 +53,12 @@ by a fixture under `testdata/`.
 
 - Unit tests use the standard `testing` package, `net/http/httptest` for
   fake catalog/download servers, and `github.com/google/go-cmp` for diffs.
-- TUI screens use `github.com/charmbracelet/x/exp/teatest/v2` golden tests.
+- TUI screens are driven headlessly with
+  `github.com/charmbracelet/x/exp/teatest/v2` at a pinned terminal size and
+  `colorprofile.NoTTY`, asserting on the rendered frame. There are no golden
+  files: a screen's layout changes often enough that a committed frame would
+  be re-blessed rather than read, so tests assert the few things that
+  actually matter in the output.
 - Never hit real network services in a normal test run. Tests that need the
   real internet (e.g. downloading a real ReShade release) must be gated
   behind `YARM_NETWORK_TESTS=1` and skipped otherwise.
