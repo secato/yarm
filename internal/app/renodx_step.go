@@ -245,7 +245,19 @@ func (s *WizardScreen) chooseRenoDX() {
 		return
 	}
 	s.renodxChoice = it.ID
-	s.renodx.chooseOnly(it.ID)
+	s.markRenoDXChoice()
+}
+
+// markRenoDXChoice re-applies the answer to the visible rows. chooseOnly
+// clears everything and an empty id selects nothing, which would leave
+// the "No RenoDX mod" row unchecked even when it IS the answer —
+// choosing nothing has to look chosen, since it unchooses everything
+// else.
+func (s *WizardScreen) markRenoDXChoice() {
+	s.renodx.chooseOnly(s.renodxChoice)
+	if s.renodxChoice == "" {
+		s.renodx.selected[renodxNoneID] = true
+	}
 }
 
 // CapturesInput tells the shell to route plain keys here while the RenoDX

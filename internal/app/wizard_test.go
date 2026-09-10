@@ -1,6 +1,8 @@
 package app
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -1317,6 +1319,86 @@ func gameWithExistingFiles(t *testing.T, files map[string]int) GameEntry {
 	entry := sampleGameEntry()
 	entry.Root = root
 	return entry
+}
+
+// managedTestEntry roots a game at a temp dir holding content beside its
+// executable, with a recorded install claiming it byte-for-byte.
+func managedTestEntry(t *testing.T, version, content string) GameEntry {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "Game"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "Game", "dxgi.dll"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(content))
+	entry := sampleGameEntry()
+	entry.Root = root
+	entry.Exes[0].Installed = &state.Install{
+		Exe:      "Game/emberhollow.exe",
+		ReShade:  state.ReShadeInfo{Version: version, Flavor: "addon", DLL: "dxgi.dll"},
+		Packages: []string{"standard-effects"},
+		Files: []state.File{{
+			Path: "Game/dxgi.dll", SHA256: hex.EncodeToString(sum[:]),
+			Size: int64(len(content)), Origin: state.OriginReShade,
+		}},
+	}
+	return entry
+}
+
+// A managed file the plan will skip is not a conflict: owned, unmodified,
+// same version, build and DLL. Reopening the wizard to change a shader
+// must not cry "yours, replaced" about an untouched proxy DLL.
+func TestConflictsOmitUnchangedManagedFiles(t *testing.T) {
+	s := loadWizard(t, managedTestEntry(t, "6.8.0", "the installed reshade build"), 0, fakeDeps())
+
+	if cs := s.conflicts(); len(cs) != 0 {
+		t.Errorf("an untouched managed file should not conflict: %+v", cs)
+	}
+}
+
+// The same file edited since is still reported — it really will be
+// replaced.
+func TestConflictsKeepEditedManagedFiles(t *testing.T) {
+	entry := managedTestEntry(t, "6.8.0", "the installed reshade build")
+	if err := os.WriteFile(filepath.Join(entry.Root, "Game", "dxgi.dll"),
+		[]byte("edited by the user, much longer than before"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := loadWizard(t, entry, 0, fakeDeps())
+
+	found := false
+	for _, c := range s.conflicts() {
+		if c.Path == "Game/dxgi.dll" {
+			found = true
+			if c.Kind != install.ConflictManaged {
+				t.Errorf("kind = %q, want managed", c.Kind)
+			}
+		}
+	}
+	if !found {
+		t.Error("an edited managed file should still conflict")
+	}
+}
+
+// A version bump really does replace the DLL, so it stays reported even
+// when the file on disk is byte-identical to the manifest.
+func TestConflictsKeepManagedFilesOnUpgrade(t *testing.T) {
+	s := loadWizard(t, managedTestEntry(t, "6.7.3", "the installed reshade build"), 0, fakeDeps())
+	s = openSection(t, s, stepReShade)
+	s = pressSpecial(t, s, tea.KeyUp) // 6.7.3 -> 6.8.0
+	s = pressSpecial(t, s, tea.KeyEnter)
+
+	found := false
+	for _, c := range s.conflicts() {
+		if c.Path == "Game/dxgi.dll" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("an upgrade should still report the managed DLL it will replace")
+	}
 }
 
 // The review page has to say what is already in the folder before the user

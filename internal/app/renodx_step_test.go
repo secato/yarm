@@ -186,6 +186,46 @@ func TestRenoDXTypingLeavesOtherListsAlone(t *testing.T) {
 	}
 }
 
+// Choosing "No RenoDX mod" has to look chosen: it is a real answer that
+// unchooses everything else, not the absence of one.
+func TestRenoDXNoneRowShowsSelected(t *testing.T) {
+	s := loadWizard(t, sampleGameEntry(), 0, fakeDeps())
+	s = advance(t, s, stepRenoDX)
+	noneAt := indexOfRow(t, s, "No RenoDX mod")
+
+	// First pick a mod, so "none" has something to unchoose.
+	s.renodx.cursor = indexOfRow(t, s, "Ember Hollow")
+	s = pressSpecial(t, s, ' ')
+	if s.renodxChoice != "emberhollow" {
+		t.Fatalf("choice = %q, want emberhollow", s.renodxChoice)
+	}
+	if s.renodx.isSelected(noneAt) {
+		t.Error("picking a mod should uncheck the none row")
+	}
+
+	s.renodx.cursor = noneAt
+	s = pressSpecial(t, s, ' ')
+	if s.renodxChoice != "" {
+		t.Errorf("choice = %q, want none", s.renodxChoice)
+	}
+	if !s.renodx.isSelected(noneAt) {
+		t.Error("the none row should show checked once chosen")
+	}
+
+	// A list rebuild must not lose the mark.
+	s.refreshLists()
+	if !s.renodx.isSelected(indexOfRow(t, s, "No RenoDX mod")) {
+		t.Error("refreshing the lists should keep the none row checked")
+	}
+
+	// And picking a mod again unchecks it.
+	s.renodx.cursor = indexOfRow(t, s, "Ember Hollow")
+	s = pressSpecial(t, s, ' ')
+	if s.renodx.isSelected(indexOfRow(t, s, "No RenoDX mod")) {
+		t.Error("picking a mod should uncheck the none row again")
+	}
+}
+
 // The answer is held in renodxChoice, not read back from the visible
 // rows — so a search that hides the chosen mod must not unanswer the step.
 func TestRenoDXSearchDoesNotUnchooseAHiddenMod(t *testing.T) {

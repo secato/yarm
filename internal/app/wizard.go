@@ -2,10 +2,15 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
+	"os"
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
@@ -227,6 +232,10 @@ type WizardScreen struct {
 	// Step: review options — the overwrite/backup checklist shown in the
 	// apply confirmation, navigated the same way shaders/add-ons are.
 	options multiSelect
+
+	// managedSigs memoizes managed-file hashes for conflicts(), keyed by
+	// path and validated against size and mtime.
+	managedSigs map[string]managedSig
 
 	// missingGen bumps every time an answer missing() depends on changes
 	// (version, build, selections), so the review page and the apply modal
@@ -584,7 +593,7 @@ func (s *WizardScreen) refreshLists() {
 	s.packages.setItems(curate(s.annotate(s.fullPackages(), sel), curatedPackages, s.showAll, s.packages.selected))
 	s.addons.setItems(curate(s.annotate(s.fullAddons(), sel), curatedAddons, s.showAll, s.addons.selected))
 	s.renodx.setItems(filterRenoDX(s.renodxRows(), s.renodxFilter.Value()))
-	s.renodx.chooseOnly(s.renodxChoice)
+	s.markRenoDXChoice()
 }
 
 // refreshRenoDX rebuilds only the RenoDX list. Typing a search must not
@@ -592,7 +601,7 @@ func (s *WizardScreen) refreshLists() {
 // probes — too.
 func (s *WizardScreen) refreshRenoDX() {
 	s.renodx.setItems(filterRenoDX(s.renodxRows(), s.renodxFilter.Value()))
-	s.renodx.chooseOnly(s.renodxChoice)
+	s.markRenoDXChoice()
 }
 
 // selection is everything checked across both steps, which is what a
@@ -1983,15 +1992,110 @@ func addonsForDownload(flavor install.Flavor, addons multiSelect) []string {
 }
 
 // conflicts is what already sits where this install would write. Cheap
-// (a handful of stats), so it is recomputed each render rather than cached
-// and risking a stale answer after the user alt-tabs away and edits the
+// (a handful of stats, plus a hash only when a managed file may have
+// changed), so it is recomputed each render rather than cached and
+// risking a stale answer after the user alt-tabs away and edits the
 // folder.
 func (s *WizardScreen) conflicts() []install.Conflict {
 	req, ok := s.buildRequest()
 	if !ok {
 		return nil
 	}
-	return install.Preflight(req, s.existing)
+	return s.filterUnchangedManaged(req, install.Preflight(req, s.existing))
+}
+
+// filterUnchangedManaged drops managed files the plan will skip: owned,
+// unmodified, and with the same source this request would install. Those
+// need no decision, so listing them as "yours, replaced" only cries wolf
+// — the common case being reopening the wizard and changing a shader,
+// where the proxy DLL is untouched.
+func (s *WizardScreen) filterUnchangedManaged(req install.Request, cs []install.Conflict) []install.Conflict {
+	if s.existing == nil {
+		return cs
+	}
+	out := make([]install.Conflict, 0, len(cs))
+	for _, c := range cs {
+		if c.Kind != install.ConflictManaged || !s.managedWillSkip(req, c) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// managedWillSkip reports whether a managed file will keep its bytes: the
+// request names the same source the recorded install put there (releases
+// are deterministic, so same version, build and DLL name means identical
+// bytes), and what is on disk still hashes to the recorded hash.
+func (s *WizardScreen) managedWillSkip(req install.Request, c install.Conflict) bool {
+	var rec state.File
+	found := false
+	for _, f := range s.existing.Files {
+		if f.Path == c.Path {
+			rec, found = f, true
+			break
+		}
+	}
+	if !found {
+		return false
+	}
+	// The compiler dll has no version: it is either ours and intact, or
+	// it is not.
+	if base := path.Base(c.Path); base != artifacts.D3DCompiler {
+		if req.Version != s.existing.ReShade.Version ||
+			string(req.Flavor) != s.existing.ReShade.Flavor ||
+			req.DLLName != s.existing.ReShade.DLL {
+			return false
+		}
+	}
+	sum, err := s.managedSum(filepath.Join(s.entry.Root, filepath.FromSlash(c.Path)))
+	return err == nil && sum == rec.SHA256
+}
+
+// managedSig remembers a managed file's hash alongside the size and mtime
+// it was taken at, so a per-frame conflicts() call stats instead of
+// re-reading megabytes of DLL.
+type managedSig struct {
+	size  int64
+	mtime time.Time
+	sum   string
+}
+
+// managedSum hashes a file, returning the memoized hash when size and
+// mtime say it has not changed since. An unreadable file errors, which
+// the caller reads as "not skippable" — a file that cannot be read is
+// not one to silently claim as fine.
+func (s *WizardScreen) managedSum(abs string) (string, error) {
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", err
+	}
+	if sig, ok := s.managedSigs[abs]; ok && sig.size == info.Size() && sig.mtime.Equal(info.ModTime()) {
+		return sig.sum, nil
+	}
+	sum, err := fileSHA256(abs)
+	if err != nil {
+		return "", err
+	}
+	if s.managedSigs == nil {
+		s.managedSigs = map[string]managedSig{}
+	}
+	s.managedSigs[abs] = managedSig{size: info.Size(), mtime: info.ModTime(), sum: sum}
+	return sum, nil
+}
+
+// fileSHA256 hashes a file for comparison, not for the manifest — the
+// install engine keeps its own copy tied to the bytes it writes.
+func fileSHA256(abs string) (string, error) {
+	f, err := os.Open(abs)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // describeConflict turns one conflict into its row: what is there, and
