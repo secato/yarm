@@ -69,13 +69,24 @@ func (p Planner) Plan(req Request, art Artifacts) (Plan, error) {
 	prev, hasPrev := p.Registry.FindInstall(req.Game.ID, filepath.ToSlash(req.Exe.Path))
 	plan.Upgrade = hasPrev
 
+	// One lookup table for the whole plan: OwnedFile scans the manifest
+	// linearly, and classifying every file against it would be quadratic
+	// in shader-heavy installs.
+	var owned map[string]state.File
+	if hasPrev {
+		owned = make(map[string]state.File, len(prev.Files))
+		for _, f := range prev.Files {
+			owned[f.Path] = f
+		}
+	}
+
 	// Decide each file's action against what is on disk and what a
 	// previous install claims.
 	for i := range files {
-		if hasPrev {
-			files[i].OwnedRecord, files[i].Owned = prev.OwnedFile(files[i].Dest)
+		if rec, ok := owned[files[i].Dest]; ok {
+			files[i].OwnedRecord, files[i].Owned = rec, true
 		}
-		action, warn, err := p.classify(req, prev, hasPrev, files[i])
+		action, warn, err := p.classify(req, owned, files[i])
 		if err != nil {
 			return Plan{}, err
 		}
@@ -213,8 +224,9 @@ func (p Planner) collect(req Request, art Artifacts, exeDir string) ([]PlannedFi
 }
 
 // classify decides what to do about one planned file, given what is on
-// disk and what a previous install claims.
-func (p Planner) classify(req Request, prev state.Install, hasPrev bool, f PlannedFile) (Action, string, error) {
+// disk and the previous install's manifest as a lookup table (nil when
+// there is no previous install).
+func (p Planner) classify(req Request, owned map[string]state.File, f PlannedFile) (Action, string, error) {
 	dst := filepath.Join(req.Game.Root, filepath.FromSlash(f.Dest))
 
 	info, err := os.Stat(dst)
@@ -234,24 +246,35 @@ func (p Planner) classify(req Request, prev state.Install, hasPrev bool, f Plann
 		return ActionSkip, "", nil
 	}
 
-	// Does a previous install of ours claim this file, unmodified?
-	if hasPrev {
-		if owned, ok := prev.OwnedFile(f.Dest); ok {
-			sum, err := hashFile(dst)
-			if err != nil {
-				return "", "", err
-			}
-			if sum == owned.SHA256 {
-				// Identical content already installed: nothing to do.
-				if same, err := sameContent(f.Source, sum); err == nil && same {
-					return ActionSkip, "", nil
-				}
-				return ActionReplace, "", nil
-			}
+	// Does a previous install of ours claim this file, unmodified? Sizes
+	// answer first when the manifest recorded them: a file whose size no
+	// longer matches was edited, and one matching the manifest but not
+	// the new source is a replace — both without reading a single byte.
+	// A manifest entry without a size (zero) cannot say either, so it
+	// falls through to hashing, exactly as before.
+	if rec, ok := owned[f.Dest]; ok {
+		if rec.Size > 0 && info.Size() != rec.Size {
 			// Ours by the manifest, but the user has since edited it.
 			return ActionReplace, fmt.Sprintf(
 				"%s was modified after installation and will be replaced", f.Dest), nil
 		}
+		if rec.Size > 0 && info.Size() != f.Size {
+			return ActionReplace, "", nil
+		}
+		sum, err := hashFile(dst)
+		if err != nil {
+			return "", "", err
+		}
+		if sum == rec.SHA256 {
+			// Identical content already installed: nothing to do.
+			if same, err := sameContent(f.Source, sum); err == nil && same {
+				return ActionSkip, "", nil
+			}
+			return ActionReplace, "", nil
+		}
+		// Same size, different bytes: edited without changing the length.
+		return ActionReplace, fmt.Sprintf(
+			"%s was modified after installation and will be replaced", f.Dest), nil
 	}
 
 	// A file we do not own. Only touch it with explicit permission.

@@ -168,6 +168,24 @@ func TestRenoDXSearchNarrowsTheList(t *testing.T) {
 	}
 }
 
+// Typing a RenoDX search rebuilds only the RenoDX list: the shader and
+// add-on lists (with their annotations and cache probes) are untouched.
+func TestRenoDXTypingLeavesOtherListsAlone(t *testing.T) {
+	s := loadWizard(t, sampleGameEntry(), 0, fakeDeps())
+	s = advance(t, s, stepRenoDX)
+	s = pressSpecial(t, s, '/')
+
+	pkgRow, addonRow := &s.packages.items[0], &s.addons.items[0]
+	s = typeInto(t, s, "wob")
+
+	if &s.packages.items[0] != pkgRow {
+		t.Error("typing a RenoDX search should not rebuild the shader list")
+	}
+	if &s.addons.items[0] != addonRow {
+		t.Error("typing a RenoDX search should not rebuild the add-on list")
+	}
+}
+
 // The answer is held in renodxChoice, not read back from the visible
 // rows — so a search that hides the chosen mod must not unanswer the step.
 func TestRenoDXSearchDoesNotUnchooseAHiddenMod(t *testing.T) {

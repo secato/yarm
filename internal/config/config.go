@@ -73,7 +73,7 @@ steam:
 defaults:
   reshade_flavor: normal      # normal | addon (addon builds are detectable by anti-cheat)
   packages: ["standard"]      # package ids preselected in the wizard
-catalog_ttl_hours: 24         # how long EffectPackages.ini/Addons.ini/version list are trusted
+catalog_ttl_hours: 24         # how long the RenoDX mod index is trusted (placeholder; final cache times TBD)
 `
 
 // Path returns the full path to config.yaml inside dir.

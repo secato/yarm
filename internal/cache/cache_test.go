@@ -405,6 +405,120 @@ func TestClean(t *testing.T) {
 	}
 }
 
+// touch() rewrites the whole index file, so back-to-back hits within the
+// hour must not each fsync it.
+func TestTouchThrottlesRewrites(t *testing.T) {
+	dir := t.TempDir()
+	c := New(dir, nil)
+	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	c.Now = func() time.Time { return now }
+
+	rel := filepath.Join("test", "a")
+	if err := os.MkdirAll(filepath.Join(dir, rel), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, rel, "f"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := c.record(Entry{ID: "a", Kind: KindPackage, Path: rel}); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	at := func() time.Time {
+		t.Helper()
+		idx, err := loadIndex(dir)
+		if err != nil {
+			t.Fatalf("loadIndex: %v", err)
+		}
+		return idx.Entries["a"].LastUsedAt
+	}
+	first := at()
+
+	now = now.Add(30 * time.Minute)
+	if err := c.touch("a"); err != nil {
+		t.Fatalf("touch: %v", err)
+	}
+	if got := at(); !got.Equal(first) {
+		t.Errorf("touch within the hour moved LastUsedAt to %v", got)
+	}
+
+	now = now.Add(time.Hour)
+	if err := c.touch("a"); err != nil {
+		t.Fatalf("touch: %v", err)
+	}
+	if got := at(); !got.After(first) {
+		t.Error("touch after the hour should update LastUsedAt")
+	}
+}
+
+// Clean refuses an entry pointing outside the root but still sweeps the
+// rest, rather than stopping at the first bad row.
+func TestCleanSkipsOutsideRoot(t *testing.T) {
+	c, _, _ := newCache(t, func(w http.ResponseWriter, r *http.Request) {})
+
+	rel := filepath.Join("test", "good")
+	if err := os.MkdirAll(c.abs(rel), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(c.abs(rel), "f"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := c.record(Entry{ID: "good", Kind: KindPackage, Path: rel}); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	idx, err := loadIndex(c.Root)
+	if err != nil {
+		t.Fatalf("loadIndex: %v", err)
+	}
+	idx.Entries["evil"] = Entry{ID: "evil", Kind: KindPackage, Path: filepath.Join("..", "..", "evil")}
+	if err := saveIndex(c.Root, idx); err != nil {
+		t.Fatalf("saveIndex: %v", err)
+	}
+
+	removed, err := c.Clean()
+	if err == nil {
+		t.Error("want an error for the outside-root entry, got nil")
+	}
+	if removed != 1 {
+		t.Errorf("removed %d entries, want 1", removed)
+	}
+	if _, statErr := os.Stat(c.abs(rel)); !os.IsNotExist(statErr) {
+		t.Error("the good entry should be gone from disk")
+	}
+	entries, _ := c.List(SortByName, false)
+	for _, e := range entries {
+		if e.ID == "good" {
+			t.Error("the good entry should be gone from the index")
+		}
+	}
+}
+
+// CleanPartials sweeps interrupted downloads but nothing else: the .part
+// suffix is fetch-exclusive, so a completed download never matches it.
+func TestCleanPartials(t *testing.T) {
+	c, _, _ := newCache(t, func(w http.ResponseWriter, r *http.Request) {})
+
+	downloads := c.abs(DirDownloads)
+	if err := os.MkdirAll(downloads, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	for _, name := range []string{"a.zip" + fetch.PartSuffix, "b.exe" + fetch.PartSuffix, "keep.zip"} {
+		if err := os.WriteFile(filepath.Join(downloads, name), []byte("x"), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+
+	if err := c.CleanPartials(); err != nil {
+		t.Fatalf("CleanPartials() error = %v", err)
+	}
+	entries, err := os.ReadDir(downloads)
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "keep.zip" {
+		t.Errorf("downloads dir holds %v, want only keep.zip", entries)
+	}
+}
+
 // A download filename is built from a catalog-supplied URL, so the
 // extension it contributes must be plain and bounded. A query string in
 // particular is an invalid filename on Windows and would fail the write.

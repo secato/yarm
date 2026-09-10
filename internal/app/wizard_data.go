@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/secato/yarm/internal/catalog"
 	"github.com/secato/yarm/internal/game"
@@ -44,24 +45,35 @@ type CatalogWizardData struct {
 
 // LoadWizardData implements WizardDataLoader.
 //
-// A failure in one source does not suppress the others — an expired
-// GitHub rate limit should not stop the wizard from at least offering
-// versions and packages it already has cached — but the wizard cannot
-// proceed with nothing at all to offer.
+// The five sources are independent — versions, packages, add-ons, RenoDX
+// and the custom folder — so they load concurrently rather than summing
+// their latencies into one cold open. A failure in one source does not
+// suppress the others — an expired GitHub rate limit should not stop the
+// wizard from at least offering versions and packages it already has
+// cached — but the wizard cannot proceed with nothing at all to offer.
 func (l CatalogWizardData) LoadWizardData(ctx context.Context) (WizardData, error) {
 	var data WizardData
+	var vErr, pErr, aErr, rErr error
 
-	versions, vErr := l.Client.Versions(ctx)
-	data.Versions = versions
-
-	packages, pErr := l.Client.Packages(ctx)
-	data.Packages = packages
-
-	addons, aErr := l.Client.Addons(ctx)
-	data.Addons = addons
-
-	mods, rErr := l.Client.RenoDX(ctx)
-	data.RenoDX = mods
+	var wg sync.WaitGroup
+	wg.Add(4)
+	go func() {
+		defer wg.Done()
+		data.Versions, vErr = l.Client.Versions(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		data.Packages, pErr = l.Client.Packages(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		data.Addons, aErr = l.Client.Addons(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		data.RenoDX, rErr = l.Client.RenoDX(ctx)
+	}()
+	wg.Wait()
 
 	custom, cErr := catalog.ScanCustom(l.CustomDir)
 	for _, c := range custom {

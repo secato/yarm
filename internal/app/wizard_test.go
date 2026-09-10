@@ -161,6 +161,50 @@ func TestWizardLoadsDataAndPreselectsRequired(t *testing.T) {
 	}
 }
 
+// The unfiltered catalog rows are built once per data load: rebuilding
+// them means a cache probe per row, which per-frame and per-keystroke
+// callers must not pay.
+func TestFullListsAreBuiltOnce(t *testing.T) {
+	deps := fakeDeps()
+	deps.CacheStatus = fakeCacheStatus{packages: map[string]bool{"standard-effects": true}}
+	s := loadWizard(t, sampleGameEntry(), 0, deps)
+
+	first := s.fullPackages()
+	deps.CacheStatus = fakeCacheStatus{}
+	s.deps = deps
+	second := s.fullPackages()
+	if len(first) != len(second) {
+		t.Fatalf("lengths differ: %d vs %d", len(first), len(second))
+	}
+	for i := range first {
+		if first[i] != second[i] {
+			t.Errorf("row %d changed without new data: %+v vs %+v", i, first[i], second[i])
+		}
+	}
+}
+
+// missing() probes the cache per entry, so the review page and the apply
+// modal share one computation per generation of answers.
+func TestMissingIsCachedByGeneration(t *testing.T) {
+	s := advance(t, loadWizard(t, sampleGameEntry(), 0, fakeDeps()), stepReview)
+
+	first := s.missing()
+	if len(first) == 0 {
+		t.Fatal("want a non-empty download list against an empty cache")
+	}
+	if second := s.missing(); len(second) == 0 || &first[0] != &second[0] {
+		t.Error("missing should be served from cache within a generation")
+	}
+
+	// A new answer — a different version — invalidates it.
+	s.step = stepReShade
+	s = pressSpecial(t, s, tea.KeyDown)
+	s.step = stepReview
+	if third := s.missing(); len(third) == 0 || &third[0] == &first[0] {
+		t.Error("missing should recompute after the answers change")
+	}
+}
+
 // The user's configured default packages (config.yaml defaults.packages,
 // aliases and all) must be preselected alongside whatever is Required.
 func TestWizardPreselectsConfiguredDefaults(t *testing.T) {

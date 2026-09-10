@@ -123,6 +123,15 @@ func (s *WizardScreen) renodxRow(m catalog.RenoMod, matched bool) selectItem {
 // every screen it matters; quietly adding a second injected DLL to every
 // install would contradict that.
 func (s *WizardScreen) renodxRows() []selectItem {
+	if s.renodxFull == nil {
+		s.renodxFull = s.buildRenoDXRows()
+	}
+	return s.renodxFull
+}
+
+// buildRenoDXRows assembles the unfiltered RenoDX list once per data load:
+// one cache probe per mod makes rebuilding it per keystroke a stat storm.
+func (s *WizardScreen) buildRenoDXRows() []selectItem {
 	none := selectItem{ID: renodxNoneID, Name: "No RenoDX mod"}
 	rows := []selectItem{none}
 
@@ -197,12 +206,12 @@ func (s *WizardScreen) handleRenoDXKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 			s.renodxFiltering = false
 			s.renodxFilter.Blur()
 			s.renodxFilter.SetValue("")
-			s.refreshLists()
+			s.refreshRenoDX()
 			return s, nil
 		}
 		var cmd tea.Cmd
 		s.renodxFilter, cmd = s.renodxFilter.Update(msg)
-		s.refreshLists()
+		s.refreshRenoDX()
 		return s, cmd
 	}
 
@@ -216,6 +225,7 @@ func (s *WizardScreen) handleRenoDXKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		s.renodx.down()
 	case key.Matches(msg, s.keys.Toggle):
 		s.chooseRenoDX()
+		s.missingGen++
 	case key.Matches(msg, s.keys.Enter):
 		s.step = s.afterStep(stepRenoDX)
 	}

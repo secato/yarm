@@ -70,11 +70,23 @@ type Client struct {
 // New returns a Client with sensible defaults.
 func New(userAgent string) *Client {
 	return &Client{
-		HTTP:      &http.Client{Timeout: DefaultTimeout},
+		HTTP:      &http.Client{Timeout: DefaultTimeout, Transport: DefaultTransport()},
 		UserAgent: userAgent,
 		Retries:   DefaultRetries,
 		Backoff:   DefaultBackoff,
 		MaxBytes:  DefaultMaxBytes,
+	}
+}
+
+// DefaultTransport returns a transport with connection reuse tuned for a
+// client that talks to a handful of hosts repeatedly: idle connections
+// persist across the sequential catalog and artifact fetches instead of
+// paying a handshake per request.
+func DefaultTransport() *http.Transport {
+	return &http.Transport{
+		MaxIdleConns:        16,
+		MaxIdleConnsPerHost: 4,
+		IdleConnTimeout:     90 * time.Second,
 	}
 }
 

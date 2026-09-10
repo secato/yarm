@@ -1,9 +1,18 @@
 package app
 
 import (
+	"context"
+
 	"github.com/secato/yarm/internal/cache"
 	"github.com/secato/yarm/internal/config"
 )
+
+// CatalogRefresher force-refreshes the on-disk catalogs, bypassing their
+// cache. Implemented by *catalog.Client; a nil refresher means catalogs
+// only ever load, never refresh.
+type CatalogRefresher interface {
+	RefreshCatalog(ctx context.Context) error
+}
 
 // Deps bundles what game-focused screens need beyond their own data:
 // access to the catalog and cache (through small interfaces, so tests can
@@ -15,8 +24,11 @@ type Deps struct {
 	Installer   Installer
 	Uninstaller UninstallRunner
 	Adopter     AdoptRunner
-	CacheStatus CacheStatus // may be nil: badges just show nothing
-	Defaults    config.DefaultsConfig
+	// CatalogRefresh force-refreshes the on-disk catalogs for the rescan
+	// key (nil in tests that never rescan).
+	CatalogRefresh CatalogRefresher
+	CacheStatus    CacheStatus // may be nil: badges just show nothing
+	Defaults       config.DefaultsConfig
 
 	// Cache backs the resources screen (browse/download/delete/refresh)
 	// and the cache-status badges elsewhere. It is the concrete type, not

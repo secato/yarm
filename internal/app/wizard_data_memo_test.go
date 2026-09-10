@@ -144,6 +144,102 @@ func TestWizardOpensWithoutLoadingWhenTheCatalogIsWarm(t *testing.T) {
 	}
 }
 
+// Reset drops the memoized load so the next caller fetches fresh — the
+// rescan path, after forcing the on-disk catalogs to refresh.
+func TestMemoResetReloads(t *testing.T) {
+	inner := &countingLoader{data: sampleWizardData()}
+	loader := Memoize(inner)
+
+	if _, err := loader.LoadWizardData(context.Background()); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	r, ok := loader.(interface{ Reset() })
+	if !ok {
+		t.Fatal("the memoized loader should be resettable")
+	}
+	r.Reset()
+	if _, ok := loader.(preloadedWizardData).loaded(); ok {
+		t.Error("a reset memo should not count as preloaded")
+	}
+	if _, err := loader.LoadWizardData(context.Background()); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got := inner.calls.Load(); got != 2 {
+		t.Errorf("the catalog was loaded %d times, want twice", got)
+	}
+}
+
+// fakeRefresher records catalog refresh requests.
+type fakeRefresher struct {
+	hits int
+	err  error
+}
+
+func (f *fakeRefresher) RefreshCatalog(context.Context) error {
+	f.hits++
+	return f.err
+}
+
+// The rescan key means fresh data everywhere: the on-disk catalogs
+// re-fetch, the memo built from the old copies is dropped, and a fresh
+// load is warmed — alongside the game rescan, not instead of it.
+func TestRescanRefreshesTheCatalog(t *testing.T) {
+	inner := &countingLoader{data: sampleWizardData()}
+	ref := &fakeRefresher{}
+	deps := Deps{WizardData: Memoize(inner), CatalogRefresh: ref}
+	s := NewGamesScreen(fakeLoader{entries: sampleEntries()}, deps, false)
+	drainCmd(s.Init()) // startup preload: one load
+	if got := inner.calls.Load(); got != 1 {
+		t.Fatalf("startup loads = %d, want 1", got)
+	}
+
+	_, cmd := s.Update(tea.KeyPressMsg{Code: 'r', Text: "r"}, wizardEnv())
+	if cmd == nil {
+		t.Fatal("rescan should return a command")
+	}
+	drainCmd(cmd)
+
+	if ref.hits != 1 {
+		t.Errorf("catalog refreshed %d times, want once", ref.hits)
+	}
+	if got := inner.calls.Load(); got != 2 {
+		t.Errorf("catalog loads = %d, want 2 (memo reset, then warmed)", got)
+	}
+}
+
+// A failed refresh is not modal: the old disk copies are untouched and
+// still serve, so rescan only says so in the status line.
+func TestRescanCatalogFailureStaysOnCache(t *testing.T) {
+	inner := &countingLoader{data: sampleWizardData()}
+	ref := &fakeRefresher{err: errors.New("network down")}
+	deps := Deps{WizardData: Memoize(inner), CatalogRefresh: ref}
+	s := NewGamesScreen(fakeLoader{entries: sampleEntries()}, deps, false)
+
+	msg := s.refreshCatalog()()
+	refreshed, ok := msg.(catalogRefreshedMsg)
+	if !ok {
+		t.Fatalf("message = %T, want catalogRefreshedMsg", msg)
+	}
+	if refreshed.err == nil {
+		t.Fatal("want the refresh error carried, got nil")
+	}
+
+	_, cmd := s.Update(refreshed, wizardEnv())
+	if cmd == nil {
+		t.Fatal("a failed refresh should set the status line")
+	}
+	status, ok := cmd().(statusMsg)
+	if !ok {
+		t.Fatalf("message = %T, want statusMsg", cmd())
+	}
+	if !strings.Contains(status.text, "cached") {
+		t.Errorf("status = %q, want it to say the cached catalogs still serve", status.text)
+	}
+	if _, ok := deps.WizardData.(preloadedWizardData).loaded(); !ok {
+		t.Error("the memo should have warmed from the old copies despite the failure")
+	}
+}
+
 // drainCmd runs a command (and any batched children) for its side
 // effects, which is all the preload has.
 func drainCmd(cmd tea.Cmd) {

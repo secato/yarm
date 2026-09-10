@@ -83,10 +83,16 @@ type Installer interface {
 // the CLI; the two are intentionally not shared, since each belongs to
 // its own top-layer entry point.
 type RealInstaller struct {
-	Cache     *cache.Cache
-	Catalog   *catalog.Client
-	CustomDir string
-	StateDir  string
+	Cache   *cache.Cache
+	Catalog *catalog.Client
+	// WizardData is the memoized catalog load the wizard showed its lists
+	// from. Resolving from it rather than re-reading the catalogs keeps an
+	// install identical to what was on screen when it was confirmed — and
+	// skips a full re-parse per install. Nil (or an unloadable memo) falls
+	// back to the catalog client.
+	WizardData WizardDataLoader
+	CustomDir  string
+	StateDir   string
 }
 
 // Install implements Installer.
@@ -154,7 +160,7 @@ func (r *RealInstaller) resolve(ctx context.Context, req *install.Request, send 
 	}
 
 	if len(req.Packages) > 0 {
-		packages, err := r.Catalog.Packages(ctx)
+		packages, err := r.packages(ctx)
 		if err != nil {
 			return install.Artifacts{}, err
 		}
@@ -177,7 +183,7 @@ func (r *RealInstaller) resolve(ctx context.Context, req *install.Request, send 
 	}
 
 	if len(req.Addons) > 0 {
-		addons, err := r.Catalog.Addons(ctx)
+		addons, err := r.addons(ctx)
 		if err != nil {
 			return install.Artifacts{}, err
 		}
@@ -205,7 +211,7 @@ func (r *RealInstaller) resolve(ctx context.Context, req *install.Request, send 
 			}
 
 			if renoMods == nil {
-				renoMods, err = r.Catalog.RenoDX(ctx)
+				renoMods, err = r.renoDX(ctx)
 				if err != nil {
 					return install.Artifacts{}, err
 				}
@@ -228,7 +234,7 @@ func (r *RealInstaller) resolve(ctx context.Context, req *install.Request, send 
 	}
 
 	if req.RenoDX != "" {
-		mods, err := r.Catalog.RenoDX(ctx)
+		mods, err := r.renoDX(ctx)
 		if err != nil {
 			return install.Artifacts{}, err
 		}
@@ -250,7 +256,7 @@ func (r *RealInstaller) resolve(ctx context.Context, req *install.Request, send 
 	}
 
 	if len(req.Custom) > 0 {
-		found, err := catalog.ScanCustom(r.CustomDir)
+		found, err := r.custom()
 		if err != nil {
 			return install.Artifacts{}, err
 		}
@@ -268,6 +274,56 @@ func (r *RealInstaller) resolve(ctx context.Context, req *install.Request, send 
 	}
 
 	return art, nil
+}
+
+// catalogData is one resolve's view of the catalogs: the memoized wizard
+// load when it has one (what the user confirmed against), the catalog
+// client otherwise.
+func (r *RealInstaller) catalogData(ctx context.Context) (WizardData, bool) {
+	if r.WizardData == nil {
+		return WizardData{}, false
+	}
+	data, err := r.WizardData.LoadWizardData(ctx)
+	if err != nil || data.empty() {
+		return WizardData{}, false
+	}
+	return data, true
+}
+
+func (r *RealInstaller) packages(ctx context.Context) ([]catalog.Package, error) {
+	if data, ok := r.catalogData(ctx); ok {
+		return data.Packages, nil
+	}
+	return r.Catalog.Packages(ctx)
+}
+
+func (r *RealInstaller) addons(ctx context.Context) ([]catalog.Addon, error) {
+	if data, ok := r.catalogData(ctx); ok {
+		return data.Addons, nil
+	}
+	return r.Catalog.Addons(ctx)
+}
+
+func (r *RealInstaller) renoDX(ctx context.Context) ([]catalog.RenoMod, error) {
+	// An empty memo list is not an answer: the wizard tolerates a failed
+	// RenoDX load (it is a different project's host), so fall through to
+	// the client, which may have recovered since.
+	if data, ok := r.catalogData(ctx); ok && len(data.RenoDX) > 0 {
+		return data.RenoDX, nil
+	}
+	return r.Catalog.RenoDX(ctx)
+}
+
+func (r *RealInstaller) custom() ([]catalog.Custom, error) {
+	if r.WizardData != nil {
+		if data, err := r.WizardData.LoadWizardData(context.Background()); err == nil && !data.empty() {
+			out := make([]catalog.Custom, 0, len(data.CustomShaders)+len(data.CustomAddons))
+			out = append(out, data.CustomShaders...)
+			out = append(out, data.CustomAddons...)
+			return out, nil
+		}
+	}
+	return catalog.ScanCustom(r.CustomDir)
 }
 
 // describeEvent turns an install.Event into a progress line.

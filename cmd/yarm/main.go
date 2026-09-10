@@ -135,8 +135,15 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	slog.Info("starting", "version", buildinfo.Version, "first_run", firstRun)
 
 	c := newCache(dirs, cfg)
+	if err := c.CleanPartials(); err != nil {
+		slog.Warn("could not clear interrupted downloads", "error", err)
+	}
 	cl := newCatalogClient(dirs, cfg)
 	customDir := dirs.Custom()
+
+	// One memoized catalog load shared by the wizard and the install
+	// pipeline, so an install resolves exactly what the wizard showed.
+	wizardData := app.Memoize(app.CatalogWizardData{Client: cl, CustomDir: customDir})
 
 	return app.Run(ctx, app.Options{
 		Loader: app.ProviderLoader{
@@ -144,12 +151,14 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			StateDir:  dirs.Data,
 		},
 		Deps: app.Deps{
-			WizardData: app.Memoize(app.CatalogWizardData{Client: cl, CustomDir: customDir}),
+			WizardData:     wizardData,
+			CatalogRefresh: cl,
 			Installer: &app.RealInstaller{
-				Cache:     c,
-				Catalog:   cl,
-				CustomDir: customDir,
-				StateDir:  dirs.Data,
+				Cache:      c,
+				Catalog:    cl,
+				WizardData: wizardData,
+				CustomDir:  customDir,
+				StateDir:   dirs.Data,
 			},
 			Uninstaller: app.RealUninstaller{StateDir: dirs.Data},
 			Adopter:     app.RealAdopter{StateDir: dirs.Data},
@@ -188,7 +197,7 @@ func newCache(dirs paths.Dirs, cfg config.Config) *cache.Cache {
 
 func newCatalogClient(dirs paths.Dirs, cfg config.Config) *catalog.Client {
 	return catalog.New(
-		&http.Client{Timeout: 30 * time.Second},
+		&http.Client{Timeout: 30 * time.Second, Transport: fetch.DefaultTransport()},
 		filepath.Join(cacheRoot(dirs, cfg), "catalog"),
 		time.Duration(cfg.CatalogTTLHours)*time.Hour,
 		userAgent(),

@@ -203,6 +203,16 @@ type WizardScreen struct {
 	addons   multiSelect
 	showAll  bool
 
+	// pkgsFull, addonsFull and renodxFull are the unfiltered catalog rows
+	// behind the three lists, built once when the data loads. Rebuilding
+	// them means a cache probe per row (a stat per shader, per add-on,
+	// per RenoDX mod), so per-frame and per-keystroke callers — the
+	// footer, the review page, the RenoDX search — read these instead.
+	// The cache cannot change underneath a wizard: downloads happen on
+	// other screens, and opening the wizard reloads.
+	pkgsFull   []selectItem
+	addonsFull []selectItem
+	renodxFull []selectItem
 	// Step: RenoDX. One mod at most, searched rather than shortlisted:
 	// there are ~200 of them and which one you want is decided by which
 	// game you are installing into, not by taste.
@@ -217,6 +227,17 @@ type WizardScreen struct {
 	// Step: review options — the overwrite/backup checklist shown in the
 	// apply confirmation, navigated the same way shaders/add-ons are.
 	options multiSelect
+
+	// missingGen bumps every time an answer missing() depends on changes
+	// (version, build, selections), so the review page and the apply modal
+	// can cache its cache probes instead of re-statting per frame. The
+	// cache directory itself cannot change underneath a wizard — downloads
+	// happen on other screens — so answers plus data are the whole key.
+	missingGen   uint64
+	missingCache struct {
+		gen uint64
+		val []string
+	}
 }
 
 // NewWizardScreen returns a wizard targeting exe — every step but Paths
@@ -487,14 +508,17 @@ func (s *WizardScreen) Update(msg tea.Msg, env Env) (Screen, tea.Cmd) {
 func (s *WizardScreen) applyWizardData(msg wizardDataLoadedMsg) tea.Cmd {
 	s.loading = false
 	s.data = msg.data
+	// New data invalidates the built rows and the missing-cache below.
+	s.pkgsFull, s.addonsFull, s.renodxFull = nil, nil, nil
+	s.missingGen++
 	existingVersion := ""
 	if s.existing != nil {
 		existingVersion = s.existing.ReShade.Version
 	}
 	s.data.Versions = capVersions(s.data.Versions, existingVersion)
 
-	s.packages = newMultiSelect(s.data.PackagesWithCustom(s.deps.CacheStatus))
-	s.addons = newMultiSelect(s.data.AddonsWithCustom(s.deps.CacheStatus))
+	s.packages = newMultiSelect(s.fullPackages())
+	s.addons = newMultiSelect(s.fullAddons())
 	// Built here, not left to refreshLists: setItems replaces the rows
 	// but never creates the selection map, and chooseOnly writes to it.
 	s.renodx = newMultiSelect(nil)
@@ -559,6 +583,14 @@ func (s *WizardScreen) refreshLists() {
 	sel := s.selection()
 	s.packages.setItems(curate(s.annotate(s.fullPackages(), sel), curatedPackages, s.showAll, s.packages.selected))
 	s.addons.setItems(curate(s.annotate(s.fullAddons(), sel), curatedAddons, s.showAll, s.addons.selected))
+	s.renodx.setItems(filterRenoDX(s.renodxRows(), s.renodxFilter.Value()))
+	s.renodx.chooseOnly(s.renodxChoice)
+}
+
+// refreshRenoDX rebuilds only the RenoDX list. Typing a search must not
+// pay for the shader and add-on lists — with their annotations and cache
+// probes — too.
+func (s *WizardScreen) refreshRenoDX() {
 	s.renodx.setItems(filterRenoDX(s.renodxRows(), s.renodxFilter.Value()))
 	s.renodx.chooseOnly(s.renodxChoice)
 }
@@ -654,10 +686,22 @@ func (s *WizardScreen) unmet() []string {
 }
 
 func (s *WizardScreen) fullPackages() []selectItem {
-	return s.data.PackagesWithCustom(s.deps.CacheStatus)
+	if s.pkgsFull == nil {
+		s.pkgsFull = s.data.PackagesWithCustom(s.deps.CacheStatus)
+	}
+	return s.pkgsFull
 }
 
 func (s *WizardScreen) fullAddons() []selectItem {
+	if s.addonsFull == nil {
+		s.addonsFull = s.buildAddonRows()
+	}
+	return s.addonsFull
+}
+
+// buildAddonRows assembles the add-on list once per data load: catalog
+// rows with the RenoDX retargeting and utility mods folded in.
+func (s *WizardScreen) buildAddonRows() []selectItem {
 	items := s.data.AddonsWithCustom(s.deps.CacheStatus)
 	// RenoDX is in the catalog with no download URL, so it renders as
 	// manual-only — but the wizard does install it, one step later.
@@ -1105,6 +1149,10 @@ func (s *WizardScreen) handlePathsKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 }
 
 func (s *WizardScreen) handleReShadeKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
+	// Every key here but enter can move the version or the build, which
+	// the download list depends on — and one spare recompute on enter is
+	// cheaper than threading the bump through four branches.
+	s.missingGen++
 	switch {
 	case key.Matches(msg, s.keys.Up):
 		s.versionCursor.up()
@@ -1125,6 +1173,7 @@ func (s *WizardScreen) handleReShadeKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 }
 
 func (s *WizardScreen) handleAPIKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
+	s.missingGen++
 	switch {
 	case key.Matches(msg, s.keys.Up):
 		s.dllCursor.up()
@@ -1150,6 +1199,7 @@ func (s *WizardScreen) handleMultiSelectKey(msg tea.KeyPressMsg, m *multiSelect,
 			id = m.items[m.cursor].ID
 		}
 		m.toggle()
+		s.missingGen++
 		// Turning something on pulls in what it needs; turning it off
 		// leaves the dependency alone, since it may be wanted on its own
 		// and the review page will say if something is now missing.
@@ -1261,14 +1311,19 @@ func (s *WizardScreen) buildOps() ([]folderOp, bool) {
 // since every one of them shares the same version, build and package
 // selection and differs at most in bitness.
 func (s *WizardScreen) missing() []string {
+	if s.missingCache.val != nil && s.missingCache.gen == s.missingGen {
+		return s.missingCache.val
+	}
 	version, ok := s.selectedVersion()
 	if !ok {
 		return nil
 	}
-	return describeMissing(s.deps.CacheStatus, version.Version, s.flavor.Addon(),
+	val := describeMissing(s.deps.CacheStatus, version.Version, s.flavor.Addon(),
 		s.packages.selectedIDs(), addonsForDownload(s.flavor, s.addons), s.data.isRenoDXUtility,
 		renodxForDownload(s.flavor, s.renodxChoice),
 		s.exe.Arch, artifacts.NeedsD3DCompiler(s.targetOS))
+	s.missingCache.gen, s.missingCache.val = s.missingGen, val
+	return val
 }
 
 // View implements Screen.

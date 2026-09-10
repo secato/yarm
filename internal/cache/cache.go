@@ -220,6 +220,9 @@ func (c *Cache) EnsureAddon(ctx context.Context, addon catalog.Addon, arch game.
 	dir := c.abs(rel)
 	id := "addon:" + addon.ID + ":" + version + ":" + string(arch)
 
+	// Checked before downloading, not after: the key is date-only, so an
+	// existing directory is today's answer either way and the download
+	// would be pure waste.
 	if nonEmpty(dir) {
 		return dir, c.touch(id)
 	}
@@ -275,6 +278,8 @@ func (c *Cache) EnsureRenoDX(ctx context.Context, mod catalog.RenoMod, arch game
 	dir := c.abs(rel)
 	id := "renodx:" + mod.ID + ":" + version + ":" + string(arch)
 
+	// As in EnsureAddon: the key is date-only, so check before
+	// downloading — an existing directory is today's answer either way.
 	if nonEmpty(dir) {
 		return dir, c.touch(id)
 	}
@@ -400,24 +405,58 @@ func (c *Cache) Delete(id string) error {
 }
 
 // Clean removes every downloadable entry, leaving custom content alone.
+// The index is read and written once for the whole sweep, not once per
+// entry. Entries that fail keep their rows; the first error is reported
+// alongside how far the sweep got.
 func (c *Cache) Clean() (removed int, err error) {
-	entries, err := c.List(SortByName, false)
+	idx, err := loadIndex(c.Root)
 	if err != nil {
 		return 0, err
 	}
-	for _, e := range entries {
-		if err := c.Delete(e.ID); err != nil {
-			return removed, err
+	var firstErr error
+	for id, e := range idx.Entries {
+		target := c.abs(e.Path)
+		if !withinRoot(c.Root, target) {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("refusing to delete %q: outside the cache root", e.Path)
+			}
+			continue
 		}
+		if rmErr := os.RemoveAll(target); rmErr != nil {
+			if firstErr == nil {
+				firstErr = rmErr
+			}
+			continue
+		}
+		delete(idx.Entries, id)
 		removed++
 	}
 	// Partial downloads are not indexed, so clear them explicitly.
 	_ = os.RemoveAll(c.abs(DirDownloads))
-	return removed, nil
+	if saveErr := saveIndex(c.Root, idx); saveErr != nil && firstErr == nil {
+		firstErr = saveErr
+	}
+	return removed, firstErr
 }
 
 // Total returns the cache's total size on disk.
 func (c *Cache) Total() (int64, error) { return fsutil.DirSize(c.Root) }
+
+// CleanPartials removes interrupted downloads left by a killed run. Only
+// the fetch-exclusive suffix is swept: a completed download is renamed
+// out of it before it can be trusted, so nothing live ever matches.
+func (c *Cache) CleanPartials() error {
+	matches, err := filepath.Glob(c.abs(filepath.Join(DirDownloads, "*"+fetch.PartSuffix)))
+	if err != nil {
+		return err
+	}
+	for _, m := range matches {
+		if err := os.Remove(m); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
+}
 
 // record adds or replaces an index entry.
 func (c *Cache) record(e Entry) error {
@@ -443,6 +482,10 @@ func (c *Cache) record(e Entry) error {
 // touch updates an entry's last-used time, so the cache screen can show
 // what is actually being used. A missing entry is not an error: the files
 // are there, only the bookkeeping is absent.
+//
+// Writes are throttled: every Ensure hit rewrites the whole index file,
+// and back-to-back installs would otherwise fsync it once per artifact.
+// Anything used within the hour reads as used.
 func (c *Cache) touch(id string) error {
 	idx, err := loadIndex(c.Root)
 	if err != nil {
@@ -450,6 +493,9 @@ func (c *Cache) touch(id string) error {
 	}
 	e, ok := idx.Entries[id]
 	if !ok {
+		return nil
+	}
+	if c.now().Sub(e.LastUsedAt) < time.Hour {
 		return nil
 	}
 	e.LastUsedAt = c.now()

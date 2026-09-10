@@ -115,6 +115,111 @@ func TestClientCachesWithinTTL(t *testing.T) {
 	}
 }
 
+// Static catalogs never expire on their own: once on disk they are
+// trusted until an explicit refresh, so starting the app is disk-fast.
+func TestStaticCatalogNeverExpires(t *testing.T) {
+	ts := newTestServer(t)
+	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	c := newTestClient(t, ts, &now)
+
+	if _, err := c.Packages(context.Background()); err != nil {
+		t.Fatalf("warm the cache: %v", err)
+	}
+	if got := ts.hits.Load(); got != 1 {
+		t.Fatalf("after first load: %d requests, want 1", got)
+	}
+
+	now = now.Add(30 * 24 * time.Hour) // far past any TTL
+	if _, err := c.Packages(context.Background()); err != nil {
+		t.Fatalf("second load error = %v", err)
+	}
+	if got := ts.hits.Load(); got != 1 {
+		t.Errorf("static catalog: %d requests, want 1 (disk should have served it)", got)
+	}
+}
+
+// RefreshCatalog re-fetches every source at once, so the rescan key means
+// fresh data everywhere rather than waiting out four TTLs.
+func TestRefreshCatalogRefetchesEverything(t *testing.T) {
+	ts := newTestServer(t)
+	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	c := newTestClient(t, ts, &now)
+
+	if _, err := c.Packages(context.Background()); err != nil {
+		t.Fatalf("warm the cache: %v", err)
+	}
+	base := ts.hits.Load()
+
+	if err := c.RefreshCatalog(context.Background()); err != nil {
+		t.Fatalf("refresh error = %v", err)
+	}
+	// Packages, add-ons, tags, RenoDX — the reshade.me scrape is live and
+	// never stored, so it is not part of a refresh.
+	if got, want := ts.hits.Load()-base, int64(4); got != want {
+		t.Errorf("refresh made %d requests, want %d", got, want)
+	}
+
+	// Everything just stored: reading it back touches no network.
+	before := ts.hits.Load()
+	if _, err := c.Packages(context.Background()); err != nil {
+		t.Fatalf("packages error = %v", err)
+	}
+	if _, err := c.Addons(context.Background()); err != nil {
+		t.Fatalf("addons error = %v", err)
+	}
+	if got := ts.hits.Load(); got != before {
+		t.Errorf("after refresh: %d requests, want %d", got, before)
+	}
+}
+
+// A failed refresh must not wipe good data: each source keeps its previous
+// copy and the errors come back joined.
+func TestRefreshCatalogKeepsOldCopiesOnFailure(t *testing.T) {
+	ts := newTestServer(t)
+	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	c := newTestClient(t, ts, &now)
+
+	want, err := c.Packages(context.Background())
+	if err != nil {
+		t.Fatalf("warm the cache: %v", err)
+	}
+
+	ts.fail.Store(true)
+	if err := c.RefreshCatalog(context.Background()); err == nil {
+		t.Error("want a joined error when every source fails, got nil")
+	}
+
+	got, err := c.Packages(context.Background())
+	if err != nil {
+		t.Fatalf("packages should still serve the old copy: %v", err)
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("refresh failure changed the cached packages (-want +got):\n%s", diff)
+	}
+}
+
+// The RenoDX index is a rolling release, so unlike the static catalogs it
+// keeps a TTL — overridden per source, defaulting to the client's.
+func TestRenoDXTTL(t *testing.T) {
+	ts := newTestServer(t)
+	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	c := newTestClient(t, ts, &now)
+	c.RenoDXTTL = 30 * time.Minute
+
+	if _, err := c.RenoDX(context.Background()); err != nil {
+		t.Fatalf("warm the cache: %v", err)
+	}
+	base := ts.hits.Load()
+
+	now = now.Add(time.Hour) // past the RenoDX TTL, within the client's
+	if _, err := c.RenoDX(context.Background()); err != nil {
+		t.Fatalf("second load error = %v", err)
+	}
+	if got := ts.hits.Load(); got != base+1 {
+		t.Errorf("past RenoDX TTL: %d requests, want %d", got, base+1)
+	}
+}
+
 // A dead network must not break the app when a cached copy exists, even an
 // expired one.
 func TestClientFallsBackToStaleCacheOffline(t *testing.T) {

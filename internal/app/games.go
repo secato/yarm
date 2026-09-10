@@ -24,6 +24,13 @@ type gamesLoadedMsg struct {
 	err     error
 }
 
+// catalogRefreshedMsg reports an explicit catalog refresh: nil on success,
+// otherwise the refresh error — in which case the previous disk copies are
+// still in place and the app keeps working from those.
+type catalogRefreshedMsg struct {
+	err error
+}
+
 // GamesScreen is the home screen: a table of discovered games with a
 // detail panel for the selected one.
 type GamesScreen struct {
@@ -140,6 +147,30 @@ func (s *GamesScreen) preloadCatalog() tea.Cmd {
 	}
 }
 
+// refreshCatalog forces the on-disk catalogs to re-fetch, drops the
+// memoized wizard data built from the old copies, and warms a fresh load —
+// so the rescan key means fresh data everywhere, not just fresh games. A
+// refresh failure is not modal: the old copies are untouched and still
+// serve, so it only sets the status line.
+func (s *GamesScreen) refreshCatalog() tea.Cmd {
+	loader := s.deps.WizardData
+	refresh := s.deps.CatalogRefresh
+	if loader == nil || refresh == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		if r, ok := loader.(interface{ Reset() }); ok {
+			r.Reset()
+		}
+		if err := refresh.RefreshCatalog(context.Background()); err != nil {
+			_, _ = loader.LoadWizardData(context.Background())
+			return catalogRefreshedMsg{err: err}
+		}
+		_, _ = loader.LoadWizardData(context.Background())
+		return catalogRefreshedMsg{}
+	}
+}
+
 // load discovers games off the UI goroutine.
 func (s *GamesScreen) load() tea.Cmd {
 	loader := s.loader
@@ -211,6 +242,12 @@ func (s *GamesScreen) Update(msg tea.Msg, env Env) (Screen, tea.Cmd) {
 		s.resize(env)
 		return s, SetStatus(fmt.Sprintf("found %d game(s)", len(s.entries)))
 
+	case catalogRefreshedMsg:
+		if msg.err != nil {
+			return s, SetStatus("catalog refresh failed — using cached catalogs")
+		}
+		return s, nil
+
 	case uninstallDoneMsg:
 		return s, PushScreen(NewUninstallResultScreen(msg.exePath, msg.result, nil))
 
@@ -259,7 +296,7 @@ func (s *GamesScreen) handleKey(msg tea.KeyPressMsg, env Env) (Screen, tea.Cmd) 
 
 	case key.Matches(msg, s.keys.Rescan):
 		s.loading = true
-		return s, tea.Batch(s.load(), SetStatus("rescanning…"))
+		return s, tea.Batch(s.load(), s.refreshCatalog(), SetStatus("rescanning…"))
 
 	case key.Matches(msg, s.keys.AddGame):
 		return s, PushScreen(NewAddFolderScreen())

@@ -76,3 +76,14 @@ func (m *memoWizardData) loaded() (WizardData, bool) {
 	defer m.mu.Unlock()
 	return m.data, m.err == nil && !m.data.empty()
 }
+
+// Reset drops the memoized result so the next caller loads fresh — the
+// rescan path, after forcing the on-disk catalogs to refresh. A load
+// already in flight keeps writing to the old once, which Reset replaces:
+// either order leaves the memo holding one complete load, never a mix.
+func (m *memoWizardData) Reset() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.data, m.err = WizardData{}, nil
+	m.once = new(sync.Once)
+}

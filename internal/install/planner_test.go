@@ -295,6 +295,46 @@ func TestPlanConflictDetection(t *testing.T) {
 	})
 }
 
+// Manifest sizes decide before any hashing: an edited size warns without
+// reading, and a source that differs in size replaces without reading.
+func TestClassifyUsesSizesBeforeHashing(t *testing.T) {
+	const dest = "Game/dxgi.dll"
+	f := newFixture(t)
+	req := f.Request()
+
+	srcBody := "a new build, longer than the old one"
+	src := f.write(t.TempDir(), "ReShade64.dll", srcBody)
+	planned := PlannedFile{
+		Source: src, Dest: dest, Origin: state.OriginReShade, Size: int64(len(srcBody)),
+	}
+	manifestBody := "the installed build"
+	owned := map[string]state.File{dest: {
+		Path: dest, SHA256: sha256Of(manifestBody),
+		Size: int64(len(manifestBody)), Origin: state.OriginReShade,
+	}}
+
+	// Disk no longer matches the manifest size: edited, with a warning.
+	f.GameFile("Game/dxgi.dll", manifestBody+" plus user edits")
+	action, warn, err := (Planner{}).classify(req, owned, planned)
+	if err != nil {
+		t.Fatalf("classify() error = %v", err)
+	}
+	if action != ActionReplace || !strings.Contains(warn, "modified") {
+		t.Errorf("edited size: action = %q, warn = %q; want replace with a modified warning", action, warn)
+	}
+
+	// Disk matches the manifest but the source differs in size: replace,
+	// quietly.
+	f.GameFile("Game/dxgi.dll", manifestBody)
+	action, warn, err = (Planner{}).classify(req, owned, planned)
+	if err != nil {
+		t.Fatalf("classify() error = %v", err)
+	}
+	if action != ActionReplace || warn != "" {
+		t.Errorf("differing source size: action = %q, warn = %q; want quiet replace", action, warn)
+	}
+}
+
 // An upgrade drops files the new selection no longer includes.
 func TestPlanUpgradeRemovesStaleFiles(t *testing.T) {
 	f := newFixture(t).WithReShade().
