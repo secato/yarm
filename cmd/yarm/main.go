@@ -144,8 +144,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	// One memoized catalog load shared by the wizard and the install
 	// pipeline, so an install resolves exactly what the wizard showed.
 	wizardData := app.Memoize(app.CatalogWizardData{Client: cl, CustomDir: customDir})
-	// Game discovery is cached for a few minutes: navigating the UI must
-	// not rescan the disk, while installs and R still see fresh games.
+	// Game discovery is cached for the life of the process: navigating
+	// the UI must not rescan the disk, while installs and R still see
+	// fresh games.
 	gamesCache := app.NewGamesCache()
 
 	return app.Run(ctx, app.Options{

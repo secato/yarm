@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -18,10 +17,11 @@ import (
 	"github.com/secato/yarm/internal/platform"
 )
 
-// A fresh cache misses; a set one hits until it expires or is cleared.
-func TestGamesCacheHitMissExpireClear(t *testing.T) {
-	now := time.Now()
-	c := &GamesCache{Now: func() time.Time { return now }}
+// A fresh cache misses; a set one hits until cleared. No expiry: the
+// list is small enough to keep for the whole session (on the order of
+// 2 KB per game), and staleness is handled by explicit invalidation.
+func TestGamesCacheHitMissClear(t *testing.T) {
+	c := NewGamesCache()
 
 	if _, _, ok := c.Get(); ok {
 		t.Fatal("a fresh cache should miss")
@@ -39,13 +39,6 @@ func TestGamesCacheHitMissExpireClear(t *testing.T) {
 		t.Error("Get should return a copy of the cached entries")
 	}
 
-	now = now.Add(gamesCacheTTL)
-	if _, _, ok := c.Get(); ok {
-		t.Error("an expired cache should miss")
-	}
-
-	now = time.Now()
-	c.Set(entries, nil)
 	c.Clear()
 	if _, _, ok := c.Get(); ok {
 		t.Error("a cleared cache should miss")
