@@ -112,18 +112,18 @@ func TestSettingsScreenTTLValidation(t *testing.T) {
 		next, _ = s.Update(settingsSpecial(tea.KeyEnter), wizardEnv())
 		s = next.(*SettingsScreen)
 
-		got := s.pending.CatalogTTLHours
+		got := s.pending.RenodxTTLHours
 		if tt.wantSet {
 			want := 48
 			if got != want {
-				t.Errorf("input %q: CatalogTTLHours = %d, want %d", tt.input, got, want)
+				t.Errorf("input %q: RenodxTTLHours = %d, want %d", tt.input, got, want)
 			}
 			if s.mode != modeRows {
 				t.Errorf("input %q: should have committed and returned to modeRows", tt.input)
 			}
 		} else {
-			if got != config.Default().CatalogTTLHours {
-				t.Errorf("input %q: CatalogTTLHours = %d, want unchanged", tt.input, got)
+			if got != config.Default().RenodxTTLHours {
+				t.Errorf("input %q: RenodxTTLHours = %d, want unchanged", tt.input, got)
 			}
 			if s.mode != modeEditText {
 				t.Errorf("input %q: an invalid value should stay in edit mode, not commit", tt.input)
@@ -204,7 +204,7 @@ func TestSettingsScreenRemoveManualGame(t *testing.T) {
 func TestSettingsScreenSaveRejectsInvalidConfig(t *testing.T) {
 	dir := t.TempDir()
 	s := NewSettingsScreen(dir, config.Default())
-	s.pending.CatalogTTLHours = -1 // invalid
+	s.pending.RenodxTTLHours = -1 // invalid
 
 	next, _ := s.save()
 	s = next.(*SettingsScreen)
@@ -224,7 +224,7 @@ func TestSettingsScreenSaveRejectsInvalidConfig(t *testing.T) {
 func TestSettingsScreenSaveWritesConfig(t *testing.T) {
 	dir := t.TempDir()
 	s := NewSettingsScreen(dir, config.Default())
-	s.pending.CatalogTTLHours = 48
+	s.pending.RenodxTTLHours = 48
 
 	if !s.dirty() {
 		t.Fatal("test setup: expected the pending copy to differ from saved")
@@ -241,8 +241,8 @@ func TestSettingsScreenSaveWritesConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load() after save: %v", err)
 	}
-	if reloaded.CatalogTTLHours != 48 {
-		t.Errorf("saved CatalogTTLHours = %d, want 48", reloaded.CatalogTTLHours)
+	if reloaded.RenodxTTLHours != 48 {
+		t.Errorf("saved RenodxTTLHours = %d, want 48", reloaded.RenodxTTLHours)
 	}
 }
 

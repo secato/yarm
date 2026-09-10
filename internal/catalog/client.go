@@ -34,14 +34,10 @@ const (
 	metaSuffix   = ".meta.json"
 )
 
-// Placeholder durations for cache times the user has not confirmed yet.
-// Do not tune these without asking: final values are an open question.
-const (
-	// PlaceholderRenoDXTTL is the candidate default for how long the
-	// RenoDX mod index is trusted: rolling release, slower-moving than
-	// the ReShade version list but less static than the shader catalogs.
-	PlaceholderRenoDXTTL = 7 * 24 * time.Hour
-)
+// DefaultRenoDXTTL is how long the RenoDX mod index is trusted when no
+// configuration says otherwise: a rolling release, slower-moving than the
+// ReShade version list but less static than the shader catalogs.
+const DefaultRenoDXTTL = 7 * 24 * time.Hour
 
 // maxCatalogBytes caps how much we read from a catalog endpoint. The real
 // files are tens of kilobytes; this only stops a misbehaving or hijacked
@@ -83,7 +79,7 @@ type Doer interface {
 type Client struct {
 	HTTP Doer
 	Dir  string        // cache/catalog
-	TTL  time.Duration // from config.catalog_ttl_hours
+	TTL  time.Duration // fallback trust window
 	// RenoDXTTL is how long the RenoDX index is trusted. Zero means TTL.
 	RenoDXTTL time.Duration
 	UserAgent string

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -40,7 +41,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 			ReshadeFlavor: "normal",
 			Packages:      []string{"standard", "sweetfx"},
 		},
-		CatalogTTLHours: 48,
+		RenodxTTLHours: 48,
 	}
 
 	if err := Save(dir, cfg); err != nil {
@@ -58,8 +59,53 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		len(got.Steam.ExtraLibraryPaths) != 1 || got.Steam.ExtraLibraryPaths[0] != "/mnt/extra" ||
 		got.Defaults.ReshadeFlavor != cfg.Defaults.ReshadeFlavor ||
 		len(got.Defaults.Packages) != 2 ||
-		got.CatalogTTLHours != cfg.CatalogTTLHours {
+		got.RenodxTTLHours != cfg.RenodxTTLHours {
 		t.Errorf("round trip mismatch: got %+v, want %+v", got, cfg)
+	}
+}
+
+// A file written before the rename names the TTL catalog_ttl_hours: it
+// still counts, and the next save forgets the old name.
+func TestLoadMigratesOldTTLKey(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(Path(dir), []byte("catalog_ttl_hours: 48\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	got, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got.RenodxTTLHours != 48 {
+		t.Errorf("RenodxTTLHours = %d, want the migrated 48", got.RenodxTTLHours)
+	}
+
+	if err := Save(dir, got); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	data, err := os.ReadFile(Path(dir))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if strings.Contains(string(data), "catalog_ttl_hours") {
+		t.Errorf("save should drop the old key:\n%s", data)
+	}
+}
+
+// When both keys are present the new one wins outright.
+func TestLoadPrefersNewTTLKey(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(Path(dir),
+		[]byte("catalog_ttl_hours: 48\nrenodx_ttl_hours: 72\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	got, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got.RenodxTTLHours != 72 {
+		t.Errorf("RenodxTTLHours = %d, want 72", got.RenodxTTLHours)
 	}
 }
 
@@ -71,8 +117,8 @@ func TestValidate(t *testing.T) {
 	}{
 		{"valid defaults", Default(), false},
 		{"bad flavor", func() Config { c := Default(); c.Defaults.ReshadeFlavor = "bogus"; return c }(), true},
-		{"zero ttl", func() Config { c := Default(); c.CatalogTTLHours = 0; return c }(), true},
-		{"negative ttl", func() Config { c := Default(); c.CatalogTTLHours = -1; return c }(), true},
+		{"zero ttl", func() Config { c := Default(); c.RenodxTTLHours = 0; return c }(), true},
+		{"negative ttl", func() Config { c := Default(); c.RenodxTTLHours = -1; return c }(), true},
 		{"manual game missing name", func() Config {
 			c := Default()
 			c.ManualGames = []ManualGame{{Name: "", Path: "/x"}}
@@ -97,7 +143,7 @@ func TestValidate(t *testing.T) {
 
 func TestLoadRejectsInvalidConfig(t *testing.T) {
 	dir := t.TempDir()
-	bad := []byte("defaults:\n  reshade_flavor: bogus\n  packages: []\ncatalog_ttl_hours: 24\n")
+	bad := []byte("defaults:\n  reshade_flavor: bogus\n  packages: []\nrenodx_ttl_hours: 24\n")
 	if err := os.WriteFile(Path(dir), bad, 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}

@@ -32,7 +32,7 @@ func (r settingsRow) label() string {
 	case rowCacheDir:
 		return "Cache directory"
 	case rowTTL:
-		return "Catalog TTL (hours)"
+		return "RenoDX TTL (hours)"
 	case rowManualGames:
 		return "Manual games"
 	default:
@@ -177,7 +177,7 @@ func (s *SettingsScreen) activateRow() (Screen, tea.Cmd) {
 	case rowCacheDir:
 		s.beginEdit(rowCacheDir, s.pending.CacheDir)
 	case rowTTL:
-		s.beginEdit(rowTTL, strconv.Itoa(s.pending.CatalogTTLHours))
+		s.beginEdit(rowTTL, strconv.Itoa(s.pending.RenodxTTLHours))
 	case rowManualGames:
 		s.mode = modeManualGames
 		s.cursor = 0
@@ -216,10 +216,10 @@ func (s *SettingsScreen) commitEdit() (Screen, tea.Cmd) {
 	case rowTTL:
 		n, err := strconv.Atoi(value)
 		if err != nil || n <= 0 {
-			s.status = "catalog TTL must be a positive number of hours"
+			s.status = "RenoDX TTL must be a positive number of hours"
 			return s, nil
 		}
-		s.pending.CatalogTTLHours = n
+		s.pending.RenodxTTLHours = n
 	}
 
 	s.status = ""
@@ -325,7 +325,7 @@ func (s *SettingsScreen) rowValue(r settingsRow) string {
 		}
 		return s.pending.CacheDir
 	case rowTTL:
-		return strconv.Itoa(s.pending.CatalogTTLHours)
+		return strconv.Itoa(s.pending.RenodxTTLHours)
 	case rowManualGames:
 		return fmt.Sprintf("%d folder(s)", len(s.pending.ManualGames))
 	default:

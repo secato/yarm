@@ -196,12 +196,14 @@ func newCache(dirs paths.Dirs, cfg config.Config) *cache.Cache {
 }
 
 func newCatalogClient(dirs paths.Dirs, cfg config.Config) *catalog.Client {
-	return catalog.New(
+	cl := catalog.New(
 		&http.Client{Timeout: 30 * time.Second, Transport: fetch.DefaultTransport()},
 		filepath.Join(cacheRoot(dirs, cfg), "catalog"),
-		time.Duration(cfg.CatalogTTLHours)*time.Hour,
+		time.Duration(cfg.RenodxTTLHours)*time.Hour,
 		userAgent(),
 	)
+	cl.RenoDXTTL = time.Duration(cfg.RenodxTTLHours) * time.Hour
+	return cl
 }
 
 // cacheRoot resolves the cache directory, honoring the config override.

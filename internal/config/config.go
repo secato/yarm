@@ -9,6 +9,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 
+	"github.com/secato/yarm/internal/catalog"
 	"github.com/secato/yarm/internal/fsutil"
 )
 
@@ -17,11 +18,15 @@ const FileName = "config.yaml"
 
 // Config is the parsed contents of config.yaml.
 type Config struct {
-	CacheDir        string         `yaml:"cache_dir"`
-	ManualGames     []ManualGame   `yaml:"manual_games"`
-	Steam           SteamConfig    `yaml:"steam"`
-	Defaults        DefaultsConfig `yaml:"defaults"`
-	CatalogTTLHours int            `yaml:"catalog_ttl_hours"`
+	CacheDir       string         `yaml:"cache_dir"`
+	ManualGames    []ManualGame   `yaml:"manual_games"`
+	Steam          SteamConfig    `yaml:"steam"`
+	Defaults       DefaultsConfig `yaml:"defaults"`
+	RenodxTTLHours int            `yaml:"renodx_ttl_hours"`
+	// CatalogTTLHours is the pre-rename name of RenodxTTLHours, kept so
+	// existing files keep working. It is only read when renodx_ttl_hours
+	// is absent, and never written back (see Save: omitempty drops it).
+	CatalogTTLHours int `yaml:"catalog_ttl_hours,omitempty"`
 }
 
 // ManualGame is a user-added game folder.
@@ -42,6 +47,10 @@ type DefaultsConfig struct {
 	Packages      []string `yaml:"packages"`
 }
 
+// defaultRenodxTTLHours mirrors catalog.DefaultRenoDXTTL in the hours
+// the config file speaks.
+var defaultRenodxTTLHours = int(catalog.DefaultRenoDXTTL.Hours())
+
 // Default returns the built-in configuration used when no config.yaml
 // exists yet.
 func Default() Config {
@@ -58,7 +67,7 @@ func Default() Config {
 			ReshadeFlavor: "normal",
 			Packages:      []string{"standard"},
 		},
-		CatalogTTLHours: 24,
+		RenodxTTLHours: defaultRenodxTTLHours,
 	}
 }
 
@@ -73,7 +82,7 @@ steam:
 defaults:
   reshade_flavor: normal      # normal | addon (addon builds are detectable by anti-cheat)
   packages: ["standard"]      # package ids preselected in the wizard
-catalog_ttl_hours: 24         # how long the RenoDX mod index is trusted (placeholder; final cache times TBD)
+renodx_ttl_hours: 168       # how long the RenoDX mod index is trusted (168 = 7 days)
 `
 
 // Path returns the full path to config.yaml inside dir.
@@ -102,11 +111,32 @@ func Load(dir string) (Config, error) {
 		return Config{}, fmt.Errorf("parse %s: %w", path, err)
 	}
 
+	// Pre-rename configs name the RenoDX TTL catalog_ttl_hours. When the
+	// new key is absent, the old one still counts; when both are present
+	// the new one wins and the old is forgotten on the next save
+	// (omitempty keeps it out of what Save writes).
+	if !hasKey(data, "renodx_ttl_hours") && hasKey(data, "catalog_ttl_hours") {
+		cfg.RenodxTTLHours = cfg.CatalogTTLHours
+	}
+	cfg.CatalogTTLHours = 0
+
 	if err := cfg.Validate(); err != nil {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
 	}
 
 	return cfg, nil
+}
+
+// hasKey reports whether raw YAML names a top-level key. A presence probe
+// rather than a zero check: 0 is never a valid TTL, but "absent" and
+// "explicitly default" must still tell apart for the migration above.
+func hasKey(data []byte, key string) bool {
+	var raw map[string]any
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return false
+	}
+	_, ok := raw[key]
+	return ok
 }
 
 // Save writes cfg to dir/config.yaml atomically.
@@ -126,8 +156,8 @@ func (c Config) Validate() error {
 		return fmt.Errorf("defaults.reshade_flavor must be %q or %q, got %q",
 			"normal", "addon", c.Defaults.ReshadeFlavor)
 	}
-	if c.CatalogTTLHours <= 0 {
-		return fmt.Errorf("catalog_ttl_hours must be positive, got %d", c.CatalogTTLHours)
+	if c.RenodxTTLHours <= 0 {
+		return fmt.Errorf("renodx_ttl_hours must be positive, got %d", c.RenodxTTLHours)
 	}
 	for i, g := range c.ManualGames {
 		if g.Name == "" {
