@@ -296,6 +296,11 @@ func (s *GamesScreen) handleKey(msg tea.KeyPressMsg, env Env) (Screen, tea.Cmd) 
 
 	case key.Matches(msg, s.keys.Rescan):
 		s.loading = true
+		// Fresh games and fresh catalogs together: R means "I changed
+		// something out there, look again".
+		if inv, ok := s.loader.(interface{ InvalidateCache() }); ok {
+			inv.InvalidateCache()
+		}
 		return s, tea.Batch(s.load(), s.refreshCatalog(), SetStatus("rescanning…"))
 
 	case key.Matches(msg, s.keys.AddGame):

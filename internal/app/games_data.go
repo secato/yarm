@@ -411,10 +411,29 @@ type ProviderLoader struct {
 	Providers []platform.Provider
 	// StateDir holds installs.json.
 	StateDir string
+	// Cache memoizes discovery for a few minutes (nil disables it).
+	Cache *GamesCache
 }
 
 // LoadGames implements GamesLoader.
 func (l ProviderLoader) LoadGames(ctx context.Context) ([]GameEntry, error) {
+	if entries, err, ok := l.Cache.Get(); ok {
+		return entries, err
+	}
+	entries, err := l.discover(ctx)
+	l.Cache.Set(entries, err)
+	return entries, err
+}
+
+// InvalidateCache drops the memoized discovery, so the next load
+// rescans. The rescan key and every flow that changes what a scan would
+// find — install, uninstall, adopt — go through here.
+func (l ProviderLoader) InvalidateCache() {
+	l.Cache.Clear()
+}
+
+// discover runs the providers and scans every game they report.
+func (l ProviderLoader) discover(ctx context.Context) ([]GameEntry, error) {
 	found, err := platform.DiscoverAll(ctx, l.Providers)
 	if err != nil {
 		// Discovery errors are partial by design: one provider failing

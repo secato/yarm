@@ -93,6 +93,9 @@ type RealInstaller struct {
 	WizardData WizardDataLoader
 	CustomDir  string
 	StateDir   string
+	// GamesCache is cleared whenever an install lands: the games list
+	// reloads from it after every apply, and must see the new install.
+	Games *GamesCache
 }
 
 // Install implements Installer.
@@ -118,6 +121,7 @@ func (r *RealInstaller) Install(ctx context.Context, req install.Request, send f
 	if err != nil {
 		return install.Result{}, err
 	}
+	r.Games.Clear()
 	return result, nil
 }
 
@@ -353,11 +357,19 @@ type UninstallRunner interface {
 // RealUninstaller wraps install.Uninstaller.
 type RealUninstaller struct {
 	StateDir string
+	// GamesCache is cleared whenever an uninstall lands, for the same
+	// reason as RealInstaller.Games.
+	Games *GamesCache
 }
 
 // Uninstall implements UninstallRunner.
 func (r RealUninstaller) Uninstall(req install.UninstallRequest) (install.UninstallResult, error) {
-	return install.NewUninstaller(r.StateDir).Run(req)
+	res, err := install.NewUninstaller(r.StateDir).Run(req)
+	if err != nil {
+		return install.UninstallResult{}, err
+	}
+	r.Games.Clear()
+	return res, nil
 }
 
 // AdoptRunner records an unmanaged install as yarm-tracked. An interface so
@@ -370,9 +382,17 @@ type AdoptRunner interface {
 // RealAdopter wraps install.Adopt.
 type RealAdopter struct {
 	StateDir string
+	// GamesCache is cleared whenever an adopt lands, for the same reason
+	// as RealInstaller.Games.
+	Games *GamesCache
 }
 
 // Adopt implements AdoptRunner.
 func (r RealAdopter) Adopt(g game.Game, exe game.Executable, candidate install.AdoptCandidate) (state.Install, error) {
-	return install.Adopt(r.StateDir, g, exe, candidate)
+	in, err := install.Adopt(r.StateDir, g, exe, candidate)
+	if err != nil {
+		return state.Install{}, err
+	}
+	r.Games.Clear()
+	return in, nil
 }
