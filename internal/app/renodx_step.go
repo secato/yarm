@@ -126,14 +126,15 @@ func (s *WizardScreen) renodxRows() []selectItem {
 	none := selectItem{ID: renodxNoneID, Name: "No RenoDX mod"}
 	rows := []selectItem{none}
 
-	matched, hasMatch := matchRenoDX(s.data.RenoDX, s.entry.ID)
+	games := s.data.RenoDXGames()
+	matched, hasMatch := matchRenoDX(games, s.entry.ID)
 	if hasMatch {
 		rows = append(rows,
 			selectItem{Header: true, Name: "── For this game ──"},
 			s.renodxRow(matched, true),
 			selectItem{Header: true, Name: "── All mods ──"})
 	}
-	for _, m := range s.data.RenoDX {
+	for _, m := range games {
 		if hasMatch && m.ID == matched.ID {
 			continue
 		}
@@ -266,10 +267,11 @@ func (s *WizardScreen) viewRenoDX(b *strings.Builder, env Env, height int) {
 		height -= 2
 	}
 
-	if _, ok := matchRenoDX(s.data.RenoDX, s.entry.ID); !ok && s.renodxFilter.Value() == "" {
+	games := s.data.RenoDXGames()
+	if _, ok := matchRenoDX(games, s.entry.ID); !ok && s.renodxFilter.Value() == "" {
 		b.WriteString(env.Styles.Faint.Render(wrap(fmt.Sprintf(
 			"RenoDX has no mod for %s. Press / to search all %d, or enter to skip.",
-			s.entry.Name, len(s.data.RenoDX)), env.Width-1)))
+			s.entry.Name, len(games)), env.Width-1)))
 		b.WriteString("\n\n")
 		height -= 2
 	}
@@ -316,6 +318,26 @@ func (s *WizardScreen) renodxUnmet() []string {
 	// gives whichever loads second — not a blend, and not a choice.
 	if s.addons.selected[autoHDRAddonID] {
 		out = append(out, "RenoDX and AutoHDR both replace the game's tone mapping; pick one")
+	}
+	return out
+}
+
+// addonRenoDXUnmet is renodxUnmet's counterpart for RenoDX's utility
+// mods, chosen from the Add-ons list rather than the RenoDX step: they
+// link the same framework, so the same ReShade-version floor applies.
+func (s *WizardScreen) addonRenoDXUnmet() []string {
+	if s.renodxVersionOK() {
+		return nil
+	}
+	v, _ := s.selectedVersion()
+	var out []string
+	for _, id := range addonsForDownload(s.flavor, s.addons) {
+		m, ok := s.renodxMod(id)
+		if !ok || !m.Utility {
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s needs ReShade %s or newer (you chose %s)",
+			m.Title, catalog.RenoDXMinReShade, v.Version))
 	}
 	return out
 }

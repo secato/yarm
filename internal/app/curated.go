@@ -84,6 +84,12 @@ var curatedAddons = map[string]bool{
 	// add-on people look for most, so it stays visible and greyed with its
 	// repository URL rather than vanishing into the full list.
 	"renodx-by-shortfuse": true,
+	// RenoDX's own utility mods (see catalog.RenoMod.Utility): unlike a
+	// per-game or Generic mod they do not replace shaders or tone
+	// mapping, so more than one can run at once, and FPS Limiter
+	// especially is exactly the kind of thing worth surfacing by name.
+	"fpslimiter": true,
+	"dlssfix":    true,
 }
 
 // curate narrows a step's rows to the curated shortlist. Rows are kept

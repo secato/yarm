@@ -526,28 +526,81 @@ func TestWizardManualDLLChoiceSurvivesRevisit(t *testing.T) {
 	}
 }
 
-// Overwrite is a checkbox on the review step, toggled the same way
+// openApplyModal opens the apply confirmation from a wizard sitting on its
+// Review step (fresh) or its hub (edit), the way enter/'a' would.
+func openApplyModal(t *testing.T, s *WizardScreen) applyOverlay {
+	t.Helper()
+	cmd := s.confirmApply()
+	if cmd == nil {
+		t.Fatal("confirmApply should open the confirmation modal")
+	}
+	msg, ok := cmd().(showOverlayMsg)
+	if !ok {
+		t.Fatalf("cmd() = %T, want showOverlayMsg", cmd())
+	}
+	ov, ok := msg.overlay.(applyOverlay)
+	if !ok {
+		t.Fatalf("overlay = %T, want applyOverlay", msg.overlay)
+	}
+	return ov
+}
+
+// overlayKey builds a key press for the modal: special keys by code,
+// printable ones with their text, mirroring press/pressSpecial.
+func overlayKey(code rune, text string) tea.KeyPressMsg {
+	if text == "" {
+		return tea.KeyPressMsg{Code: code}
+	}
+	return tea.KeyPressMsg{Code: code, Text: text}
+}
+
+// modalToggle drives space through the modal and returns it for further
+// assertions — the overlay mutates the wizard's own options, so the screen
+// reads the result back live.
+func modalToggle(t *testing.T, ov applyOverlay) applyOverlay {
+	t.Helper()
+	next, _ := ov.update(overlayKey(tea.KeySpace, ""))
+	out, ok := next.(applyOverlay)
+	if !ok {
+		t.Fatalf("overlay = %T, want applyOverlay", next)
+	}
+	return out
+}
+
+// modalMove drives an up/down key through the modal.
+func modalMove(t *testing.T, ov applyOverlay, code rune) applyOverlay {
+	t.Helper()
+	next, _ := ov.update(overlayKey(code, ""))
+	out, ok := next.(applyOverlay)
+	if !ok {
+		t.Fatalf("overlay = %T, want applyOverlay", next)
+	}
+	return out
+}
+
+// Overwrite is a checkbox in the apply confirmation, toggled the same way
 // shaders and add-ons are.
-func TestWizardReviewOverwriteToggle(t *testing.T) {
+func TestApplyModalOverwriteToggle(t *testing.T) {
 	s := loadWizard(t, sampleGameEntry(), 0, fakeDeps())
 	s = advance(t, s, stepReview)
+	ov := openApplyModal(t, s)
 
 	if s.overwrite() {
 		t.Fatal("overwrite should start off")
 	}
-	s = pressSpecial(t, s, ' ')
+	modalToggle(t, ov)
 	if !s.overwrite() {
 		t.Error("space should toggle overwrite on")
 	}
-	s = pressSpecial(t, s, ' ')
+	modalToggle(t, ov)
 	if s.overwrite() {
 		t.Error("space should toggle overwrite back off")
 	}
 }
 
-// Pressing enter at Review must push a ProgressScreen carrying the built
-// Request.
-func TestWizardReviewEnterPushesProgress(t *testing.T) {
+// Pressing enter at Review opens the apply confirmation, and only
+// confirming it pushes a ProgressScreen carrying the built Request.
+func TestWizardReviewEnterOpensApplyConfirmation(t *testing.T) {
 	s := loadWizard(t, sampleGameEntry(), 0, fakeDeps())
 	s = advance(t, s, stepReview)
 
@@ -555,26 +608,63 @@ func TestWizardReviewEnterPushesProgress(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("enter at Review should return a command")
 	}
-	push, ok := cmd().(pushScreenMsg)
+	msg, ok := cmd().(showOverlayMsg)
 	if !ok {
-		t.Fatalf("message = %T, want pushScreenMsg", cmd())
+		t.Fatalf("message = %T, want showOverlayMsg", cmd())
 	}
-	if _, ok := push.screen.(*ProgressScreen); !ok {
-		t.Fatalf("pushed screen = %T, want *ProgressScreen", push.screen)
+	ov, ok := msg.overlay.(applyOverlay)
+	if !ok {
+		t.Fatalf("overlay = %T, want applyOverlay", msg.overlay)
+	}
+
+	next, push := ov.update(overlayKey('y', "y"))
+	if next != nil {
+		t.Error("confirming should dismiss the modal")
+	}
+	pushMsg, ok := push().(pushScreenMsg)
+	if !ok {
+		t.Fatalf("message = %T, want pushScreenMsg", push())
+	}
+	if _, ok := pushMsg.screen.(*ProgressScreen); !ok {
+		t.Fatalf("pushed screen = %T, want *ProgressScreen", pushMsg.screen)
+	}
+
+	// And declining runs nothing.
+	ov = openApplyModal(t, s)
+	if next, push := ov.update(overlayKey('n', "n")); next != nil || push != nil {
+		t.Error("declining the confirmation must dismiss it without running anything")
+	}
+}
+
+// The edit-mode summary has no Review pane: the options it used to show
+// live in the apply confirmation now, beside the commit they belong to.
+func TestEditingSummaryHasNoReviewSection(t *testing.T) {
+	s := editWizard(t)
+
+	if slices.Contains(s.hubSections(), stepReview) {
+		t.Errorf("sections = %v, want no Review pane", s.hubSections())
+	}
+	body := s.View(wizardEnv())
+	if strings.Contains(body, "Review") {
+		t.Errorf("the summary should not render a Review pane:\n%s", body)
 	}
 }
 
 // Review says what the install still has to fetch — the one thing the
-// earlier steps could not already show.
+// earlier steps could not already show. The overwrite/backup options are
+// not on this page any more: they live in the apply confirmation.
 func TestWizardReviewListsWhatItWillDownload(t *testing.T) {
 	s := loadWizard(t, sampleGameEntry(), 0, fakeDeps())
 	s = advance(t, s, stepReview)
 	body := s.View(wizardEnv())
 
-	for _, want := range []string{"To download", "ReShade 6.8.0 (addon)", "Options"} {
+	for _, want := range []string{"To download", "ReShade 6.8.0 (addon)"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("review should show %q:\n%s", want, body)
 		}
+	}
+	if strings.Contains(body, "Options") {
+		t.Errorf("the options belong to the apply confirmation, not the review page:\n%s", body)
 	}
 	const disclaimer = "Files not created by yarm are left in place unless overwrite is on."
 	if !strings.Contains(body, wizardEnv().Styles.Warn.Render(disclaimer)) {
@@ -693,6 +783,7 @@ func TestDescribeMissing(t *testing.T) {
 	got := describeMissing(cache, "6.8.0", true,
 		[]string{"standard-effects", "sweetfx-by-ceejay-dk"},
 		[]string{"swap-chain-override-by-crosire"},
+		func(string) bool { return false },
 		"",
 		game.ArchX64, true)
 
@@ -716,7 +807,7 @@ func TestDescribeMissingNothingMissing(t *testing.T) {
 		reshade:     map[string]bool{"6.8.0:normal": true},
 		d3dcompiler: true,
 	}
-	got := describeMissing(cache, "6.8.0", false, nil, nil, "", game.ArchX64, true)
+	got := describeMissing(cache, "6.8.0", false, nil, nil, func(string) bool { return false }, "", game.ArchX64, true)
 	if len(got) != 0 {
 		t.Errorf("describeMissing() = %v, want none (everything already cached)", got)
 	}
@@ -725,7 +816,8 @@ func TestDescribeMissingNothingMissing(t *testing.T) {
 // A nil CacheStatus (no cache wired up at all) must report everything as
 // missing rather than panicking or, worse, claiming nothing is needed.
 func TestDescribeMissingNilCache(t *testing.T) {
-	got := describeMissing(nil, "6.8.0", true, []string{"standard-effects"}, nil, "", game.ArchX64, true)
+	got := describeMissing(nil, "6.8.0", true, []string{"standard-effects"}, nil,
+		func(string) bool { return false }, "", game.ArchX64, true)
 	want := []string{"ReShade 6.8.0 (addon)", "package standard-effects", "d3dcompiler_47.dll (~40 MB, once)"}
 	if len(got) != len(want) {
 		t.Fatalf("describeMissing(nil cache) = %v, want %v", got, want)
@@ -1206,18 +1298,27 @@ func TestWizardReviewShowsWhatIsAlreadyInTheFolder(t *testing.T) {
 }
 
 // With overwrite on, the same file is reported as replaced-and-recoverable
-// — the backup is the reason overwriting is not a one-way door.
-func TestWizardReviewSaysForeignFilesAreBackedUpWhenOverwriting(t *testing.T) {
+// — the backup is the reason overwriting is not a one-way door. Toggled
+// in the apply confirmation, where the option lives.
+func TestApplyModalSaysForeignFilesAreBackedUpWhenOverwriting(t *testing.T) {
 	entry := gameWithExistingFiles(t, map[string]int{"dxgi.dll": 25872384})
 	s := advance(t, loadWizard(t, entry, 0, fakeDeps()), stepReview)
-	s = pressSpecial(t, s, tea.KeySpace) // the overwrite checkbox
+	ov := modalToggle(t, openApplyModal(t, s)) // overwrite on
 
-	body := s.View(wizardEnv())
+	body := ov.view(wizardEnv())
+	// The advice wraps to the modal width, so assert on the halves either
+	// side of the break rather than the whole sentence.
 	if !strings.Contains(body, install.BackupSuffix) {
-		t.Errorf("review should name the backup file:\n%s", body)
+		t.Errorf("the confirmation should name the backup file:\n%s", body)
 	}
-	if !strings.Contains(body, "put back when you uninstall") {
-		t.Errorf("review should say the backup is restored on uninstall:\n%s", body)
+	// The anti-cheat warning lives on the build steps, the review page and
+	// the hub — by confirmation time it is already read, so the modal
+	// stays quiet about it.
+	if strings.Contains(body, "anti-cheat") {
+		t.Errorf("the confirmation should not repeat the anti-cheat warning:\n%s", body)
+	}
+	if !strings.Contains(body, "put back when you") || !strings.Contains(body, "uninstall.") {
+		t.Errorf("the confirmation should say the backup is restored on uninstall:\n%s", body)
 	}
 	if strings.Contains(body, "will not load") {
 		t.Errorf("with overwrite on, nothing is kept:\n%s", body)
@@ -1245,7 +1346,7 @@ func TestWizardReviewWithConflictsFitsNarrowTerminals(t *testing.T) {
 		for _, overwrite := range []bool{false, true} {
 			s := advance(t, loadWizard(t, entry, 0, fakeDeps()), stepReview)
 			if overwrite {
-				s = pressSpecial(t, s, tea.KeySpace)
+				modalToggle(t, openApplyModal(t, s))
 			}
 			env := Env{Styles: NewStyles(true), Width: size.width, Height: size.height}
 			body := s.View(env)
@@ -1280,14 +1381,15 @@ func TestWizardBackupIsOnByDefault(t *testing.T) {
 	}
 }
 
-// Turning backups off is allowed, reaches the request, and the review page
-// says plainly what it costs.
-func TestWizardBackupCanBeTurnedOff(t *testing.T) {
+// Turning backups off is allowed, reaches the request, and the
+// confirmation says plainly what it costs.
+func TestApplyModalBackupCanBeTurnedOff(t *testing.T) {
 	entry := gameWithExistingFiles(t, map[string]int{"dxgi.dll": 25872384})
 	s := advance(t, loadWizard(t, entry, 0, fakeDeps()), stepReview)
-	s = pressSpecial(t, s, tea.KeySpace) // overwrite on
-	s = pressSpecial(t, s, tea.KeyDown)
-	s = pressSpecial(t, s, tea.KeySpace) // backup off
+	ov := openApplyModal(t, s)
+	ov = modalToggle(t, ov) // overwrite on
+	ov = modalMove(t, ov, tea.KeyDown)
+	ov = modalToggle(t, ov) // backup off
 
 	req, ok := s.buildRequest()
 	if !ok {
@@ -1297,27 +1399,28 @@ func TestWizardBackupCanBeTurnedOff(t *testing.T) {
 		t.Error("Request.NoBackup should be true once the backup option is off")
 	}
 
-	body := s.View(wizardEnv())
+	body := ov.view(wizardEnv())
 	if !strings.Contains(body, "original discarded") || !strings.Contains(body, "gone for good") {
-		t.Errorf("review should say the originals are not recoverable:\n%s", body)
+		t.Errorf("the confirmation should say the originals are not recoverable:\n%s", body)
 	}
 }
 
 // Overwriting is a fresh decision each time it is turned on, so the safe
 // default comes back with it rather than inheriting an earlier "no
 // backups" from a decision the user may not remember making.
-func TestWizardTurningOverwriteBackOnRestoresBackups(t *testing.T) {
+func TestApplyModalTurningOverwriteBackOnRestoresBackups(t *testing.T) {
 	s := advance(t, loadWizard(t, sampleGameEntry(), 0, fakeDeps()), stepReview)
+	ov := openApplyModal(t, s)
 
-	s = pressSpecial(t, s, tea.KeySpace) // overwrite on
-	s = pressSpecial(t, s, tea.KeyDown)
-	s = pressSpecial(t, s, tea.KeySpace) // backup off
-	s = pressSpecial(t, s, tea.KeyUp)
-	s = pressSpecial(t, s, tea.KeySpace) // overwrite off
+	ov = modalToggle(t, ov) // overwrite on
+	ov = modalMove(t, ov, tea.KeyDown)
+	ov = modalToggle(t, ov) // backup off
+	ov = modalMove(t, ov, tea.KeyUp)
+	ov = modalToggle(t, ov) // overwrite off
 	if s.backup() {
 		t.Fatal("turning overwrite off should leave the backup choice alone")
 	}
-	s = pressSpecial(t, s, tea.KeySpace) // overwrite on again
+	modalToggle(t, ov) // overwrite on again
 
 	if !s.backup() {
 		t.Error("turning overwrite back on should restore backups to the safe default")
@@ -1326,15 +1429,16 @@ func TestWizardTurningOverwriteBackOnRestoresBackups(t *testing.T) {
 
 // While nothing is being overwritten the option does nothing, and says so
 // rather than presenting a checkbox with no effect.
-func TestWizardBackupOptionSaysItOnlyAppliesWhenOverwriting(t *testing.T) {
+func TestApplyModalBackupOptionSaysItOnlyAppliesWhenOverwriting(t *testing.T) {
 	s := advance(t, loadWizard(t, sampleGameEntry(), 0, fakeDeps()), stepReview)
+	ov := openApplyModal(t, s)
 
-	if !strings.Contains(s.View(wizardEnv()), "only when overwriting") {
-		t.Errorf("the backup row should say when it applies:\n%s", s.View(wizardEnv()))
+	if !strings.Contains(ov.view(wizardEnv()), "only when overwriting") {
+		t.Errorf("the backup row should say when it applies:\n%s", ov.view(wizardEnv()))
 	}
-	s = pressSpecial(t, s, tea.KeySpace)
-	if strings.Contains(s.View(wizardEnv()), "only when overwriting") {
-		t.Errorf("with overwrite on, the caveat is wrong:\n%s", s.View(wizardEnv()))
+	ov = modalToggle(t, ov)
+	if strings.Contains(ov.view(wizardEnv()), "only when overwriting") {
+		t.Errorf("with overwrite on, the caveat is wrong:\n%s", ov.view(wizardEnv()))
 	}
 }
 
@@ -1467,10 +1571,49 @@ func TestEditingSummaryShowsWhatWouldChange(t *testing.T) {
 	s = pressSpecial(t, s, tea.KeyEnter)
 
 	body := s.View(wizardEnv())
-	for _, want := range []string{"6.7.3 → 6.8.0", "addon build", "-SweetFX by CeeJay.dk"} {
+	for _, want := range []string{"6.7.3 → 6.8.0", "addon build", "Removing", "SweetFX by CeeJay.dk"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the summary should report %q:\n%s", want, body)
 		}
+	}
+}
+
+// A full-width rule separates the section panes from the Changes block,
+// so the diff reads as its own block rather than one more row of panes.
+func TestEditingSummaryRulesOffTheChanges(t *testing.T) {
+	s := editWizard(t)
+	s = openSection(t, s, stepShaders)
+	s = pressSpecial(t, s, tea.KeyDown)
+	s = pressSpecial(t, s, tea.KeySpace)
+	s = pressSpecial(t, s, tea.KeyEnter)
+
+	env := Env{Styles: NewStyles(true), Width: 100, Height: 26}
+	body := s.View(env)
+	rule := strings.Repeat("─", env.Width)
+	lines := strings.Split(body, "\n")
+	ruleAt := -1
+	for i, line := range lines {
+		if strings.Contains(line, rule) {
+			ruleAt = i
+			break
+		}
+	}
+	if ruleAt < 0 {
+		t.Fatalf("the summary should rule off the changes section:\n%s", body)
+	}
+	// Margin on both sides: a blank line above the rule and below it.
+	if ruleAt == 0 || lines[ruleAt-1] != "" {
+		t.Errorf("the rule should have a blank line above it:\n%s", body)
+	}
+	if ruleAt+1 >= len(lines) || lines[ruleAt+1] != "" {
+		t.Errorf("the rule should have a blank line below it:\n%s", body)
+	}
+	ruleLine := strings.Join(lines[ruleAt:], "\n")
+	if idx := strings.Index(ruleLine, "- SweetFX by CeeJay.dk"); idx < 0 {
+		t.Errorf("the diff should sit below the rule:\n%s", body)
+	}
+	if idx := strings.Index(body, "Shaders"); idx < 0 || idx > strings.Index(body, rule) {
+		t.Errorf("the panes should sit above the rule:\n%s", body)
 	}
 }
 
@@ -1515,7 +1658,7 @@ func TestFreshInstallStillWalksTheSteps(t *testing.T) {
 // terminal, and neither must a section reached from it.
 func TestEditingFitsNarrowTerminals(t *testing.T) {
 	for _, size := range []struct{ width, height int }{{80, 21}, {60, 21}, {44, 21}} {
-		for _, step := range []wizardStep{stepHub, stepReShade, stepAPI, stepShaders, stepReview} {
+		for _, step := range []wizardStep{stepHub, stepReShade, stepAPI, stepShaders} {
 			s := editWizard(t)
 			if step != stepHub {
 				s = openSection(t, s, step)
@@ -1531,6 +1674,22 @@ func TestEditingFitsNarrowTerminals(t *testing.T) {
 					t.Errorf("%dx%d, %v: line is %d columns wide:\n%q",
 						size.width, size.height, step, lipgloss.Width(line), line)
 				}
+			}
+		}
+		// The edit-mode Review page is reachable by step rather than from
+		// the hub now, and must fit the same terminals.
+		s := editWizard(t)
+		s.step = stepReview
+		env := Env{Styles: NewStyles(true), Width: size.width, Height: size.height}
+		body := s.View(env)
+		if got := countLines(body); got > env.Height {
+			t.Errorf("%dx%d, review: rendered %d lines into %d:\n%s",
+				size.width, size.height, got, env.Height, body)
+		}
+		for _, line := range strings.Split(body, "\n") {
+			if lipgloss.Width(line) > size.width {
+				t.Errorf("%dx%d, review: line is %d columns wide:\n%q",
+					size.width, size.height, lipgloss.Width(line), line)
 			}
 		}
 	}
@@ -1598,8 +1757,8 @@ func TestEditingSummaryNamesPackagesTheCatalogNoLongerHas(t *testing.T) {
 		t.Errorf("the shaders pane should name what it cannot account for: %v",
 			s.hubLines(stepShaders, wizardEnv(), 80))
 	}
-	// And applying would indeed drop it, which the Apply line must admit —
-	// by name, since that is the only way to recognize what is going.
+	// And applying would indeed drop it, which changes() must admit — by
+	// name, since that is the only way to recognize what is going.
 	if got := s.changes(); len(got) != 1 || got[0] != "-some-pack-that-vanished" {
 		t.Errorf("changes() = %v, want the vanished package named as a removal", got)
 	}
@@ -1615,21 +1774,17 @@ func TestEditingSummaryHighlightsTheFocusedPane(t *testing.T) {
 	accentSeq, _, _ := strings.Cut(strings.TrimPrefix(accent, "\x1b["), "m")
 
 	body := s.View(env)
-	// The Apply button is a box of its own now, so its border line also
-	// contains "╭" — the pane tops are told apart as the one row with
-	// more than one box opening.
-	var borders []string
+	// A row of pane tops has more than one "╭" — one per box in that row —
+	// so summing the accent color across every such row finds exactly one
+	// highlighted box, whichever row it falls on.
+	var accents int
 	for _, line := range strings.Split(body, "\n") {
 		if strings.Count(line, "╭") > 1 {
-			borders = append(borders, line)
+			accents += strings.Count(line, accentSeq)
 		}
 	}
-	if len(borders) != 1 {
-		t.Fatalf("expected one row of pane tops, found %d", len(borders))
-	}
-	// Exactly one of the three boxes carries the accent color.
-	if n := strings.Count(borders[0], accentSeq); n != 1 {
-		t.Errorf("%d of the panes are highlighted, want just the focused one:\n%q", n, borders[0])
+	if accents != 1 {
+		t.Errorf("%d panes are highlighted, want just the focused one:\n%s", accents, body)
 	}
 
 	// And the marker sits on the same pane as the highlight.
@@ -1671,6 +1826,89 @@ func TestEditingSummaryMovesWithLeftAndRight(t *testing.T) {
 	}
 	if s := pressSpecial(t, s, tea.KeyDown); s.hubCursor.Cursor() != 1 {
 		t.Error("↓ should still move, whichever layout is showing")
+	}
+}
+
+// Pressing 'a' at the hub summary must not apply anything by itself — it
+// opens the apply confirmation, and only confirming it runs the edit. The
+// confirmation also carries the overwrite/backup options.
+func TestWizardHubApplyOpensConfirmation(t *testing.T) {
+	s := editWizard(t)
+
+	_, cmd := s.Update(tea.KeyPressMsg{Code: 'a', Text: "a"}, wizardEnv())
+	if cmd == nil {
+		t.Fatal("pressing 'a' at the hub should return a command")
+	}
+	msg, ok := cmd().(showOverlayMsg)
+	if !ok {
+		t.Fatalf("cmd() = %T, want showOverlayMsg", cmd())
+	}
+	ov, ok := msg.overlay.(applyOverlay)
+	if !ok {
+		t.Fatalf("overlay = %T, want applyOverlay", msg.overlay)
+	}
+	if body := ov.view(wizardEnv()); !strings.Contains(body, "Options") {
+		t.Errorf("the confirmation should carry the overwrite/backup options:\n%s", body)
+	}
+
+	next, push := ov.update(overlayKey('y', "y"))
+	if next != nil {
+		t.Error("confirming should dismiss the modal")
+	}
+	pushMsg, ok := push().(pushScreenMsg)
+	if !ok {
+		t.Fatalf("confirming apply produced %T, want pushScreenMsg", push())
+	}
+	if _, ok := pushMsg.screen.(*ProgressScreen); !ok {
+		t.Fatalf("pushed screen = %T, want *ProgressScreen", pushMsg.screen)
+	}
+}
+
+// Unchecking a folder that already has a recorded install, right after
+// checking a new one, is how an edit moves an install from one folder to
+// another — buildOps must uninstall the one and install the other in the
+// same batch, and the hub's own diff must name both folders by path.
+func TestWizardEditMovesInstallBetweenFolders(t *testing.T) {
+	e := twoFolderGame()
+	s := loadWizard(t, e, 0, fakeDeps())
+
+	s = openSection(t, s, stepPaths)
+	s = pressSpecial(t, s, tea.KeyDown)
+	s = pressSpecial(t, s, tea.KeySpace) // check Ship
+	s = pressSpecial(t, s, tea.KeyUp)
+	s = pressSpecial(t, s, tea.KeySpace) // uncheck Release
+	s = pressSpecial(t, s, tea.KeyEnter) // back to the hub
+
+	ops, ok := s.buildOps()
+	if !ok {
+		t.Fatal("buildOps() should succeed")
+	}
+	if len(ops) != 2 {
+		t.Fatalf("ops = %d, want one install and one uninstall", len(ops))
+	}
+	var install, uninstall *folderOp
+	for i := range ops {
+		switch {
+		case ops[i].Install != nil:
+			install = &ops[i]
+		case ops[i].Uninstall != nil:
+			uninstall = &ops[i]
+		}
+	}
+	if install == nil || install.Dir != "Ship" {
+		t.Errorf("install op = %+v, want one for Ship", install)
+	}
+	if uninstall == nil || uninstall.Dir != "Release" {
+		t.Errorf("uninstall op = %+v, want one for Release", uninstall)
+	}
+
+	// The diff table clips names to a third of the terminal, so read it
+	// wide enough for both folder lines to fit unclipped.
+	body := s.View(Env{Styles: NewStyles(true), Width: 130, Height: 30})
+	for _, want := range []string{"Installing on folder two/Ship/", "Uninstalling from folder two/Release/"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("hub should report %q:\n%s", want, body)
+		}
 	}
 }
 
@@ -1770,6 +2008,74 @@ func TestReviewNamesWhatAnEditChanges(t *testing.T) {
 	// up in either pane.
 	if strings.Contains(body, "Standard effects") {
 		t.Error("a package that was kept must not be listed as a change")
+	}
+}
+
+// The edit diff is one table, not two boxes: Adding on the left,
+// Removing on the right, each a third of the terminal.
+func TestDiffPanesRendersTwoColumns(t *testing.T) {
+	env := Env{Styles: NewStyles(true), Width: 90, Height: 24}
+	body := diffPanes([]string{"SweetFX by CeeJay.dk"}, []string{"Standard effects"}, env)
+
+	for _, want := range []string{"Adding", "Removing", "+ SweetFX by CeeJay.dk", "- Standard effects"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the diff should show %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "╭") {
+		t.Errorf("the diff should not draw boxes:\n%s", body)
+	}
+	// Paired rows share one line: the added and the removed name sit side
+	// by side rather than in separate sections.
+	var paired bool
+	for _, line := range strings.Split(body, "\n") {
+		if strings.Contains(line, "+ SweetFX") && strings.Contains(line, "- Standard") {
+			paired = true
+		}
+		if w := lipgloss.Width(line); w > env.Width {
+			t.Errorf("line is %d columns wide in %d:\n%q", w, env.Width, line)
+		}
+	}
+	if !paired {
+		t.Errorf("adding and removing should share rows:\n%s", body)
+	}
+
+	// Only the headers carry the column color; the names render in the
+	// standard foreground.
+	openSeq := func(s lipgloss.Style) string {
+		r := s.Render("x")
+		return r[:strings.Index(r, "x")]
+	}
+	if got := strings.Count(body, openSeq(env.Styles.Good.Bold(true))); got != 1 {
+		t.Errorf("green should open exactly once (the Adding header), opened %d times:\n%s", got, body)
+	}
+	if got := strings.Count(body, openSeq(env.Styles.Bad.Bold(true))); got != 1 {
+		t.Errorf("red should open exactly once (the Removing header), opened %d times:\n%s", got, body)
+	}
+}
+
+// An empty side names itself once — a column of "none" would read as data.
+func TestDiffPanesMarksAnEmptySideOnce(t *testing.T) {
+	env := Env{Styles: NewStyles(true), Width: 90, Height: 24}
+	body := diffPanes(nil, []string{"Standard effects"}, env)
+
+	if got := strings.Count(body, "none"); got != 1 {
+		t.Errorf("an empty side should say none once, said it %d times:\n%s", got, body)
+	}
+}
+
+// Too narrow for two columns, the diff stacks into one +/- list.
+func TestDiffPanesStacksOnNarrowTerminals(t *testing.T) {
+	env := Env{Styles: NewStyles(true), Width: 30, Height: 24}
+	body := diffPanes([]string{"SweetFX by CeeJay.dk"}, []string{"Standard effects"}, env)
+
+	for _, want := range []string{"+ SweetFX by CeeJay.dk", "- Standard effects"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the stacked diff should show %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "Adding") || strings.Contains(body, "Removing") {
+		t.Errorf("the stacked diff has no columns to head:\n%s", body)
 	}
 }
 

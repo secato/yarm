@@ -22,6 +22,11 @@ import (
 type pathsList struct {
 	groups   []FolderGroup
 	selected map[string]bool // by Dir
+	// initial is a snapshot of selected as the wizard opened it — untouched
+	// by toggle — so addedFolders and removedInstalls can tell "checked
+	// from the start" apart from "checked, then unchecked again", which
+	// nets out to no change at all.
+	initial  map[string]bool // by Dir
 	expanded map[string]bool // by Dir
 	cursor   cursorList
 	// multi allows more than one folder checked at once. Uninstalling and
@@ -32,6 +37,14 @@ type pathsList struct {
 	// exists at all is a 32- and a 64-bit tree set up together.
 	multi bool
 }
+
+// maxAutoExpandedGroups is how many folders a game can have before the
+// paths pane falls back to a count instead of each one's full executable
+// list by default. Executables are what tells two folders of the same
+// game apart, so they earn their room up to a handful of folders; past
+// that, showing every one in full would defeat the point of the pane,
+// which is comparing folders at a glance.
+const maxAutoExpandedGroups = 5
 
 // newPathsList returns a pathsList over groups, with preselected checked
 // and the cursor on it (or on the first group, if preselected is empty).
@@ -47,10 +60,21 @@ func newPathsList(groups []FolderGroup, preselected []string, multi bool) pathsL
 			break
 		}
 	}
+	expanded := map[string]bool{}
+	if len(groups) <= maxAutoExpandedGroups {
+		for _, g := range groups {
+			expanded[g.Dir] = true
+		}
+	}
+	initial := make(map[string]bool, len(sel))
+	for dir := range sel {
+		initial[dir] = true
+	}
 	return pathsList{
 		groups:   groups,
 		selected: sel,
-		expanded: map[string]bool{},
+		initial:  initial,
+		expanded: expanded,
 		cursor:   newCursorList(len(groups), start),
 		multi:    multi,
 	}
@@ -114,10 +138,39 @@ func (p pathsList) selectedGroups() []FolderGroup {
 	return out
 }
 
+// addedFolders is every folder checked now that was not checked when the
+// wizard opened — a new folder this edit is extending the install into.
+func (p pathsList) addedFolders() []FolderGroup {
+	var out []FolderGroup
+	for _, g := range p.groups {
+		if p.selected[g.Dir] && !p.initial[g.Dir] {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// removedInstalls is every folder that already has a recorded install and
+// was checked when the wizard opened, but is not checked now. Unchecking a
+// folder is how an edit moves an install out of it — folderOp supports an
+// Install and an Uninstall in the same batch for exactly this — so applying
+// uninstalls it rather than silently leaving it out of the batch untouched.
+func (p pathsList) removedInstalls() []FolderGroup {
+	var out []FolderGroup
+	for _, g := range p.groups {
+		if g.Installed != nil && p.initial[g.Dir] && !p.selected[g.Dir] {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
 // writePathsList renders the full pane: one block per folder, a checkbox
 // (multi-select only — single-select shows which one is picked without
 // implying others could join it), the path, its ReShade status, and its
-// executables, collapsed to a count unless expanded.
+// executables — shown in full up to maxAutoExpandedGroups folders,
+// collapsed to a count past that, either way overridable per folder by
+// toggleExpand.
 func writePathsList(b *strings.Builder, env Env, p pathsList, height int) {
 	perRow := 2
 	if _, ok := p.current(); ok {

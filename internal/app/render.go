@@ -69,6 +69,14 @@ func writeWindow(b *strings.Builder, env Env, count, cursor, height int, indent 
 	}
 }
 
+// rule draws a full-width horizontal separator: the line between one block
+// and the next, so stacked sections read as sections rather than one run.
+// Box-drawing is safe here — a terminal that cannot draw it cannot draw
+// the panels either.
+func rule(env Env) string {
+	return env.Styles.Faint.Render(strings.Repeat("─", env.Width))
+}
+
 // splitRow fits a row's text and the note that trails it into width,
 // clipping each so that together they fit — clipping them independently
 // against the full width is how a row ends up wider than the terminal. The

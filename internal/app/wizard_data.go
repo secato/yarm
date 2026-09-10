@@ -141,6 +141,34 @@ func (d WizardData) AddonsWithCustom(cache CacheStatus) []selectItem {
 	return items
 }
 
+// RenoDXGames is the catalog's RenoDX mods narrowed to what the RenoDX
+// step itself offers: a mod for one game, or Generic standing in for
+// one. Never more than one of these installs at once — see
+// install.Request.RenoDX's own comment. The utility mods (FPS Limiter,
+// DLSS Fix) sit beside ordinary add-ons instead — see fullAddons.
+func (d WizardData) RenoDXGames() []catalog.RenoMod {
+	out := make([]catalog.RenoMod, 0, len(d.RenoDX))
+	for _, m := range d.RenoDX {
+		if !m.Utility {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// isRenoDXUtility reports whether id names one of RenoDX's utility mods,
+// so a caller that only has an add-on id can tell a RenoDX-sourced one
+// (cached under the RenoDX bucket) from a catalog one (cached under the
+// add-on bucket) without carrying its own separate list.
+func (d WizardData) isRenoDXUtility(id string) bool {
+	for _, m := range d.RenoDX {
+		if m.Utility && m.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 // manualNote is the note on an add-on yarm cannot install: that it is
 // manual, and where to get it by hand when the catalog says where.
 func manualNote(repoURL string) string {
@@ -162,8 +190,13 @@ type CacheStatus interface {
 }
 
 // describeMissing names what an install still needs to download, for the
-// review step's warning list.
-func describeMissing(cache CacheStatus, version string, addon bool, packages, addons []string, renodx string, arch game.Arch, needsD3D bool) []string {
+// review step's warning list. isRenoDXAddon reports whether an add-on id
+// is actually one of RenoDX's utility mods, which are cached under a
+// different bucket than a catalog add-on and so need HasRenoDX rather
+// than HasAddon.
+func describeMissing(cache CacheStatus, version string, addon bool, packages, addons []string,
+	isRenoDXAddon func(string) bool, renodx string, arch game.Arch, needsD3D bool,
+) []string {
 	var missing []string
 	if cache == nil || !cache.HasReShade(version, addon) {
 		flavor := "normal"
@@ -178,7 +211,15 @@ func describeMissing(cache CacheStatus, version string, addon bool, packages, ad
 		}
 	}
 	for _, id := range addons {
-		if cache == nil || !cache.HasAddon(id) {
+		cached := cache != nil
+		if cached {
+			if isRenoDXAddon(id) {
+				cached = cache.HasRenoDX(id)
+			} else {
+				cached = cache.HasAddon(id)
+			}
+		}
+		if !cached {
 			missing = append(missing, "add-on "+id)
 		}
 	}

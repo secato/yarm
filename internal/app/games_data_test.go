@@ -130,8 +130,47 @@ func TestGameDetailShowsOneUnmanagedStatusNotPerExecutable(t *testing.T) {
 	if n := strings.Count(body, "found, untracked"); n != 1 {
 		t.Errorf("body mentions \"found, untracked\" %d time(s), want exactly 1:\n%s", n, body)
 	}
-	if !strings.Contains(body, "start_protected_game.exe") {
-		t.Error("both executables should still be listed, just without a repeated status")
+}
+
+// The games list's detail pane leads with what is actually installed,
+// names each folder under the game's own name rather than a bare
+// "(game root)/", and no longer lists executables at all — a folder with
+// nothing installed just says so.
+func TestGameDetailLeadsWithInstalledFoldersAndDropsExecutables(t *testing.T) {
+	installed := state.Install{
+		Exe:     "compat/Grim Dawn.exe",
+		ReShade: state.ReShadeInfo{Version: "6.8.0", Flavor: "addon", DLL: "dxgi.dll"},
+	}
+	exes := []Executable{
+		{Executable: game.Executable{Path: "Grim Dawn.exe"}},
+		{Executable: game.Executable{Path: "compat/Grim Dawn.exe"}, Installed: &installed},
+		{Executable: game.Executable{Path: "x64/Grim Dawn.exe"}},
+	}
+	entry := GameEntry{
+		Game:   game.Game{ID: "steam:219990", Name: "Grim Dawn", Root: "/home/user/Steam/steamapps/common/Grim Dawn"},
+		Exes:   exes,
+		Groups: groupByFolder("/home/user/Steam/steamapps/common/Grim Dawn", exes),
+	}
+
+	body := panelText(t, entry, Env{Styles: NewStyles(true), Width: 100, Height: 30})
+
+	if strings.Contains(body, "Grim Dawn.exe") {
+		t.Errorf("the detail pane should not list executables at all:\n%s", body)
+	}
+	for _, want := range []string{"Grim Dawn/", "Grim Dawn/compat/", "Grim Dawn/x64/"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("folder labels should be prefixed with the game's own folder name, want %q:\n%s", want, body)
+		}
+	}
+	if n := strings.Count(body, "Not installed on this path"); n != 2 {
+		t.Errorf("2 folders have nothing installed, want that said once each, got %d:\n%s", n, body)
+	}
+	// The installed folder ("compat/") must be listed before either
+	// uninstalled one, which read "Not installed on this path".
+	compatIdx := strings.Index(body, "compat/")
+	rootIdx := strings.Index(body, "Not installed on this path")
+	if compatIdx < 0 || rootIdx < 0 || compatIdx > rootIdx {
+		t.Errorf("the installed folder should be listed before an uninstalled one:\n%s", body)
 	}
 }
 
@@ -283,27 +322,25 @@ func TestMultiFolderGameOffersEveryActionItsFoldersAllow(t *testing.T) {
 		}
 	}
 
-	// Only one folder has an install, so edit does not need to ask which:
-	// it goes straight to the wizard on that folder.
+	// Both edit and install hand the wizard every installable folder, not
+	// just the one already installed into: the Paths step is where a
+	// second folder joins the same pass, and — since Ship's ReShade was
+	// found rather than recorded — each also raises its own adopt
+	// confirmation for it at the same time, rather than silently leaving
+	// that folder out.
 	_, cmd := gs.Update(tea.KeyPressMsg{Code: 'e', Text: "e"}, env)
-	if cmd == nil {
-		t.Fatal("edit should act on the one installed folder")
-	}
-	push, ok := cmd().(pushScreenMsg)
-	if !ok {
-		t.Fatalf("message = %T, want pushScreenMsg", cmd())
-	}
-	if wiz, ok := push.screen.(*WizardScreen); !ok {
-		t.Fatalf("screen = %T, want *WizardScreen", push.screen)
-	} else if wiz.exe.Path != "Release/Game.exe" {
-		t.Errorf("wizard targets %q, want the installed folder's exe", wiz.exe.Path)
-	}
+	assertOpensWizardAndAdopt(t, cmd)
 
-	// Install opens the wizard on the folder it can actually install into,
-	// and — since the other folder's ReShade was found rather than
-	// recorded — raises its own adopt confirmation at the same time,
-	// rather than silently leaving that folder out.
 	_, cmd = gs.Update(tea.KeyPressMsg{Code: 'i', Text: "i"}, env)
+	assertOpensWizardAndAdopt(t, cmd)
+}
+
+// assertOpensWizardAndAdopt checks a batched command opens the wizard on
+// the installed folder's exe and separately confirms adopting the
+// unmanaged one — the shape both the edit and install keys produce on a
+// game with one of each.
+func assertOpensWizardAndAdopt(t *testing.T, cmd tea.Cmd) {
+	t.Helper()
 	batch, ok := cmd().(tea.BatchMsg)
 	if !ok {
 		t.Fatalf("message = %T, want tea.BatchMsg", cmd())
@@ -329,10 +366,10 @@ func TestMultiFolderGameOffersEveryActionItsFoldersAllow(t *testing.T) {
 		}
 	}
 	if !sawWizard {
-		t.Error("install should still open the wizard on the installable folder")
+		t.Error("should still open the wizard on the installable folder")
 	}
 	if !sawAdopt {
-		t.Error("install should also offer to adopt the unmanaged folder")
+		t.Error("should also offer to adopt the unmanaged folder")
 	}
 }
 
@@ -379,13 +416,13 @@ func TestSidePanelShowsAntiCheatWarningBelowEverythingElse(t *testing.T) {
 	env := Env{Styles: NewStyles(true), Width: 100, Height: 30}
 	body := gamesWith(t, entry, env).View(env)
 
-	execIdx := strings.Index(body, "Executables")
+	statusIdx := strings.Index(body, "6.8.0 (addon)")
 	warnIdx := strings.Index(body, "anti-cheat")
-	if execIdx < 0 || warnIdx < 0 {
-		t.Fatalf("expected both \"Executables\" and the anti-cheat warning in the body:\n%s", body)
+	if statusIdx < 0 || warnIdx < 0 {
+		t.Fatalf("expected both the ReShade status and the anti-cheat warning in the body:\n%s", body)
 	}
-	if warnIdx < execIdx {
-		t.Errorf("the anti-cheat warning should come after \"Executables\", not before:\n%s", body)
+	if warnIdx < statusIdx {
+		t.Errorf("the anti-cheat warning should come after the ReShade status, not before:\n%s", body)
 	}
 }
 

@@ -185,16 +185,41 @@ func (r *RealInstaller) resolve(ctx context.Context, req *install.Request, send 
 		for _, a := range addons {
 			byID[a.ID] = a
 		}
+		// RenoDX's utility mods (FPS Limiter, DLSS Fix) are not in
+		// crosire's catalog at all — they are RenoDX's own, fetched the
+		// same way req.RenoDX is below — so the RenoDX list is only
+		// loaded lazily, the first time an id misses byID.
+		var renoMods []catalog.RenoMod
 		for _, id := range req.Addons {
-			a, ok := byID[id]
-			if !ok {
+			if a, ok := byID[id]; ok {
+				if !a.Installable() {
+					return install.Artifacts{}, fmt.Errorf("add-on %q is manual only; see %s", id, a.RepositoryURL)
+				}
+				send(ProgressUpdate{Label: "Downloading add-on " + a.Name})
+				dir, err := r.Cache.EnsureAddon(ctx, a, req.Exe.Arch, progress(a.Name))
+				if err != nil {
+					return install.Artifacts{}, fmt.Errorf("addon %s: %w", id, err)
+				}
+				art.Addons[id] = dir
+				continue
+			}
+
+			if renoMods == nil {
+				renoMods, err = r.Catalog.RenoDX(ctx)
+				if err != nil {
+					return install.Artifacts{}, err
+				}
+			}
+			i := slices.IndexFunc(renoMods, func(m catalog.RenoMod) bool { return m.Utility && m.ID == id })
+			if i < 0 {
 				return install.Artifacts{}, fmt.Errorf("unknown add-on %q", id)
 			}
-			if !a.Installable() {
-				return install.Artifacts{}, fmt.Errorf("add-on %q is manual only; see %s", id, a.RepositoryURL)
+			mod := renoMods[i]
+			if _, ok := mod.ArtifactFor(req.Exe.Arch); !ok {
+				return install.Artifacts{}, fmt.Errorf("add-on %q has no %s build for this game", id, req.Exe.Arch)
 			}
-			send(ProgressUpdate{Label: "Downloading add-on " + a.Name})
-			dir, err := r.Cache.EnsureAddon(ctx, a, req.Exe.Arch, progress(a.Name))
+			send(ProgressUpdate{Label: "Downloading " + mod.Title})
+			dir, err := r.Cache.EnsureRenoDX(ctx, mod, req.Exe.Arch, progress(mod.Title))
 			if err != nil {
 				return install.Artifacts{}, fmt.Errorf("addon %s: %w", id, err)
 			}

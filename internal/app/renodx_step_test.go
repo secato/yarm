@@ -1,6 +1,7 @@
 package app
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -300,6 +301,91 @@ func TestRenoDXReportsTheAutoHDRConflict(t *testing.T) {
 	}
 }
 
+// wizardDataWithFPSLimiter appends RenoDX's FPS Limiter — a utility mod,
+// not a per-game or Generic one — without touching sampleWizardData()
+// and every other test built on its exact RenoDX list.
+func wizardDataWithFPSLimiter() WizardData {
+	data := sampleWizardData()
+	data.RenoDX = append(data.RenoDX, catalog.RenoMod{
+		ID: "fpslimiter", Title: "FPS Limiter", Description: "Frame rate limiter",
+		Utility: true,
+		Artifacts: []catalog.RenoArtifact{{
+			Name: "renodx-fpslimiter.addon64", Arch: game.ArchX64, Size: 1 << 20,
+			URL: catalog.RenoDXAssetBase + "renodx-fpslimiter.addon64",
+		}},
+	})
+	return data
+}
+
+// A utility mod does not replace a game's shaders or tone mapping, so it
+// belongs beside ordinary add-ons rather than in RenoDX's own, single
+// choice — and the RenoDX step, in turn, must not offer it.
+func TestRenoDXUtilityModLivesInAddonsNotRenoDX(t *testing.T) {
+	deps := fakeDeps()
+	deps.WizardData = fakeWizardData{data: wizardDataWithFPSLimiter()}
+	s := loadWizard(t, sampleGameEntry(), 0, deps)
+
+	for _, it := range s.renodx.items {
+		if it.ID == "fpslimiter" {
+			t.Fatalf("FPS Limiter should not be offered on the RenoDX step: %v", renodxRowNames(s))
+		}
+	}
+
+	found := false
+	for _, it := range s.addons.items {
+		if it.ID == "fpslimiter" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("FPS Limiter should be offered as an ordinary add-on")
+	}
+}
+
+// Unlike two mods that both hook the swap chain, a utility mod and a
+// per-game mod do not conflict, so both should reach the request.
+func TestRenoDXUtilityModCombinesWithAGameMod(t *testing.T) {
+	deps := fakeDeps()
+	deps.WizardData = fakeWizardData{data: wizardDataWithFPSLimiter()}
+	s := loadWizard(t, sampleGameEntry(), 0, deps)
+
+	s = advance(t, s, stepAddons)
+	s = toggleRow(t, s, &s.addons, "fpslimiter")
+	s = pressSpecial(t, s, tea.KeyEnter) // -> stepRenoDX
+
+	s.renodx.cursor = indexOfRow(t, s, "Ember Hollow")
+	s = pressSpecial(t, s, ' ')
+
+	req, ok := s.buildRequest()
+	if !ok {
+		t.Fatal("buildRequest() ok = false")
+	}
+	if req.RenoDX != "emberhollow" {
+		t.Errorf("Request.RenoDX = %q, want emberhollow", req.RenoDX)
+	}
+	if !slices.Contains(req.Addons, "fpslimiter") {
+		t.Errorf("Request.Addons = %v, want fpslimiter alongside the game mod", req.Addons)
+	}
+}
+
+// FPS Limiter links the same RenoDX framework as a per-game mod, so it
+// carries the same ReShade-version floor — reported even though nothing
+// was ever chosen on the RenoDX step itself.
+func TestRenoDXUtilityModReportsATooOldReShade(t *testing.T) {
+	deps := fakeDeps()
+	deps.WizardData = fakeWizardData{data: wizardDataWithFPSLimiter()}
+	s := loadWizard(t, sampleGameEntry(), 0, deps)
+	s = pressSpecial(t, s, tea.KeyDown) // 6.7.3, below the floor
+
+	s = advance(t, s, stepAddons)
+	s = toggleRow(t, s, &s.addons, "fpslimiter")
+
+	unmet := strings.Join(s.unmet(), "\n")
+	if !strings.Contains(unmet, "FPS Limiter") || !strings.Contains(unmet, catalog.RenoDXMinReShade) {
+		t.Errorf("Check block = %q, want FPS Limiter's own version requirement named", unmet)
+	}
+}
+
 // A choice made while the add-on build was on offer must not survive a
 // switch back: the normal build cannot load it and Validate would reject
 // the whole request.
@@ -361,7 +447,7 @@ func TestRenoDXPreselectsTheRecordedMod(t *testing.T) {
 	if s.sectionChanged(stepRenoDX) {
 		t.Error("an unchanged section should not be marked changed")
 	}
-	if got := s.hubValue(stepRenoDX, nil); !strings.Contains(got, "Ember Hollow") {
+	if got := s.hubValue(stepRenoDX); !strings.Contains(got, "Ember Hollow") {
 		t.Errorf("hub value = %q, want the mod named", got)
 	}
 }
@@ -431,7 +517,11 @@ func TestRequestValidateRejectsRenoDXOnTheNormalBuild(t *testing.T) {
 // from 96 columns to 120, so a 100-column terminal in edit mode now gets
 // the stacked list instead of panes. That is a real change in what people
 // see, pinned here so it stays a decision rather than a bug report.
-func TestHubStacksBelow120ColumnsOnTheAddonBuild(t *testing.T) {
+// The grid wraps at three panes to a row regardless of how many sections
+// the build has, so the width that forces a stack is the same whether the
+// add-on build's extra two panes (Add-ons, RenoDX) are on offer or not —
+// they just add a second row rather than widening the first.
+func TestHubStacksBelow72ColumnsOnTheAddonBuild(t *testing.T) {
 	entry := sampleGameEntry()
 	entry.Exes[0].Installed = &state.Install{
 		Exe:     entry.Exes[0].Path,
@@ -441,14 +531,14 @@ func TestHubStacksBelow120ColumnsOnTheAddonBuild(t *testing.T) {
 	if s.step != stepHub {
 		t.Fatalf("step = %v, want the edit-mode summary", s.step)
 	}
-	if got := len(s.hubSections()); got != 7 {
-		t.Fatalf("hubSections = %d, want 7 on the add-on build", got)
+	if got := len(s.hubSections()); got != 6 {
+		t.Fatalf("hubSections = %d, want 6 on the add-on build", got)
 	}
 
 	for _, tt := range []struct {
 		width   int
 		stacked bool
-	}{{130, true}, {143, true}, {144, false}, {150, false}} {
+	}{{60, true}, {71, true}, {72, false}, {90, false}} {
 		got := s.hubStacked(Env{Styles: NewStyles(true), Width: tt.width, Height: 24})
 		if got != tt.stacked {
 			t.Errorf("hubStacked at %d columns = %v, want %v", tt.width, got, tt.stacked)

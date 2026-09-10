@@ -72,6 +72,14 @@ type RenoMod struct {
 	Description string
 	Maintainers []string
 	Artifacts   []RenoArtifact
+	// Utility marks a hand-kept extra that does not replace a game's
+	// shaders or tone mapping the way a per-game mod (or Generic,
+	// standing in for one) does. FPS Limiter and DLSS Fix patch
+	// something else entirely, so — unlike two mods that both hook the
+	// swap chain — more than one can be active at once, and yarm treats
+	// them as ordinary add-ons rather than folding them into RenoDX's
+	// single choice.
+	Utility bool
 }
 
 // Beta reports whether upstream flags this mod as still settling.
@@ -263,19 +271,30 @@ func extOf(name string) string {
 // Kept here rather than derived, for the same reason requires.go is
 // hand-kept: there is nothing upstream to derive them from.
 //
+// Generic is a stand-in for a per-game mod — the same kind of shader and
+// tone-mapping replacement, just not tied to one game — so it stays
+// exclusive with everything else RenoDX offers. DLSS Fix and FPS Limiter
+// patch something unrelated to that and are marked Utility.
+//
 // Deliberately not included: renodx-devkit, which is a development tool,
 // and the emulator titles, which are absent from the index because they
 // are not Steam games and which yarm's discovery would never surface.
 func renodxExtras() []RenoMod {
-	extras := []struct{ id, title, desc string }{
-		{"generic", "RenoDX Generic", "Works with many games that have no mod of their own"},
-		{"dlssfix", "DLSS Fix", "Corrects DLSS rendering issues"},
-		{"fpslimiter", "FPS Limiter", "Frame rate limiter"},
+	extras := []struct {
+		id, title, desc string
+		utility         bool
+	}{
+		{"generic", "RenoDX Generic", "Works with many games that have no mod of their own", false},
+		{"dlssfix", "DLSS Fix", "Corrects DLSS rendering issues", true},
+		{"fpslimiter", "FPS Limiter", "Frame rate limiter", true},
 	}
 
 	out := make([]RenoMod, 0, len(extras))
 	for _, e := range extras {
-		mod := RenoMod{ID: e.id, Title: e.title, Description: e.desc, Maintainers: []string{"RenoDX"}}
+		mod := RenoMod{
+			ID: e.id, Title: e.title, Description: e.desc,
+			Maintainers: []string{"RenoDX"}, Utility: e.utility,
+		}
 		for _, arch := range []game.Arch{game.ArchX64, game.ArchX86} {
 			suffix := ".addon64"
 			if arch == game.ArchX86 {

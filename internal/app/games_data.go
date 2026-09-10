@@ -46,14 +46,47 @@ type FolderGroup struct {
 	Runtime install.RuntimeInfo
 }
 
-// folderLabel names a folder the way every screen shows it: the
-// game-relative directory with a trailing slash, and the game root spelled
-// out rather than rendered as a bare "/".
+// folderLabel names a folder the way the wizard's own Paths pane shows
+// it: the game-relative directory with a trailing slash, and the game
+// root spelled out rather than rendered as a bare "/".
 func folderLabel(dir string) string {
 	if dir == "" {
 		return "(game root)/"
 	}
 	return dir + "/"
+}
+
+// detailFolderLabel names a folder the way the games list's detail pane
+// shows it: prefixed with the game's own folder name, since "compat/" on
+// its own does not say which game it belongs to once several folders show
+// side by side, and "(game root)/" said nothing at all.
+func detailFolderLabel(e GameEntry, dir string) string {
+	base := filepath.Base(e.Root)
+	if dir == "" {
+		return base + "/"
+	}
+	return base + "/" + dir + "/"
+}
+
+// sortedDetailGroups orders a game's folders installed-first, then
+// unmanaged, then the rest — so the detail pane leads with what is
+// actually there rather than making the reader scan past empty folders
+// to find it.
+func sortedDetailGroups(groups []FolderGroup) []FolderGroup {
+	out := make([]FolderGroup, len(groups))
+	copy(out, groups)
+	rank := func(g FolderGroup) int {
+		switch {
+		case g.Installed != nil:
+			return 0
+		case g.Unmanaged != nil:
+			return 1
+		default:
+			return 2
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return rank(out[i]) < rank(out[j]) })
+	return out
 }
 
 // primaryExe is the executable an install should be tied to: the first

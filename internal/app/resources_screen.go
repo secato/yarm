@@ -303,11 +303,13 @@ func renodxDescription(m catalog.RenoMod) string {
 }
 
 // inUseRenoDX reports whether any recorded install uses this mod. Kept
-// apart from inUseID because a RenoDX mod is recorded in its own field
-// rather than in the add-on list, and the two id spaces are unrelated.
+// apart from inUseID because a per-game or Generic mod is recorded in
+// its own field rather than in the add-on list — but a utility mod (FPS
+// Limiter, DLSS Fix) is installed like an ordinary add-on and recorded
+// there instead, so both fields are checked.
 func inUseRenoDX(installs []state.GameInstall, id string) bool {
 	for _, gi := range installs {
-		if gi.Install.RenoDX == id {
+		if gi.Install.RenoDX == id || slices.Contains(gi.Install.Addons, id) {
 			return true
 		}
 	}

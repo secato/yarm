@@ -73,21 +73,6 @@ func TestPathsListStaysInsideTheWindow(t *testing.T) {
 	}
 }
 
-// The side panel lists a few executables per folder and counts the rest:
-// they are context for the folder, not things to act on individually, and
-// the panel has a warning under them that must not be what gets clipped.
-func TestSidePanelCapsExecutablesPerFolder(t *testing.T) {
-	env := Env{Styles: NewStyles(true), Width: 120, Height: 40}
-	body := panelText(t, bigGame(1, 12), env)
-
-	if !strings.Contains(body, "+8 more") {
-		t.Errorf("12 executables should list 4 and count the other 8:\n%s", body)
-	}
-	if strings.Contains(body, "tool11.exe") {
-		t.Errorf("executables past the cap should not be listed:\n%s", body)
-	}
-}
-
 // The games list's side panel is a fixed-height box; its content must be
 // clipped to fit rather than pushing the panel's own border off-screen.
 func TestGamesDetailPanelIsClippedToItsHeight(t *testing.T) {

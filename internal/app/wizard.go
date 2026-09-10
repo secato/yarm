@@ -51,7 +51,7 @@ var wizardSteps = []wizardStep{stepPaths, stepReShade, stepAPI, stepShaders, ste
 func (s wizardStep) label() string {
 	switch s {
 	case stepPaths:
-		return "Paths"
+		return "Game Path"
 	case stepReShade:
 		return "ReShade"
 	case stepAPI:
@@ -87,6 +87,11 @@ var wizardExpand = key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→"
 // shortlist to the whole catalog. Not a global binding: it means nothing
 // on the other three steps.
 var wizardShowAll = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "show all"))
+
+// wizardApply runs the pending edit, after a confirmation modal — the hub's
+// own hotkey rather than a pane you have to navigate onto and press enter
+// on twice, the same shape as every other action in this screen.
+var wizardApply = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "apply"))
 
 // dllOption is one radio choice on the API step, matching ReShade's own
 // installer.
@@ -209,8 +214,8 @@ type WizardScreen struct {
 	// search that hid the chosen mod would silently unanswer the step.
 	renodxChoice string
 
-	// Step: review — an options checklist (currently just "overwrite"),
-	// navigated the same way shaders/add-ons are.
+	// Step: review options — the overwrite/backup checklist shown in the
+	// apply confirmation, navigated the same way shaders/add-ons are.
 	options multiSelect
 }
 
@@ -269,10 +274,10 @@ func NewWizardScreen(entry GameEntry, exe Executable, targets []FolderGroup, dep
 	}
 }
 
-// newOptions builds the review page's checklist. Backups start on: the
-// only irreversible thing an install does is replacing a file the user had
-// without keeping a copy, and that has to be something they chose rather
-// than something they failed to notice.
+// newOptions builds the apply confirmation's checklist. Backups start on:
+// the only irreversible thing an install does is replacing a file the user
+// had without keeping a copy, and that has to be something they chose
+// rather than something they failed to notice.
 func newOptions() multiSelect {
 	m := newMultiSelect([]selectItem{
 		{ID: "overwrite", Name: "Overwrite existing files"},
@@ -334,7 +339,7 @@ func (s *WizardScreen) stepNumber(step wizardStep) int { return int(step) + 1 }
 func (s *WizardScreen) KeyBindings() []key.Binding {
 	switch s.step {
 	case stepHub:
-		return []key.Binding{s.keys.Up, s.keys.Down, s.keys.Enter, s.keys.Back}
+		return []key.Binding{s.keys.Up, s.keys.Down, s.keys.Enter, wizardApply, s.keys.Back}
 	case stepPaths:
 		return []key.Binding{
 			s.keys.Up, s.keys.Down, s.keys.Toggle, wizardExpand, s.keys.Enter, s.keys.Back,
@@ -347,8 +352,9 @@ func (s *WizardScreen) KeyBindings() []key.Binding {
 		// No "show all": there is no shortlist here, only the search.
 		return []key.Binding{s.keys.Up, s.keys.Down, s.keys.Toggle, s.keys.Filter, s.keys.Enter, s.keys.Back}
 	case stepReview:
+		// Display-only: committing is the confirmation modal, opened by
+		// enter in both flows.
 		return []key.Binding{
-			s.keys.Up, s.keys.Down, s.keys.Toggle,
 			key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", s.verb())),
 			s.keys.Back,
 		}
@@ -402,8 +408,9 @@ func (s *WizardScreen) stepEnabled(step wizardStep) bool {
 }
 
 // hubSections lists the summary's rows, in order. The add-on steps only
-// appear for a build that can load them, and Review is last because it is
-// the one row that leaves the summary rather than returning to it.
+// appear for a build that can load them. Applying is the hub's own hotkey,
+// not a section — the options it needs live in the confirmation modal, so
+// there is no Review pane to open.
 func (s *WizardScreen) hubSections() []wizardStep {
 	rows := make([]wizardStep, 0, len(wizardSteps))
 	for _, st := range wizardSteps {
@@ -411,7 +418,7 @@ func (s *WizardScreen) hubSections() []wizardStep {
 			rows = append(rows, st)
 		}
 	}
-	return append(rows, stepReview)
+	return rows
 }
 
 // syncHub re-clamps the summary cursor after the row list can have
@@ -641,7 +648,9 @@ func (s *WizardScreen) itemNames() map[string]string {
 func (s *WizardScreen) unmet() []string {
 	sel := s.selection()
 	ids := append(s.packages.selectedIDs(), addonsForDownload(s.flavor, s.addons)...)
-	return append(unmetRequirements(ids, s.itemNames(), sel), s.renodxUnmet()...)
+	out := unmetRequirements(ids, s.itemNames(), sel)
+	out = append(out, s.renodxUnmet()...)
+	return append(out, s.addonRenoDXUnmet()...)
 }
 
 func (s *WizardScreen) fullPackages() []selectItem {
@@ -658,6 +667,15 @@ func (s *WizardScreen) fullAddons() []selectItem {
 	for i := range items {
 		if items[i].ID == renodxCatalogAddonID {
 			items[i].DisabledNote = "installed on the RenoDX step"
+		}
+	}
+	// RenoDX's utility mods (FPS Limiter, DLSS Fix) end here rather than
+	// on the RenoDX step: unlike a per-game mod, more than one can be
+	// active at once, so they behave like ordinary add-ons rather than
+	// RenoDX's single choice — see catalog.RenoMod.Utility.
+	for _, m := range s.data.RenoDX {
+		if m.Utility {
+			items = append(items, s.renodxRow(m, false))
 		}
 	}
 	return items
@@ -810,8 +828,264 @@ func (s *WizardScreen) handleHubKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		if i := s.hubCursor.Cursor(); i >= 0 && i < len(rows) {
 			s.step = rows[i]
 		}
+	case key.Matches(msg, wizardApply):
+		return s, s.confirmApply()
 	}
 	return s, nil
+}
+
+// confirmApply opens the modal that commits a fresh install or an edit:
+// what it changes and the two options for files already in the folder.
+// A dialog rather than a page, since everything it would change is already
+// on screen behind it — and the same modal for both flows, so committing
+// and choosing how to commit are one decision, made once. Nothing to apply
+// (buildOps fails) does nothing rather than confirming an empty run.
+func (s *WizardScreen) confirmApply() tea.Cmd {
+	if _, ok := s.buildOps(); !ok {
+		return nil
+	}
+	question := s.applyQuestion()
+	return func() tea.Msg {
+		return showOverlayMsg{overlay: applyOverlay{keys: s.keys, question: question, screen: s}}
+	}
+}
+
+// applyQuestion names the commit: installing is creating, editing is
+// changing, and several folders at once is worth saying out loud.
+func (s *WizardScreen) applyQuestion() string {
+	if s.existing == nil {
+		if n := len(s.paths.selectedGroups()); n > 1 {
+			return fmt.Sprintf("Install ReShade in %d folders?", n)
+		}
+		return "Install ReShade?"
+	}
+	ops, ok := s.buildOps()
+	if !ok {
+		return "Apply these changes?"
+	}
+	if len(ops) > 1 || len(s.paths.removedInstalls()) > 0 {
+		return fmt.Sprintf("Apply these changes across %d folder(s)?", len(ops))
+	}
+	return "Apply these changes?"
+}
+
+// applyOverlay is the commit confirmation: the change summary, what is
+// already in the folder, and the overwrite/backup checklist — the options
+// that used to live on the Review page. Everything renders live from the
+// screen, so toggling overwrite immediately rewords what happens to the
+// files in the way; the requests themselves are built at confirm time, not
+// when the modal opens.
+type applyOverlay struct {
+	keys     KeyMap
+	question string
+	screen   *WizardScreen
+}
+
+func (o applyOverlay) update(msg tea.KeyPressMsg) (overlay, tea.Cmd) {
+	s := o.screen
+	switch {
+	case key.Matches(msg, s.keys.Up):
+		s.options.up()
+	case key.Matches(msg, s.keys.Down):
+		s.options.down()
+	case key.Matches(msg, s.keys.Toggle):
+		was := s.overwrite()
+		s.options.toggle()
+		// Turning overwrite on re-asserts the safe default: whatever was
+		// decided about backups the last time overwriting was on should
+		// not quietly carry over into a new decision to overwrite.
+		if !was && s.overwrite() {
+			s.options.selected["backup"] = true
+		}
+	case key.Matches(msg, s.keys.Confirm):
+		ops, ok := s.buildOps()
+		if !ok {
+			return nil, nil
+		}
+		return nil, PushScreen(NewProgressScreen(ops, s.deps.Installer, s.deps.Uninstaller))
+	case key.Matches(msg, s.keys.Cancel):
+		return nil, nil
+	}
+	return o, nil
+}
+
+// applyModalWidth is the overlay box minus its border and padding — the
+// same inner/outer relationship Styles.Panel documents (w renders w, w-4
+// is text).
+func applyModalWidth(env Env) int {
+	w := maxOverlayWidth(env) - 4
+	if w < 20 {
+		w = 20
+	}
+	return w
+}
+
+func (o applyOverlay) view(env Env) string {
+	s := o.screen
+	w := applyModalWidth(env)
+	var b strings.Builder
+	b.WriteString(env.Styles.Subtitle.Render(clipTail(o.question, w)))
+	b.WriteString("\n\n")
+
+	for _, line := range s.applyChangeLines(w) {
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+
+	if conflicts := s.conflicts(); len(conflicts) > 0 {
+		b.WriteString("\n")
+		for _, c := range s.applyConflictLines(conflicts, env, w) {
+			b.WriteString(c)
+			b.WriteString("\n")
+		}
+		if note := s.conflictAdvice(s.applyBlocking(conflicts)); note != "" {
+			b.WriteString(env.Styles.Faint.Render(wrap(note, w)))
+			b.WriteString("\n")
+		}
+	} else if !s.overwrite() {
+		b.WriteString("\n")
+		b.WriteString(env.Styles.Warn.Render(wrap(
+			"Files not created by yarm are left in place unless overwrite is on.", w)))
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(env.Styles.Subtitle.Render("Options"))
+	b.WriteString("\n")
+	for i, it := range s.options.items {
+		box := "[ ]"
+		if s.options.isSelected(i) {
+			box = "[x]"
+		}
+		marker := "  "
+		if i == s.options.cursor {
+			marker = "▸ "
+		}
+		line := fmt.Sprintf("%s%s %s", marker, box, it.Name)
+		// The backup option only does anything while overwriting, and
+		// saying so is better than offering a checkbox that silently means
+		// nothing.
+		note := ""
+		if it.ID == "backup" && !s.overwrite() {
+			note = "  — only when overwriting"
+		}
+		line, note = splitRow(line, note, w)
+		switch {
+		case note != "":
+			line = env.Styles.Faint.Render(line)
+			if i == s.options.cursor {
+				line = env.Styles.Selected.Render(line)
+			}
+			line += env.Styles.Faint.Render(note)
+		case i == s.options.cursor:
+			line = env.Styles.Selected.Render(line)
+		}
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+
+	// No anti-cheat warning here: the build steps, the review page and the
+	// hub all carry it, so by confirmation time it is already read.
+	b.WriteString("\n")
+	b.WriteString(env.Styles.Faint.Render(clipTail(
+		"↑↓ move · space toggles · y confirms · n/esc/enter cancels", w)))
+	return b.String()
+}
+
+// applyChangeLines summarizes what confirming would do, one short line each:
+// the full named diff for an edit, the shape of the install for a fresh
+// one. Capped — a 40-shader diff has its home on the Review page and the
+// hub's Changes section, not in a 72-column modal.
+func (s *WizardScreen) applyChangeLines(w int) []string {
+	if s.existing == nil {
+		return s.applyFreshLines(w)
+	}
+	var out []string
+	if line := s.reshadeChangeLine(); line != "" {
+		out = append(out, clipTail(line, w))
+	}
+	added, removed := s.changeLines()
+	const maxChanges = 8
+	shown, hidden := 0, 0
+	for _, name := range added {
+		if shown < maxChanges {
+			out = append(out, clipTail("+ "+name, w))
+			shown++
+		} else {
+			hidden++
+		}
+	}
+	for _, name := range removed {
+		if shown < maxChanges {
+			out = append(out, clipTail("- "+name, w))
+			shown++
+		} else {
+			hidden++
+		}
+	}
+	if hidden > 0 {
+		out = append(out, clipTail(fmt.Sprintf("+%d more", hidden), w))
+	}
+	if len(out) == 0 {
+		out = append(out, clipTail("no changes — applying reinstalls the same files", w))
+	}
+	return out
+}
+
+// applyFreshLines says what a fresh install will put down: version, proxy
+// DLL, selections and folders. Counts rather than names — the Review page
+// behind the modal already lists every download by name.
+func (s *WizardScreen) applyFreshLines(w int) []string {
+	v, _ := s.selectedVersion()
+	out := []string{
+		clipTail(fmt.Sprintf("ReShade %s (%s) · %s", v.Version, s.flavor, s.selectedDLL()), w),
+		clipTail(s.applySelectionSummary(), w),
+	}
+	if n := len(s.paths.selectedGroups()); n > 1 {
+		out = append(out, clipTail(fmt.Sprintf("applies to %d folders", n), w))
+	}
+	if n := len(s.missing()); n > 0 {
+		out = append(out, clipTail(fmt.Sprintf("%d file(s) to download", n), w))
+	}
+	return out
+}
+
+// applySelectionSummary counts what will be installed, in the install's own
+// terms — add-ons and RenoDX only when the build can load them.
+func (s *WizardScreen) applySelectionSummary() string {
+	parts := []string{countSummary(s.packages, "shader")}
+	if s.flavor.Addon() {
+		parts = append(parts, countSummary(s.addons, "add-on"))
+		parts = append(parts, s.renodxSummary())
+	}
+	return strings.Join(parts, " · ")
+}
+
+// applyConflictLines renders what is already in the folder the way the
+// Review page does, clipped to the modal instead of the terminal.
+func (s *WizardScreen) applyConflictLines(conflicts []install.Conflict, env Env, w int) []string {
+	const maxConflicts = 6
+	out := make([]string, 0, len(conflicts))
+	for i, c := range conflicts {
+		if i >= maxConflicts {
+			out = append(out, env.Styles.Faint.Render(clipTail(
+				fmt.Sprintf("+%d more", len(conflicts)-maxConflicts), w)))
+			break
+		}
+		line, style := s.describeConflict(c, env)
+		out = append(out, style.Render(clipTail(line, w)))
+	}
+	return out
+}
+
+// applyBlocking reports whether any conflict needs overwrite on — the same
+// predicate the Review page advises on.
+func (s *WizardScreen) applyBlocking(conflicts []install.Conflict) bool {
+	blocking := false
+	for _, c := range conflicts {
+		blocking = blocking || c.Blocking(s.overwrite())
+	}
+	return blocking
 }
 
 func (s *WizardScreen) handlePathsKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
@@ -893,26 +1167,15 @@ func (s *WizardScreen) handleMultiSelectKey(msg tea.KeyPressMsg, m *multiSelect,
 }
 
 func (s *WizardScreen) handleReviewKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
-	switch {
-	case key.Matches(msg, s.keys.Up):
-		s.options.up()
-	case key.Matches(msg, s.keys.Down):
-		s.options.down()
-	case key.Matches(msg, s.keys.Toggle):
-		was := s.overwrite()
-		s.options.toggle()
-		// Turning overwrite on re-asserts the safe default: whatever was
-		// decided about backups the last time overwriting was on should
-		// not quietly carry over into a new decision to overwrite.
-		if !was && s.overwrite() {
-			s.options.selected["backup"] = true
-		}
-	case key.Matches(msg, s.keys.Enter):
-		ops, ok := s.buildOps()
-		if !ok {
+	// Review only reports now: committing is the confirmation modal, the
+	// same one an edit applies through, and the overwrite/backup options
+	// live there with it. Enter here just opens it.
+	if key.Matches(msg, s.keys.Enter) {
+		if s.editing {
+			s.step = s.afterStep(stepReview)
 			return s, nil
 		}
-		return s, PushScreen(NewProgressScreen(ops, s.deps.Installer, s.deps.Uninstaller))
+		return s, s.confirmApply()
 	}
 	return s, nil
 }
@@ -958,13 +1221,16 @@ func (s *WizardScreen) buildRequestFor(exe Executable) (install.Request, bool) {
 	}, true
 }
 
-// buildOps assembles one folderOp per folder checked on the Paths step,
-// each an install.Request built from the wizard's shared answers but that
-// folder's own executable — the reason a 32- and a 64-bit tree of the same
-// game can be set up in one pass rather than run through the wizard twice.
+// buildOps assembles one folderOp per folder the Paths step touches: an
+// install.Request for each folder checked, built from the wizard's shared
+// answers but that folder's own executable — the reason a 32- and a 64-bit
+// tree of the same game can be set up in one pass rather than run through
+// the wizard twice — plus an uninstall for each folder the edit unchecked
+// that already had one recorded, since that is how an edit moves an
+// install from one folder to another.
 func (s *WizardScreen) buildOps() ([]folderOp, bool) {
 	groups := s.paths.selectedGroups()
-	ops := make([]folderOp, 0, len(groups))
+	ops := make([]folderOp, 0, len(groups)+len(s.paths.removedInstalls()))
 	for _, g := range groups {
 		target := g.primaryExe()
 		if installed, ok := g.installedExe(); ok {
@@ -975,6 +1241,16 @@ func (s *WizardScreen) buildOps() ([]folderOp, bool) {
 			return nil, false
 		}
 		ops = append(ops, folderOp{Dir: g.Dir, Install: &req})
+	}
+	for _, g := range s.paths.removedInstalls() {
+		target, ok := g.installedExe()
+		if !ok {
+			continue
+		}
+		ops = append(ops, folderOp{
+			Dir:       g.Dir,
+			Uninstall: &install.UninstallRequest{GameID: s.entry.ID, Exe: target.Path},
+		})
 	}
 	return ops, len(ops) > 0
 }
@@ -990,7 +1266,7 @@ func (s *WizardScreen) missing() []string {
 		return nil
 	}
 	return describeMissing(s.deps.CacheStatus, version.Version, s.flavor.Addon(),
-		s.packages.selectedIDs(), addonsForDownload(s.flavor, s.addons),
+		s.packages.selectedIDs(), addonsForDownload(s.flavor, s.addons), s.data.isRenoDXUtility,
 		renodxForDownload(s.flavor, s.renodxChoice),
 		s.exe.Arch, artifacts.NeedsD3DCompiler(s.targetOS))
 }
@@ -1187,9 +1463,9 @@ func (s *WizardScreen) viewFooter(env Env) string {
 	switch s.step {
 	case stepHub:
 		action = "enter opens"
-		hint = "←→ move · esc leaves"
+		hint = "←→ move · a apply · esc leaves"
 		if s.hubStacked(env) {
-			hint = "↑↓ move · esc leaves"
+			hint = "↑↓ move · a apply · esc leaves"
 		}
 	case stepReShade:
 		hint = "↑↓ version · ←→ normal/addon"
@@ -1201,18 +1477,16 @@ func (s *WizardScreen) viewFooter(env Env) string {
 		hint = "↑↓ move · space chooses · / search"
 	case stepReview:
 		action = "enter " + s.verb()
-		hint = "↑↓ move · space toggles"
+		hint = "esc back"
 	}
 	switch {
 	case s.editing && s.step != stepHub:
 		// Both keys do the same thing here, and saying so is better than
-		// implying that one of them discards.
+		// implying that one of them discards. Review included: applying is
+		// the hub's own hotkey now, so enter here only closes the section.
 		action = "enter done"
 		hint += " · esc back"
-		if s.step == stepReview {
-			action = "enter " + s.verb()
-		}
-	case !s.editing && s.step > stepReShade:
+	case !s.editing && s.step > stepReShade && s.step != stepReview:
 		hint += " · esc back"
 	}
 
@@ -1517,51 +1791,18 @@ func (s *WizardScreen) viewReview(b *strings.Builder, env Env, height int) {
 		files.WriteString("\n")
 	}
 
-	// The options block is fixed-size but its disclaimer wraps, so measure
-	// it rather than assuming a line count; the download list is the only
+	// Whether files yarm did not create survive is decided when applying,
+	// in the confirmation there — but the default still earns its line
+	// here when nothing concrete was found: with a conflicts block above,
+	// it would repeat what that block already said about actual files.
+	// Measured like a section, since the download list below is the only
 	// part that can grow, so it is what gives way on a short terminal.
-	var opts strings.Builder
-	section(&opts, "Options")
-	for i, it := range s.options.items {
-		box := "[ ]"
-		if s.options.isSelected(i) {
-			box = "[x]"
-		}
-		marker := "  "
-		if i == s.options.cursor {
-			marker = "▸ "
-		}
-		line := fmt.Sprintf("%s%s %s", marker, box, it.Name)
-
-		// The backup option only does anything while overwriting, and
-		// saying so is better than offering a checkbox that silently means
-		// nothing.
-		note := ""
-		if it.ID == "backup" && !s.overwrite() {
-			note = "  — only when overwriting"
-		}
-		line, note = splitRow(line, note, env.Width)
-		switch {
-		case note != "":
-			line = env.Styles.Faint.Render(line)
-			if i == s.options.cursor {
-				line = env.Styles.Selected.Render(line)
-			}
-			line += env.Styles.Faint.Render(note)
-		case i == s.options.cursor:
-			line = env.Styles.Selected.Render(line)
-		}
-		opts.WriteString(line)
-		opts.WriteString("\n")
-	}
-	// The generic disclaimer only earns its lines when nothing concrete
-	// was found: with a conflicts block above, it repeats — less
-	// precisely — what that block already said about actual files.
+	var note strings.Builder
 	if !s.overwrite() && len(conflicts) == 0 {
-		opts.WriteString("\n")
-		opts.WriteString(env.Styles.Warn.Render(wrap(
+		note.WriteString("\n")
+		note.WriteString(env.Styles.Warn.Render(wrap(
 			"Files not created by yarm are left in place unless overwrite is on.", env.Width-1)))
-		opts.WriteString("\n")
+		note.WriteString("\n")
 	}
 
 	// An unmet requirement is the one thing on this page that can make the
@@ -1592,9 +1833,9 @@ func (s *WizardScreen) viewReview(b *strings.Builder, env Env, height int) {
 		page.WriteString(env.Styles.Faint.Render("  nothing — everything is already cached"))
 		page.WriteString("\n")
 	}
-	// -2 for this section's own header and the blank line before Options;
+	// -2 for this section's own header and the blank line before the note;
 	// whatever the Check block above already took comes off too.
-	room := height - countLines(opts.String()) - countLines(check.String()) -
+	room := height - countLines(note.String()) - countLines(check.String()) -
 		countLines(files.String()) - countLines(diff.String()) - 2
 	if room < 1 {
 		room = 1
@@ -1603,65 +1844,78 @@ func (s *WizardScreen) viewReview(b *strings.Builder, env Env, height int) {
 		page.WriteString(clipTail("  "+missing[i], env.Width))
 		page.WriteString("\n")
 	})
-	page.WriteString("\n")
-	page.WriteString(opts.String())
+	page.WriteString(note.String())
 
 	// Backstop: on a terminal too short for even a one-row download list
-	// plus the options, the arithmetic above cannot win, and a page that
+	// plus the note, the arithmetic above cannot win, and a page that
 	// overflows would push the footer — the anti-cheat warning included —
 	// off the screen entirely.
 	b.WriteString(clipLines(page.String(), height))
 }
 
-// diffPanes lays what an edit removes and adds side by side, a colored box
-// each, rather than interleaved +/- lines that make a reviewer look twice
-// to tell which column a name belongs to. Falls back to one stacked list
-// on a terminal too narrow for two boxes, the same rule the hub's own
-// panes use.
+// diffPanes lays what an edit adds and removes out as a two-column table —
+// Adding on the left, Removing on the right, one name per row — rather
+// than interleaved +/- lines that make a reviewer look twice to tell
+// which column a name belongs to. Each column takes a third of the width:
+// names are short, and two half-terminal bordered boxes cost a border, a
+// title row and a lot of empty cells for what is usually a short list.
+// Falls back to one stacked list on a terminal too narrow for two
+// columns.
 func diffPanes(added, removed []string, env Env) string {
 	const gutter = 2
-	const minPaneWidth = 20
-	if env.Width < 2*(minPaneWidth+gutter) {
+	const minColWidth = 12
+	col := env.Width / 3
+	if col < minColWidth {
 		var b strings.Builder
-		for _, name := range removed {
-			b.WriteString(env.Styles.Bad.Render(clipTail("  - "+name, env.Width)))
-			b.WriteString("\n")
-		}
 		for _, name := range added {
 			b.WriteString(env.Styles.Good.Render(clipTail("  + "+name, env.Width)))
+			b.WriteString("\n")
+		}
+		for _, name := range removed {
+			b.WriteString(env.Styles.Bad.Render(clipTail("  - "+name, env.Width)))
 			b.WriteString("\n")
 		}
 		return b.String()
 	}
 
-	paneWidth := env.Width/2 - gutter
-	left := diffPane("Removing", removed, env.Styles.Bad, paneWidth, env)
-	right := diffPane("Adding", added, env.Styles.Good, paneWidth, env)
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, strings.Repeat(" ", gutter), right) + "\n"
-}
+	// cell clips to the column and pads with plain spaces, so the right
+	// column starts at the same offset on every row. Only the header row
+	// carries the column's color — the names themselves render in the
+	// standard foreground, the +/- prefix saying which side they are on.
+	// clipTail counts runes, so clip before the caller styles: a styled
+	// string's runes are mostly escape sequences.
+	cell := func(text string) string {
+		text = clipTail(text, col)
+		return text + strings.Repeat(" ", max(0, col-lipgloss.Width(text)))
+	}
 
-// diffPane draws one side of diffPanes: a titled box in the side's own
-// color, one name per line, or a faint "none" when that side is empty —
-// a blank box would otherwise read as though the layout had broken. Built
-// on Styles.Panel, the same box the hub's own panes use, so a colored
-// border reads as "a pane" rather than as a one-off decoration.
-func diffPane(title string, names []string, style lipgloss.Style, width int, env Env) string {
-	inner := width - 4
-	if inner < 8 {
-		inner = 8
-	}
 	var b strings.Builder
-	b.WriteString(style.Bold(true).Render(clipTail(title, inner)))
-	if len(names) == 0 {
+	b.WriteString(env.Styles.Good.Bold(true).Render(cell("  Adding")))
+	b.WriteString(strings.Repeat(" ", gutter))
+	b.WriteString(env.Styles.Bad.Bold(true).Render(cell("  Removing")))
+	b.WriteString("\n")
+	for i := 0; i < max(len(added), len(removed)); i++ {
+		left, right := "", ""
+		switch {
+		case i < len(added):
+			left = "  + " + added[i]
+		case len(added) == 0 && i == 0:
+			// An empty side still names itself once, so a blank column
+			// never reads as a layout that broke.
+			left = "  none"
+		}
+		switch {
+		case i < len(removed):
+			right = "  - " + removed[i]
+		case len(removed) == 0 && i == 0:
+			right = "  none"
+		}
+		b.WriteString(cell(left))
+		b.WriteString(strings.Repeat(" ", gutter))
+		b.WriteString(cell(right))
 		b.WriteString("\n")
-		b.WriteString(style.Render(clipTail("  none", inner)))
 	}
-	for _, name := range names {
-		b.WriteString("\n")
-		b.WriteString(style.Render(clipTail("  "+name, inner)))
-	}
-	panel := env.Styles.Panel.Width(width).BorderForeground(style.GetForeground())
-	return panel.Render(b.String())
+	return b.String()
 }
 
 // addonsForDownload returns the selected add-on ids, or none when the
@@ -1714,7 +1968,7 @@ func (s *WizardScreen) describeConflict(c install.Conflict, env Env) (string, li
 func (s *WizardScreen) conflictAdvice(blocking bool) string {
 	switch {
 	case blocking:
-		return "Turn on Overwrite below to replace these. The originals are saved next to them as " +
+		return "Turn on Overwrite in the confirmation to replace these. The originals are saved next to them as " +
 			install.BackupSuffix + " files and put back when you uninstall."
 	case s.overwrite() && s.backup():
 		return "Originals are saved as " + install.BackupSuffix +
@@ -1730,55 +1984,122 @@ func (s *WizardScreen) conflictAdvice(blocking bool) string {
 // everything about an install is already known, so it shows it: each
 // section as a pane listing what is actually in it, rather than a column
 // of labels with a truncated value beside each. The panes are also the
-// navigation — ←/→ or ↑/↓ moves between them, enter opens one.
+// navigation — ←/→ or ↑/↓ moves between them, enter opens one; applying is
+// its own hotkey (the footer says which) rather than one more pane to move
+// onto, so nothing here reads as a bigger deal than the sections beside it.
 func (s *WizardScreen) viewHub(b *strings.Builder, env Env, height int) {
-	rows := s.hubSections()
-	// The last row is Apply, which is a line under the panes rather than a
-	// pane of its own: it is an action, not a thing with contents.
-	panes := rows[:len(rows)-1]
-	applyFocused := s.hubCursor.Cursor() == len(rows)-1
-
-	apply := s.applyLine(env, applyFocused)
+	panes := s.hubSections()
 
 	const gutter = 2
 	if s.hubStacked(env) {
-		s.viewHubCompact(b, env, height-countLines(apply), rows)
-		b.WriteString(apply)
+		changes := s.hubChangesSection(env)
+		s.viewHubCompact(b, env, height-countLines(changes)-2, panes)
+		b.WriteString(rule(env))
+		b.WriteString("\n\n")
+		b.WriteString(changes)
 		return
 	}
 
-	paneWidth := env.Width/len(panes) - gutter
+	// Three panes to a row rather than one long strip: Paths, ReShade and
+	// API first since those are short answers, then Shaders, Add-ons and
+	// RenoDX — the ones whose names actually need the room.
+	cols := hubCols(len(panes))
+	paneWidth := env.Width/cols - gutter
 
-	// Boxes are as tall as their contents, not as tall as the window: an
-	// install with three shaders should not draw twenty empty rows to
-	// prove there is room for more. The tallest pane sets the height so
-	// the row of boxes still lines up.
-	content := 0
-	for _, step := range panes {
-		if n := len(s.hubLines(step, env, paneWidth-4)); n > content {
-			content = n
+	var paneRows []string
+	idx := 0
+	for start := 0; start < len(panes); start += cols {
+		end := start + cols
+		if end > len(panes) {
+			end = len(panes)
 		}
-	}
-	// Measured: Panel.Height(h) makes a box exactly h rows tall in total,
-	// so the content budget is h minus the two border rows.
-	paneHeight := content + 1 + 2 // content + the pane's header + borders
-	if max := height - countLines(apply) - 1; paneHeight > max {
-		paneHeight = max
-	}
-	if paneHeight < 5 {
-		paneHeight = 5
+		row := panes[start:end]
+
+		// Boxes are as tall as their contents, not as tall as the window,
+		// each row sized on its own: Shaders and Add-ons routinely list
+		// more than Paths, ReShade or API ever will.
+		content := 0
+		for _, step := range row {
+			if n := len(s.hubLines(step, env, paneWidth-4)); n > content {
+				content = n
+			}
+		}
+		// Measured: Panel.Height(h) makes a box exactly h rows tall in
+		// total, so the content budget is h minus the two border rows.
+		paneHeight := content + 1 + 2 // content + the pane's header + borders
+		if paneHeight < 5 {
+			paneHeight = 5
+		}
+
+		cells := make([]string, 0, len(row)*2)
+		for i, step := range row {
+			if i > 0 {
+				cells = append(cells, strings.Repeat(" ", gutter))
+			}
+			cells = append(cells, s.hubPane(step, paneWidth, paneHeight, env, idx == s.hubCursor.Cursor()))
+			idx++
+		}
+		paneRows = append(paneRows, lipgloss.JoinHorizontal(lipgloss.Top, cells...))
 	}
 
-	cols := make([]string, 0, len(panes)*2)
-	for i, step := range panes {
-		if i > 0 {
-			cols = append(cols, strings.Repeat(" ", gutter))
-		}
-		cols = append(cols, s.hubPane(step, paneWidth, paneHeight, env, i == s.hubCursor.Cursor()))
+	var page strings.Builder
+	// A blank line groups the rows of panes into one grid; a ruled-off
+	// block with a blank line on either side separates that grid from the
+	// Changes section below it, so the diff reads as its own block rather
+	// than one more row of panes.
+	page.WriteString(strings.Join(paneRows, "\n\n"))
+	page.WriteString("\n\n")
+	page.WriteString(rule(env))
+	page.WriteString("\n\n")
+	page.WriteString(s.hubChangesSection(env))
+
+	// Backstop, the same one Review's own page uses: the grid plus the
+	// changes boxes can run past a short terminal, and clipping beats a
+	// layout that overflows the footer where the apply hotkey is named.
+	b.WriteString(clipLines(page.String(), height))
+}
+
+// hubChangesSection is the hub's own diff — what applying now would add
+// and remove.
+func (s *WizardScreen) hubChangesSection(env Env) string {
+	var b strings.Builder
+	folders := len(s.paths.selectedGroups())
+	reshadeLine := s.reshadeChangeLine()
+	added, removed := s.changeLines()
+
+	if folders > 1 {
+		b.WriteString(env.Styles.Faint.Render(clipTail(fmt.Sprintf("  applies to %d folders", folders), env.Width)))
+		b.WriteString("\n")
 	}
-	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, cols...))
-	b.WriteString("\n\n")
-	b.WriteString(apply)
+	// The ReShade swap leads: it is the one change that alters every other
+	// file in the folder, not just its own entry in the +/- list below.
+	if reshadeLine != "" {
+		b.WriteString(env.Styles.Accent.Render(clipTail("  "+reshadeLine, env.Width)))
+		b.WriteString("\n")
+	}
+	if len(added)+len(removed) > 0 {
+		b.WriteString(diffPanes(added, removed, env))
+		return b.String()
+	}
+	if folders <= 1 && reshadeLine == "" {
+		b.WriteString(env.Styles.Faint.Render(clipTail("  no changes — applying reinstalls the same files", env.Width)))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// hubPaneCols is the most panes a single row of the hub's grid ever holds.
+// Three is what leaves a pane wide enough for a shader, add-on or RenoDX
+// name to read in full — the reason the grid wraps into rows at all
+// instead of cramming every section into one.
+const hubPaneCols = 3
+
+// hubCols is how many columns one row of n panes actually uses.
+func hubCols(n int) int {
+	if n < hubPaneCols {
+		return n
+	}
+	return hubPaneCols
 }
 
 // hubStacked reports whether the summary has had to fall back to one line
@@ -1787,8 +2108,8 @@ func (s *WizardScreen) viewHub(b *strings.Builder, env Env, height int) {
 func (s *WizardScreen) hubStacked(env Env) bool {
 	const gutter = 2
 	const minPaneWidth = 22
-	panes := len(s.hubSections()) - 1 // Apply is a line, not a pane
-	return env.Width < panes*(minPaneWidth+gutter)
+	cols := hubCols(len(s.hubSections()))
+	return env.Width < cols*(minPaneWidth+gutter)
 }
 
 // hubPane draws one section as a box listing what is in it.
@@ -1801,8 +2122,9 @@ func (s *WizardScreen) hubPane(step wizardStep, width, height int, env Env, focu
 	var b strings.Builder
 	header := step.label()
 	if s.sectionChanged(step) {
-		// A dot rather than the word "changed": the Apply line already
-		// spells out what changed, and this only has to say where.
+		// A dot rather than the word "changed": the Changes section below
+		// the panes already spells out what changed, and this only has to
+		// say where.
 		header += " •"
 	}
 	// The focused pane is the bright one. Styles.Panel's own border color
@@ -1904,7 +2226,7 @@ func (s *WizardScreen) hubSelectionLines(m multiSelect, env Env, empty string, w
 // catalog has no entry for — upstream dropped it, renamed it, or the
 // catalog is a partial offline copy. Without this the row simply is not
 // there, and applying would quietly remove a package the user still has,
-// with only a "-1 shader" on the Apply line to hint at it.
+// with only a "-1 shader" in the Changes section to hint at it.
 func (s *WizardScreen) hubOrphanLines(recorded []string, m multiSelect, env Env, width int) []string {
 	known := make(map[string]bool, len(m.items))
 	for _, it := range m.items {
@@ -1936,49 +2258,10 @@ func (s *WizardScreen) existingAddons() []string {
 	return s.existing.Addons
 }
 
-// applyLine is the action under the panes, drawn as a full-width button
-// rather than a plain line of text: it is the one thing on this page that
-// must never be missed, since leaving the hub without noticing it is the
-// same as never applying at all.
-func (s *WizardScreen) applyLine(env Env, focused bool) string {
-	changes := s.changes()
-	text := "Apply — no changes yet; this would reinstall the same files"
-	if len(changes) > 0 {
-		text = "Apply — " + strings.Join(changes, ", ")
-	}
-
-	width := env.Width - 2
-	inner := width - 4
-	if inner < 8 {
-		inner = 8
-	}
-	label := clipTail(text, inner)
-	// Centered, so the label reads as a button's caption rather than as
-	// text that happens to sit inside a border.
-	if pad := (inner - lipgloss.Width(label)) / 2; pad > 0 {
-		label = strings.Repeat(" ", pad) + label
-	}
-
-	button := env.Styles.Panel.Width(width)
-	switch {
-	case focused:
-		button = button.BorderForeground(env.Styles.Accent.GetForeground())
-		label = env.Styles.Selected.Bold(true).Render(label)
-	case len(changes) == 0:
-		button = button.BorderForeground(env.Styles.Faint.GetForeground())
-		label = env.Styles.Faint.Render(label)
-	default:
-		button = button.BorderForeground(env.Styles.Accent.GetForeground())
-		label = env.Styles.Accent.Bold(true).Render(label)
-	}
-	return button.Render(label) + "\n"
-}
-
 // viewHubCompact is the narrow fallback: one line per section, the same
 // content the panes carry with the listing dropped to a count.
-func (s *WizardScreen) viewHubCompact(b *strings.Builder, env Env, height int, rows []wizardStep) {
+func (s *WizardScreen) viewHubCompact(b *strings.Builder, env Env, height int, sections []wizardStep) {
 	const labelWidth = 10
-	sections := rows[:len(rows)-1]
 
 	writeWindow(b, env, len(sections), s.hubCursor.Cursor(), height, "", func(i int) {
 		step := sections[i]
@@ -1990,7 +2273,7 @@ func (s *WizardScreen) viewHubCompact(b *strings.Builder, env Env, height int, r
 		if s.sectionChanged(step) {
 			label += " •"
 		}
-		line := clipTail(fmt.Sprintf("%s%-*s %s", marker, labelWidth, label, s.hubValue(step, nil)), env.Width)
+		line := clipTail(fmt.Sprintf("%s%-*s %s", marker, labelWidth, label, s.hubValue(step)), env.Width)
 		if i == s.hubCursor.Cursor() {
 			line = env.Styles.Selected.Render(line)
 		}
@@ -2012,7 +2295,7 @@ func (s *WizardScreen) latestVersion() (string, bool) {
 
 // sectionChanged reports whether one section differs from the install
 // already recorded, so its pane can say where a change is without the
-// reader having to compare the Apply line against four panes.
+// reader having to compare the Changes section against four panes.
 func (s *WizardScreen) sectionChanged(step wizardStep) bool {
 	if s.existing == nil {
 		return false
@@ -2036,7 +2319,7 @@ func (s *WizardScreen) sectionChanged(step wizardStep) bool {
 }
 
 // hubValue is what one summary row shows to the right of its label.
-func (s *WizardScreen) hubValue(step wizardStep, changes []string) string {
+func (s *WizardScreen) hubValue(step wizardStep) string {
 	switch step {
 	case stepReShade:
 		v, _ := s.selectedVersion()
@@ -2049,11 +2332,6 @@ func (s *WizardScreen) hubValue(step wizardStep, changes []string) string {
 		return namesOrCount(s.addons)
 	case stepRenoDX:
 		return s.renodxSummary()
-	case stepReview:
-		if len(changes) == 0 {
-			return "no changes — reinstalls the same files"
-		}
-		return strings.Join(changes, ", ")
 	default:
 		return ""
 	}
@@ -2137,8 +2415,8 @@ func namedDiff(before, after []string, names map[string]string) (added, removed 
 	return added, removed
 }
 
-// diffPhrase renders a diff for a single line, capped so the Apply row
-// stays one line on a normal terminal. The full list is on Review.
+// diffPhrase renders a diff for a single line, capped so the compact
+// summary stays one line on a normal terminal. The full list is on Review.
 func diffPhrase(added, removed []string) string {
 	var parts []string
 	if len(added) > 0 {
@@ -2186,6 +2464,15 @@ func (s *WizardScreen) changeLines() (added, removed []string) {
 	if s.existing == nil {
 		return nil, nil
 	}
+	// The folder itself, first: a shader or add-on diff means nothing next
+	// to a folder that is about to gain or lose ReShade entirely.
+	for _, g := range s.paths.addedFolders() {
+		added = append(added, "Installing on folder "+detailFolderLabel(s.entry, g.Dir))
+	}
+	for _, g := range s.paths.removedInstalls() {
+		removed = append(removed, "Uninstalling from folder "+detailFolderLabel(s.entry, g.Dir))
+	}
+
 	names := s.itemNames()
 
 	a, r := namedDiff(s.existing.Packages, s.packages.selectedIDs(), names)

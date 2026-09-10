@@ -256,3 +256,20 @@ func TestExtrasAreOfferedForBothArchitectures(t *testing.T) {
 		t.Error("renodx-devkit is a development tool and must not be offered")
 	}
 }
+
+// FPS Limiter and DLSS Fix patch something unrelated to a game's shaders,
+// so more than one can be active at once and yarm offers them as ordinary
+// add-ons. Generic is the same kind of tone-mapping replacement as a
+// per-game mod, just not tied to one, so it stays exclusive with them.
+func TestUtilityExtrasAreMarkedApart(t *testing.T) {
+	mods := fixtureMods(t)
+
+	for _, id := range []string{"dlssfix", "fpslimiter"} {
+		if !findMod(t, mods, id).Utility {
+			t.Errorf("%s.Utility = false, want true", id)
+		}
+	}
+	if findMod(t, mods, "generic").Utility {
+		t.Error("generic.Utility = true, want false: it replaces a game's shaders like a per-game mod")
+	}
+}

@@ -281,7 +281,11 @@ func (s *GamesScreen) handleKey(msg tea.KeyPressMsg, env Env) (Screen, tea.Cmd) 
 
 	case key.Matches(msg, editInstallBinding):
 		if e, ok := s.selected(); ok {
-			return s, startInstallOrEdit(e, groupsWithInstall(e), s.deps)
+			// Every installable folder, not just the ones already
+			// installed into: the Paths step is where a second folder
+			// joins the same pass, and it cannot offer a folder that was
+			// never in this list to begin with.
+			return s, startInstallOrEdit(e, installableGroups(e), s.deps)
 		}
 		return s, nil
 
@@ -297,7 +301,10 @@ func (s *GamesScreen) handleKey(msg tea.KeyPressMsg, env Env) (Screen, tea.Cmd) 
 		if e, ok := s.selected(); ok {
 			switch {
 			case len(groupsWithInstall(e)) > 0:
-				return s, startInstallOrEdit(e, groupsWithInstall(e), s.deps)
+				// Which branch to take is decided by what already has an
+				// install, but the wizard itself is handed every folder
+				// that could take one — same as the edit-install key.
+				return s, startInstallOrEdit(e, installableGroups(e), s.deps)
 			case len(groupsWithUnmanaged(e)) > 0:
 				return s, startAdopt(e, groupsWithUnmanaged(e), s.deps)
 			default:
@@ -525,56 +532,35 @@ func (s *GamesScreen) renderDetail(e GameEntry, env Env) (body string, warned bo
 	case len(e.Groups) == 0:
 		b.WriteString(env.Styles.Faint.Render("No executables found."))
 	default:
-		multi := len(e.Groups) > 1
-		for i, grp := range e.Groups {
+		groups := sortedDetailGroups(e.Groups)
+		multi := len(groups) > 1
+		for i, grp := range groups {
 			if i > 0 {
 				b.WriteString("\n")
 			}
 			indent := ""
 			if multi {
-				b.WriteString(env.Styles.Subtitle.Render(folderLabel(grp.Dir)))
+				b.WriteString(env.Styles.Subtitle.Render(detailFolderLabel(e, grp.Dir)))
 				b.WriteString("\n")
 				indent = "  "
 			}
-			b.WriteString(indentLines(reshadeStatusText(grp, env, "press enter, then a to adopt it", s.detailWidth-6-len(indent)), indent))
-			var exes strings.Builder
-			writeSectionHeader(&exes, env, "Executables", grp.playableCount())
-			b.WriteString(indentLines(exes.String(), indent))
-			stripPrefix := ""
-			if grp.Dir != "" {
-				stripPrefix = grp.Dir + "/"
-			}
-			// Executables are context — ReShade covers the whole folder
-			// either way — and they are what the panel's clip would eat
-			// the anti-cheat warning to make room for. A few, then a
-			// count, the way the detail screen already does it.
-			const maxExes = 4
-			shown, hidden := 0, 0
-			for _, ex := range grp.Exes {
-				if ex.Skipped {
-					continue
-				}
-				if shown >= maxExes {
-					hidden++
-					continue
-				}
-				shown++
-				name := strings.TrimPrefix(ex.Path, stripPrefix)
-				b.WriteString(indent + "  " + truncate(name, s.detailWidth-8) + "\n")
-				b.WriteString(env.Styles.Faint.Render(
-					indent+fmt.Sprintf("    %s · %s", ex.Arch, apiLabel(ex.API))) + "\n")
-			}
-			if hidden > 0 {
-				b.WriteString(env.Styles.Faint.Render(
-					indent+fmt.Sprintf("  +%d more", hidden)) + "\n")
+			switch {
+			case grp.Installed == nil && grp.Unmanaged == nil:
+				// Nothing to report on an empty folder beyond that: no
+				// ReShade header, no executables — this pane is about
+				// what is installed, and a folder with nothing installed
+				// says so in one line rather than a blank section.
+				b.WriteString(indent + "  " + env.Styles.Faint.Render("Not installed on this path") + "\n")
+			default:
+				b.WriteString(indentLines(reshadeStatusText(grp, env, "press enter, then a to adopt it", s.detailWidth-6-len(indent)), indent))
 			}
 			// Last, below everything else in this folder's block: a real
 			// safety warning belongs at the bottom of the pane, not
-			// sandwiched between the ReShade status and the executables.
-			// The warning is returned separately rather than written
-			// here: the panel has a fixed height, and whatever is at the
-			// bottom of a too-long block is what gets clipped away. A
-			// safety notice must not be the part that gives way.
+			// sandwiched inside the ReShade status. The warning is
+			// returned separately rather than written here: the panel has
+			// a fixed height, and whatever is at the bottom of a
+			// too-long block is what gets clipped away. A safety notice
+			// must not be the part that gives way.
 			if groupIsAddon(grp) {
 				warned = true
 			}

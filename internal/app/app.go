@@ -239,6 +239,10 @@ func (m Model) render() string {
 
 	frame := lipgloss.JoinVertical(lipgloss.Left,
 		header,
+		// One blank row between the chrome and the screen body, owned by
+		// the shell so every screen gets the same gap: screens draw their
+		// own content with no leading margin of their own.
+		"",
 		body,
 		// Clipped, and clipped before styling: the chrome is one row by
 		// definition, and a status line long enough to wrap makes the
