@@ -13,7 +13,6 @@ __debug_bin*
 
 # Local notes and design documents, kept out of the repository.
 proposal.md
-performance.md
 docs/plan/
 
 # Local tool and editor state, which belongs to a machine rather than to
