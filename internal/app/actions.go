@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -125,9 +126,53 @@ func startUninstall(entry GameEntry, targets []FolderGroup, deps Deps) tea.Cmd {
 	run := PushScreen(NewProgressScreen(ops, deps.Installer, deps.Uninstaller))
 	return Confirm(
 		"Uninstall ReShade from "+strings.Join(paths, ", ")+"?",
-		"This removes only the files yarm created; anything you edited afterward is kept.",
+		uninstallDetail(deps.StateDir, entry.ID, targets),
 		run,
 	)
+}
+
+// maxUninstallListFiles caps the recorded files named in the uninstall
+// confirmation: enough to recognize the install, not the whole manifest.
+const maxUninstallListFiles = 6
+
+// uninstallDetail says what confirming will remove: the recorded file
+// count and names, so "removes only the files yarm created" is checkable
+// rather than taken on trust. Anything recorded but since edited is kept,
+// and a registry that cannot be read falls back to the generic promise.
+func uninstallDetail(stateDir, gameID string, targets []FolderGroup) string {
+	const generic = "This removes only the files yarm created; anything you edited afterward is kept."
+	if stateDir == "" {
+		return generic
+	}
+	reg, err := state.Load(stateDir)
+	if err != nil {
+		return generic
+	}
+	var names []string
+	for _, g := range targets {
+		target, ok := g.installedExe()
+		if !ok {
+			continue
+		}
+		in, ok := reg.FindInstall(gameID, target.Path)
+		if !ok {
+			continue
+		}
+		for _, f := range in.Files {
+			names = append(names, f.Path)
+		}
+	}
+	if len(names) == 0 {
+		return generic
+	}
+	shown := names
+	rest := ""
+	if len(names) > maxUninstallListFiles {
+		shown = names[:maxUninstallListFiles]
+		rest = fmt.Sprintf(", and %d more", len(names)-maxUninstallListFiles)
+	}
+	return fmt.Sprintf("Removes %d recorded file(s) (%s%s); anything you edited afterward is kept.",
+		len(names), strings.Join(shown, ", "), rest)
 }
 
 // startAdopt confirms, then records, the unmanaged install found in every
