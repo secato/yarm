@@ -10,6 +10,8 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/secato/yarm/internal/safetext"
 )
 
 // gamesLoadedMsg carries the result of a discovery run, success or not.
@@ -613,7 +615,9 @@ func (s *GamesScreen) renderDetail(e GameEntry, env Env) (body string, warned bo
 }
 
 // truncate shortens a string to width, marking the cut with an ellipsis.
+// Like clipTail, it strips control characters first; see the note there.
 func truncate(s string, width int) string {
+	s = safetext.Clean(s)
 	if width <= 1 || lipgloss.Width(s) <= width {
 		return s
 	}

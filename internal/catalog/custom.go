@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/secato/yarm/internal/safetext"
 )
 
 // Subdirectories of the custom-content folder.
@@ -74,15 +76,15 @@ func ScanCustom(root string) ([]Custom, error) {
 
 			c := Custom{
 				ID:   "custom:" + string(kind) + ":" + Slugify(e.Name()),
-				Name: e.Name(),
+				Name: safetext.Clean(e.Name()),
 				Kind: kind,
 				Path: path,
 			}
 			if m, ok := readCustomMeta(path); ok {
 				if m.Name != "" {
-					c.Name = m.Name
+					c.Name = safetext.Clean(m.Name)
 				}
-				c.Description = m.Description
+				c.Description = safetext.Clean(m.Description)
 			}
 			out = append(out, c)
 		}

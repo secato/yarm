@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/secato/yarm/internal/safetext"
 )
 
 // RuntimeInfo is what ReShade itself recorded about an install, read from
@@ -79,7 +81,9 @@ func readReshadeVersion(logPath string) string {
 	if m == nil {
 		return ""
 	}
-	return string(m[1])
+	// The log is written by a third-party DLL inside a game, and this
+	// string is put on the games screen as the installed version.
+	return safetext.Clean(string(m[1]))
 }
 
 // readActiveTechniques follows ReShade.ini's own GENERAL/PresetPath to the
@@ -127,6 +131,7 @@ func readActiveTechniques(root, exeDir, dir string) []string {
 		// Each entry is "TechniqueName@EffectFile.fx"; the name alone is
 		// what ReShade's own UI shows as the toggleable effect.
 		name, _, _ := strings.Cut(entry, "@")
+		name = safetext.Clean(name)
 		if name == "" || seen[name] {
 			continue
 		}
@@ -141,7 +146,7 @@ func listEffectFiles(shadersDir string) []string {
 	var out []string
 	_ = walkFiles(shadersDir, func(rel string, _ int64) error {
 		if strings.EqualFold(filepath.Ext(rel), ".fx") {
-			name := filepath.Base(rel)
+			name := safetext.Clean(filepath.Base(rel))
 			if !seen[name] {
 				seen[name] = true
 				out = append(out, name)

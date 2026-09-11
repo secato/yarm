@@ -8,7 +8,21 @@ import (
 	"strings"
 
 	"github.com/secato/yarm/internal/game"
+	"github.com/secato/yarm/internal/safetext"
 )
+
+// cleanAll strips control characters from a list of display strings that
+// came out of a downloaded document.
+func cleanAll(in []string) []string {
+	if in == nil {
+		return nil
+	}
+	out := make([]string, len(in))
+	for i, s := range in {
+		out[i] = safetext.Clean(s)
+	}
+	return out
+}
 
 // RenoDX is a ReShade add-on that replaces a game's shaders to upgrade its
 // HDR handling. Unlike everything else in this package it is not described
@@ -181,11 +195,13 @@ func ParseRenoDX(r io.Reader) ([]RenoMod, error) {
 			continue
 		}
 		mod := RenoMod{
-			Title:       m.Title,
+			// Titles and maintainer names come out of a JSON index yarm
+			// downloads and go straight onto a row.
+			Title:       safetext.Clean(m.Title),
 			Status:      m.Status,
 			SteamAppID:  m.Deploy.SteamAppID,
 			API:         m.Deploy.API,
-			Maintainers: m.Maintainers,
+			Maintainers: cleanAll(m.Maintainers),
 		}
 		if mod.Title == "" {
 			mod.Title = m.ID

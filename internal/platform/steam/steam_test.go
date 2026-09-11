@@ -272,3 +272,30 @@ func TestParseLibraryFoldersRefusesRelativePaths(t *testing.T) {
 		t.Errorf("parseLibraryFolders() = %v, want none", paths)
 	}
 }
+
+// A .acf is a file in a folder yarm does not own: the name it carries ends
+// up on the games screen, in the log and as a key in installs.json.
+func TestScanLibraryCleansUntrustedNames(t *testing.T) {
+	root := t.TempDir()
+	steamapps := filepath.Join(root, "steamapps")
+	if err := os.MkdirAll(filepath.Join(steamapps, "common", "Ember Hollow"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Written without %q so the control characters reach the file as
+	// themselves rather than as their escaped spelling.
+	acf := "\"AppState\"\n{\n\t\"appid\"\t\t\"42\"\n" +
+		"\t\"name\"\t\t\"\x1b[31mEmber\u200b Hollow\"\n" +
+		"\t\"installdir\"\t\t\"Ember Hollow\"\n}\n"
+	if err := os.WriteFile(filepath.Join(steamapps, "appmanifest_42.acf"), []byte(acf), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	games := scanLibrary(root)
+	if len(games) != 1 {
+		t.Fatalf("scanLibrary() = %d games, want 1: %+v", len(games), games)
+	}
+	if got, want := games[0].Name, "[31mEmber Hollow"; got != want {
+		t.Errorf("game name = %q, want %q", got, want)
+	}
+}

@@ -74,3 +74,29 @@ func TestParseINIIgnoresPreamble(t *testing.T) {
 		t.Error("preamble key leaked into the first section")
 	}
 }
+
+// EffectPackages.ini and Addons.ini are downloaded documents whose values
+// become rows on screen; an escape sequence in one is not part of a name.
+func TestParseINIStripsControlCharacters(t *testing.T) {
+	const src = "[\x1b[31m00]\nName=Sweet\x1bFX\nDescription=a\u200bb\nRepositoryUrl=https://example.test/x\n"
+
+	sections, err := ParseINI(strings.NewReader(src))
+	if err != nil {
+		t.Fatalf("ParseINI() error = %v", err)
+	}
+	if len(sections) != 1 {
+		t.Fatalf("ParseINI() = %d sections, want 1", len(sections))
+	}
+	if got, want := sections[0].Name, "[31m00"; got != want {
+		t.Errorf("section name = %q, want %q", got, want)
+	}
+	if got, want := sections[0].Get("Name"), "SweetFX"; got != want {
+		t.Errorf("Name = %q, want %q", got, want)
+	}
+	if got, want := sections[0].Get("Description"), "ab"; got != want {
+		t.Errorf("Description = %q, want %q", got, want)
+	}
+	if got, want := sections[0].Get("RepositoryUrl"), "https://example.test/x"; got != want {
+		t.Errorf("RepositoryUrl = %q, want %q", got, want)
+	}
+}

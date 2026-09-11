@@ -12,6 +12,7 @@ import (
 	"github.com/andygrunwald/vdf"
 
 	"github.com/secato/yarm/internal/game"
+	"github.com/secato/yarm/internal/safetext"
 )
 
 // ProviderName identifies this provider in game.Game.Provider and IDs.
@@ -228,7 +229,16 @@ func parseAppManifest(path string) (appManifest, error) {
 		return appManifest{}, fmt.Errorf("steam: %s: missing top-level \"AppState\" key", path)
 	}
 
+	// A .acf is a file in a folder yarm does not own, and its appid and
+	// name become a row on screen, a key in installs.json and a line in
+	// the log. Only installdir is left alone: it is a path, checked for
+	// containment by safeInstallDir rather than rewritten.
 	str := func(key string) string {
+		s, _ := state[key].(string)
+		return safetext.Clean(s)
+	}
+
+	raw := func(key string) string {
 		s, _ := state[key].(string)
 		return s
 	}
@@ -236,7 +246,7 @@ func parseAppManifest(path string) (appManifest, error) {
 	m := appManifest{
 		appID:      str("appid"),
 		name:       str("name"),
-		installDir: str("installdir"),
+		installDir: raw("installdir"),
 	}
 	if m.appID == "" || m.name == "" || m.installDir == "" {
 		return appManifest{}, fmt.Errorf("steam: %s: incomplete AppState (appid/name/installdir)", path)

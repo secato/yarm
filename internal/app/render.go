@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+
+	"github.com/secato/yarm/internal/safetext"
 )
 
 // Small rendering helpers shared by more than one screen. They deal only
@@ -19,7 +21,16 @@ func countLines(s string) int { return strings.Count(s, "\n") }
 // truncate() keeps a string's tail instead, because the distinctive part
 // of a filesystem path is its last few segments; for a sentence it is the
 // first few words.
+//
+// Both strip control characters as they go. Untrusted names are cleaned
+// where their document is parsed — that is the real defense, and it covers
+// the log and the manifest too — but every row of text funnels through
+// these two helpers on its way to the screen, which makes them the cheapest
+// place to be sure a new source of strings cannot repaint the frame. They
+// take plain text and are always called inside a style's Render, so there
+// is no styling of yarm's own here to damage.
 func clipTail(s string, width int) string {
+	s = safetext.Clean(s)
 	if width <= 1 {
 		return s
 	}

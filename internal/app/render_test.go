@@ -236,3 +236,21 @@ func TestNavigationIsArrowsOnly(t *testing.T) {
 		t.Error("space pages the table, but means \"toggle\" everywhere else in the app")
 	}
 }
+
+// Every row of text reaches the screen through one of these two, so
+// neither may pass an escape sequence through to a renderer that honors
+// SGR colors and OSC 8 hyperlinks.
+func TestClipHelpersStripControlCharacters(t *testing.T) {
+	const hostile = "\x1b[31mELDEN\rRING\x1b]8;;https://evil.test\x07"
+
+	if got := clipTail(hostile, 200); strings.ContainsAny(got, "\x1b\r\x07") {
+		t.Errorf("clipTail() = %q, still holds control characters", got)
+	}
+	if got := truncate(hostile, 200); strings.ContainsAny(got, "\x1b\r\x07") {
+		t.Errorf("truncate() = %q, still holds control characters", got)
+	}
+	// A name with nothing to strip is untouched, ellipsis rules included.
+	if got, want := clipTail("ELDEN RING", 200), "ELDEN RING"; got != want {
+		t.Errorf("clipTail() = %q, want %q", got, want)
+	}
+}

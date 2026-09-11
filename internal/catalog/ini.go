@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/secato/yarm/internal/safetext"
 )
 
 // Section is one bracketed block of a catalog ini file.
@@ -54,6 +56,11 @@ func (s Section) Flag(key string) bool { return s.Keys[key] == "1" }
 //
 // Values are taken after the first '=' so URLs with query strings survive.
 // Keys appearing before any section header are ignored.
+//
+// Every name and value is stripped of control and formatting characters as
+// it is read. These files are downloaded documents, and their values become
+// rows on screen, lines in the log and ids on disk — an escape sequence in
+// a package name is not part of the name.
 func ParseINI(r io.Reader) ([]Section, error) {
 	var (
 		sections []Section
@@ -73,7 +80,7 @@ func ParseINI(r io.Reader) ([]Section, error) {
 
 		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
 			sections = append(sections, Section{
-				Name: strings.TrimSpace(trimmed[1 : len(trimmed)-1]),
+				Name: safetext.Clean(strings.TrimSpace(trimmed[1 : len(trimmed)-1])),
 				Keys: make(map[string]string),
 			})
 			cur = &sections[len(sections)-1]
@@ -84,7 +91,7 @@ func ParseINI(r io.Reader) ([]Section, error) {
 		if !ok || cur == nil {
 			continue
 		}
-		cur.Keys[strings.TrimSpace(key)] = strings.TrimSpace(value)
+		cur.Keys[safetext.Clean(strings.TrimSpace(key))] = safetext.Clean(strings.TrimSpace(value))
 	}
 
 	if err := sc.Err(); err != nil {
