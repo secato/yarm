@@ -1,10 +1,9 @@
 <div align="center">
 
-<img src="docs/logo.png" alt="YARM" width="220">
+<img src="docs/logo.png" alt="YARM" width="320">
 
-# YARM — Yet Another ReShade Manager
+# Yet Another ReShade Manager
 
-**Install ReShade in your games from the terminal, and take it back out just as easily.**
 
 [![CI](https://github.com/secato/yarm/actions/workflows/ci.yml/badge.svg)](https://github.com/secato/yarm/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/secato/yarm)](https://github.com/secato/yarm/releases)
@@ -18,24 +17,15 @@ choose along with the shaders and add-ons you want, and keeps track of every
 file it put there — so uninstalling gives you the folder back exactly as it was.
 
 It is a single binary with no runtime, no installer and no launcher running in
-the background. It runs on **Windows and Linux**, including Steam Deck and
-Proton.
-
-> Built with [Claude Code](https://claude.com/claude-code) — vibecoded, and
-> tested like it wasn't.
+the background. It runs on **Windows and Linux**, including Steam Deck.
 
 <div align="center">
-
 <img src="docs/main-screen.png" alt="The games list, with a game's install details in the side panel" width="900">
+</div><br/>
 
-</div>
+> Built with [Claude Code](https://claude.com/claude-code) — vibecoded, and
+> tested like it wasn't. [Report what breaks.](https://github.com/secato/yarm/issues)
 
-> **Status: alpha.** Everything described here works and is covered by tests
-> on both platforms, but this is the first release and nobody but its author
-> has used it yet. It records every file it writes and the uninstall screen
-> puts the folder back, so a bad install is reversible — still, try it on a
-> game you are not in the middle of. Windows is the less-exercised platform.
-> [Report what breaks.](https://github.com/secato/yarm/issues)
 
 ## What it does for you
 
@@ -83,14 +73,6 @@ yourself and it can adopt that install and manage it from then on.
 
 **Lets you bring your own.** Drop your own shaders or add-ons into a folder and
 they appear in the wizard next to the catalog ones.
-
-**Warns you about anti-cheat.** The add-on build of ReShade is detectable.
-YARM says so, in red, on every screen where it matters — never install it into
-a game you play online.
-
-**Tells you what it cannot do.** Vulkan and D3D8 are not supported yet. YARM
-says so while you are still choosing, rather than leaving you to work it out
-from a game that starts without ReShade.
 
 ## Installing YARM
 
