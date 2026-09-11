@@ -2,6 +2,9 @@ module github.com/secato/yarm
 
 go 1.25.0
 
+// Published from a repository state that no longer exists; use v0.1.0-alpha.2.
+retract v0.1.0-alpha.1
+
 require (
 	charm.land/bubbles/v2 v2.2.1
 	charm.land/bubbletea/v2 v2.0.9

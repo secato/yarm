@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.0-alpha.1] — 2026-09-11
+## [0.1.0-alpha.2] — 2026-09-11
 
 The first release, and an alpha. Everything below works and is covered by
 tests on Linux and Windows, but yarm has not yet been used by anyone other
@@ -87,4 +87,4 @@ writes, so the way out of a bad install is the uninstall screen.
   repositories, and that is worth knowing before installing into a game.
 - **No self-update.** Check the releases page.
 
-[0.1.0-alpha.1]: https://github.com/secato/yarm/releases/tag/v0.1.0-alpha.1
+[0.1.0-alpha.2]: https://github.com/secato/yarm/releases/tag/v0.1.0-alpha.2
