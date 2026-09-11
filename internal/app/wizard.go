@@ -99,7 +99,8 @@ var wizardShowAll = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "show al
 var wizardApply = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "apply"))
 
 // dllOption is one radio choice on the API step, matching ReShade's own
-// installer.
+// installer. Newest API first: dxgi covers D3D10–12 (and is what ReShade's
+// setup recommends), then the versioned DLLs descending, then legacy ones.
 type dllOption struct {
 	Name string
 	For  string
@@ -107,9 +108,9 @@ type dllOption struct {
 
 var dllOptions = []dllOption{
 	{"dxgi.dll", "D3D10 / D3D11 / D3D12 (recommended)"},
+	{"d3d12.dll", "D3D12 only"},
 	{"d3d11.dll", "D3D11 only"},
 	{"d3d10.dll", "D3D10 only"},
-	{"d3d12.dll", "D3D12 only"},
 	{"d3d9.dll", "D3D9"},
 	{"opengl32.dll", "OpenGL"},
 }

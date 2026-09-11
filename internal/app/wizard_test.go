@@ -298,6 +298,19 @@ func TestWizardEditingAdoptedInstallFallsBackToLatestVersion(t *testing.T) {
 	}
 }
 
+// The API step lists dxgi first, then the DirectX versions descending —
+// the order a user scans them in, newest first.
+func TestAPIListsNewestFirst(t *testing.T) {
+	var names []string
+	for _, o := range dllOptions {
+		names = append(names, o.Name)
+	}
+	want := []string{"dxgi.dll", "d3d12.dll", "d3d11.dll", "d3d10.dll", "d3d9.dll", "opengl32.dll"}
+	if !slices.Equal(names, want) {
+		t.Errorf("dll order = %v, want %v", names, want)
+	}
+}
+
 // The full forward path — ReShade, API, Shaders, Add-ons, Review — ending
 // with a Request that reflects every selection made along the way.
 func TestWizardFullForwardFlowBuildsRequest(t *testing.T) {
