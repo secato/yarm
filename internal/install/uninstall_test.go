@@ -520,3 +520,186 @@ func TestUninstallRemovesARenoDXMod(t *testing.T) {
 		t.Error("the mod is still in the game folder after uninstall")
 	}
 }
+
+// forgedRegistry records one file with a caller-chosen origin, path and
+// content, all shaped to pass Load validation — the shape the uninstall
+// guards themselves must then catch.
+func forgedRegistry(t *testing.T, f *fixture, root string, origin state.Origin, rel, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(root, filepath.Dir(filepath.FromSlash(rel))), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(rel)), []byte(content), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	reg := state.Registry{}
+	reg.Record("steam:700110", state.Game{Name: "Ember Hollow", Provider: "steam", Root: root}, state.Install{
+		Exe:     "Game/emberhollow.exe",
+		ReShade: state.ReShadeInfo{Version: "6.8.0", Flavor: "normal", DLL: "dxgi.dll"},
+		Files: []state.File{{
+			Path: rel, SHA256: sha256Of(content), Size: int64(len(content)), Origin: origin,
+		}},
+	})
+	if err := state.Save(f.StateDir, reg); err != nil {
+		t.Fatalf("Save(): %v", err)
+	}
+}
+
+// A manifest entry shaped like nothing yarm writes is skipped and
+// reported, even when its hash matches: the hash gate alone cannot catch
+// an entry whose content the forger supplied too.
+func TestUninstallSkipsMisshapenEntries(t *testing.T) {
+	f := newFixture(t)
+	f.GameFile("Game/emberhollow.exe", "the game binary")
+	forgedRegistry(t, f, f.GameDir, state.PackageOrigin("x"), "Game/savestate.dat", "precious save")
+
+	out, err := NewUninstaller(f.StateDir).Run(UninstallRequest{
+		GameID: "steam:700110", Exe: "Game/emberhollow.exe",
+	})
+	if err != nil {
+		t.Fatalf("uninstall: %v", err)
+	}
+	if !slices.Contains(out.Kept, "Game/savestate.dat") {
+		t.Errorf("Kept = %v, want the misshapen entry reported", out.Kept)
+	}
+	if !f.exists("Game/savestate.dat") {
+		t.Error("a misshapen manifest entry must never be deleted")
+	}
+}
+
+// A manifest entry pointing at a symlink is kept: yarm only ever writes
+// regular files.
+func TestUninstallSkipsSymlinks(t *testing.T) {
+	f := newFixture(t)
+	f.GameFile("Game/emberhollow.exe", "the game binary")
+	target := f.GameFile("Game/real.dll", "dll bytes")
+	link := filepath.Join(f.GameDir, "Game", "dxgi.dll")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	forgedRegistry(t, f, f.GameDir, state.OriginReShade, "Game/dxgi.dll", "dll bytes")
+
+	out, err := NewUninstaller(f.StateDir).Run(UninstallRequest{
+		GameID: "steam:700110", Exe: "Game/emberhollow.exe",
+	})
+	if err != nil {
+		t.Fatalf("uninstall: %v", err)
+	}
+	if !slices.Contains(out.Kept, "Game/dxgi.dll") {
+		t.Errorf("Kept = %v, want the symlink reported", out.Kept)
+	}
+	if _, err := os.Lstat(link); err != nil {
+		t.Errorf("the link itself should be untouched: %v", err)
+	}
+}
+
+// A registry whose root no longer holds the recorded install refuses to
+// run, instead of deleting another folder's files.
+func TestUninstallRefusesAlienRoot(t *testing.T) {
+	f := newFixture(t)
+	f.GameFile("Game/emberhollow.exe", "the game binary")
+	forgedRegistry(t, f, f.GameDir, state.OriginReShade, "Game/dxgi.dll", "dll bytes")
+
+	other := t.TempDir()
+	reg, err := state.Load(f.StateDir)
+	if err != nil {
+		t.Fatalf("Load(): %v", err)
+	}
+	in, ok := reg.FindInstall("steam:700110", "Game/emberhollow.exe")
+	if !ok {
+		t.Fatal("no install recorded")
+	}
+	reg.Remove("steam:700110", "Game/emberhollow.exe")
+	reg.Record("steam:700110", state.Game{Name: "Ember Hollow", Provider: "steam", Root: other}, in)
+	if err := state.Save(f.StateDir, reg); err != nil {
+		t.Fatalf("Save(): %v", err)
+	}
+
+	if _, err := NewUninstaller(f.StateDir).Run(UninstallRequest{
+		GameID: "steam:700110", Exe: "Game/emberhollow.exe",
+	}); err == nil {
+		t.Error("want an error for a root without the recorded install, got nil")
+	}
+	if !f.exists("Game/dxgi.dll") {
+		t.Error("nothing may be deleted when the root check fails")
+	}
+}
+
+// A game folder deleted wholesale leaves nothing to remove: every entry
+// reports missing and the record is dropped, rather than erroring.
+func TestUninstallMissingRootDropsRecord(t *testing.T) {
+	f := newFixture(t)
+	f.GameFile("Game/emberhollow.exe", "the game binary")
+	forgedRegistry(t, f, f.GameDir, state.OriginReShade, "Game/dxgi.dll", "dll bytes")
+
+	if err := os.RemoveAll(f.GameDir); err != nil {
+		t.Fatalf("remove game dir: %v", err)
+	}
+	out, err := NewUninstaller(f.StateDir).Run(UninstallRequest{
+		GameID: "steam:700110", Exe: "Game/emberhollow.exe",
+	})
+	if err != nil {
+		t.Fatalf("uninstall: %v", err)
+	}
+	if !slices.Contains(out.Missing, "Game/dxgi.dll") {
+		t.Errorf("Missing = %v, want the entry reported", out.Missing)
+	}
+	reg, err := state.Load(f.StateDir)
+	if err != nil {
+		t.Fatalf("Load(): %v", err)
+	}
+	if _, ok := reg.FindInstall("steam:700110", "Game/emberhollow.exe"); ok {
+		t.Error("the record should be dropped once there is nothing left to remove")
+	}
+}
+
+// A backup swapped for a symlink after the install is never restored
+// over the game folder.
+func TestUninstallSkipsSymlinkedBackup(t *testing.T) {
+	f := newFixture(t)
+	f.GameFile("Game/emberhollow.exe", "the game binary")
+	forgedRegistry(t, f, f.GameDir, state.OriginReShade, "Game/dxgi.dll", "dll bytes")
+
+	reg, err := state.Load(f.StateDir)
+	if err != nil {
+		t.Fatalf("Load(): %v", err)
+	}
+	in, ok := reg.FindInstall("steam:700110", "Game/emberhollow.exe")
+	if !ok {
+		t.Fatal("no install recorded")
+	}
+	// A displaced original, then swapped for a link before uninstall.
+	realBak := f.GameFile("Game/dxgi.dll.yarm-bak", "the original")
+	linkBak := filepath.Join(f.GameDir, "Game", "dxgi.dll.yarm-bak")
+	if err := os.Remove(linkBak); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if err := os.Symlink(realBak, linkBak); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	in.Backups = []state.Backup{{Path: "Game/dxgi.dll", Backup: "Game/dxgi.dll.yarm-bak"}}
+	gm := reg.Games["steam:700110"]
+	reg.Remove("steam:700110", "Game/emberhollow.exe")
+	reg.Record("steam:700110", gm, in)
+	if err := state.Save(f.StateDir, reg); err != nil {
+		t.Fatalf("Save(): %v", err)
+	}
+	// Remove the installed DLL so the restore path is reached (restore
+	// only happens over an absent file).
+	if err := os.Remove(filepath.Join(f.GameDir, "Game", "dxgi.dll")); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	out, err := NewUninstaller(f.StateDir).Run(UninstallRequest{
+		GameID: "steam:700110", Exe: "Game/emberhollow.exe",
+	})
+	if err != nil {
+		t.Fatalf("uninstall: %v", err)
+	}
+	if len(out.Restored) != 0 {
+		t.Errorf("Restored = %v, want nothing restored from a linked backup", out.Restored)
+	}
+	if f.exists("Game/dxgi.dll") {
+		t.Error("a linked backup must never be renamed over the game folder")
+	}
+}

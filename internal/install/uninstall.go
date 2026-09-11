@@ -70,8 +70,50 @@ func (u *Uninstaller) Run(req UninstallRequest) (UninstallResult, error) {
 	var result UninstallResult
 	root := g.Root
 
+	// The root must be a directory holding the recorded install: an empty
+	// root, a file, or a folder without the recorded executable (or its
+	// directory — a game patch may rename the exe, but not the folder) is
+	// a registry pointing somewhere it should not, and deleting by it
+	// could remove another folder's files.
+	if root == "" {
+		return UninstallResult{}, fmt.Errorf("game %q has an empty root", req.GameID)
+	}
+	if info, err := os.Stat(root); err != nil || !info.IsDir() {
+		if os.IsNotExist(err) {
+			// The whole game folder is gone: nothing on disk to remove,
+			// just report everything missing and drop the record.
+			for _, f := range in.Files {
+				result.Missing = append(result.Missing, f.Path)
+			}
+			reg.Remove(req.GameID, req.Exe)
+			if err := state.Save(u.StateDir, reg); err != nil {
+				return UninstallResult{}, fmt.Errorf("update manifest: %w", err)
+			}
+			return result, nil
+		}
+		return UninstallResult{}, fmt.Errorf("game root %q is not a directory", root)
+	}
+	exeDir := exeDirOf(in.Exe)
+	exeAbs := filepath.Join(root, filepath.FromSlash(in.Exe))
+	if st, err := os.Stat(exeAbs); err != nil || st.IsDir() {
+		dirAbs := filepath.Join(root, filepath.FromSlash(exeDir))
+		if st, err := os.Stat(dirAbs); err != nil || !st.IsDir() {
+			return UninstallResult{}, fmt.Errorf(
+				"game root %q does not contain the recorded install (%q)", root, in.Exe)
+		}
+	}
+
 	for _, f := range in.Files {
 		if isUserData(f.Path) && !req.RemoveUserData {
+			result.Kept = append(result.Kept, f.Path)
+			continue
+		}
+
+		// A manifest entry shaped like nothing yarm writes (a savegame, a
+		// config elsewhere) is skipped and reported, however its hash
+		// reads: the hash gate alone cannot catch an entry whose content
+		// the forger supplied too.
+		if !deletableShape(exeDir, f) {
 			result.Kept = append(result.Kept, f.Path)
 			continue
 		}
@@ -79,6 +121,16 @@ func (u *Uninstaller) Run(req UninstallRequest) (UninstallResult, error) {
 		abs, err := safeDest(root, f.Path)
 		if err != nil {
 			return UninstallResult{}, err
+		}
+
+		// Regular files only: never a symlink, directory, or special
+		// file. yarm only ever writes regular files, so anything else is
+		// the user's (or an attacker's) — and removing a symlink would
+		// only remove the link, hiding what it pointed at from the
+		// report.
+		if st, err := os.Lstat(abs); err == nil && !st.Mode().IsRegular() {
+			result.Kept = append(result.Kept, f.Path)
+			continue
 		}
 
 		sum, err := hashFile(abs)
@@ -126,7 +178,11 @@ func (u *Uninstaller) Run(req UninstallRequest) (UninstallResult, error) {
 		if err != nil {
 			return UninstallResult{}, err
 		}
-		if _, err := os.Stat(src); err != nil {
+		// The backup must still be a regular file: Load's validation
+		// guarantees the suffixed name, but nothing stops the file itself
+		// being swapped for a link between installs. Anything else is
+		// not restored over the game folder.
+		if st, err := os.Lstat(src); err != nil || !st.Mode().IsRegular() {
 			continue
 		}
 		// Only restore over an absent file: if something is there, the
@@ -151,6 +207,58 @@ func (u *Uninstaller) Run(req UninstallRequest) (UninstallResult, error) {
 	sort.Strings(result.Removed)
 	sort.Strings(result.Kept)
 	return result, nil
+}
+
+// exeDirOf returns the directory holding exe, relative to the game root
+// ("" for the root itself) — the same rule Request.ExeDir applies, since
+// the manifest's Exe is recorded in the same form.
+func exeDirOf(exe string) string {
+	if d := path.Dir(filepath.ToSlash(exe)); d != "." {
+		return d
+	}
+	return ""
+}
+
+// deletableShape reports whether a manifest entry is shaped like a file
+// yarm writes: the proxy DLL, compiler, ini or add-ons beside the
+// executable, or shaders and textures under reshade-shaders/. Adopted
+// installs accept the union of those shapes. Anything else fails, however
+// its hash reads.
+func deletableShape(exeDir string, f state.File) bool {
+	dir, base := path.Split(f.Path)
+	dir = strings.TrimSuffix(dir, "/")
+	lower := strings.ToLower(base)
+	inExeDir := dir == exeDir
+	under := func(sub string) bool {
+		prefix := sub + "/"
+		if exeDir != "" {
+			prefix = exeDir + "/" + prefix
+		}
+		return strings.HasPrefix(f.Path, prefix)
+	}
+	addon := strings.HasSuffix(lower, ".addon32") || strings.HasSuffix(lower, ".addon64")
+
+	switch {
+	case f.Origin == state.OriginReShade:
+		return inExeDir && strings.HasSuffix(lower, ".dll")
+	case f.Origin == state.OriginD3DCompiler:
+		return inExeDir && lower == "d3dcompiler_47.dll"
+	case f.Origin == state.OriginINI:
+		return inExeDir && lower == "reshade.ini"
+	case strings.HasPrefix(string(f.Origin), "package:"),
+		strings.HasPrefix(string(f.Origin), "custom:"):
+		return under(ShadersDir) || under(TexturesDir)
+	case strings.HasPrefix(string(f.Origin), "addon:"),
+		strings.HasPrefix(string(f.Origin), "renodx:"):
+		return inExeDir && addon
+	case f.Origin == state.OriginAdopted:
+		return (inExeDir && strings.HasSuffix(lower, ".dll")) ||
+			(inExeDir && lower == "d3dcompiler_47.dll") ||
+			(inExeDir && lower == "reshade.ini") ||
+			under(ShadersDir) || under(TexturesDir) ||
+			(inExeDir && addon)
+	}
+	return false
 }
 
 // isUserData reports whether a path is content the user owns, which

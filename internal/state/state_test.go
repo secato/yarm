@@ -2,10 +2,9 @@ package state
 
 import (
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -191,9 +190,9 @@ func withFiles(reg Registry, files []File) Registry {
 	return reg
 }
 
-// writeUnsigned stores reg without a signature, so tests exercise
-// validation rather than verification.
-func writeUnsigned(t *testing.T, dir string, reg Registry) {
+// writeRaw stores reg as plain JSON, so tests exercise Load's validation
+// of exactly what is on disk.
+func writeRaw(t *testing.T, dir string, reg Registry) {
 	t.Helper()
 	raw, err := json.Marshal(reg)
 	if err != nil {
@@ -204,100 +203,25 @@ func writeUnsigned(t *testing.T, dir string, reg Registry) {
 	}
 }
 
-// A saved registry is signed: the file carries an HMAC, and flipping a
-// single byte breaks verification on load.
-func TestSaveSignsLoadVerifies(t *testing.T) {
+// Save refuses a registry that fails validation, and writes nothing —
+// bad in-memory state can never reach the disk.
+func TestSaveRefusesInvalidRegistry(t *testing.T) {
 	dir := t.TempDir()
-
-	if err := Save(dir, validRegistry()); err != nil {
-		t.Fatalf("Save(): %v", err)
+	bad := withFiles(validRegistry(), []File{{
+		Path: "/etc/dxgi.dll", SHA256: strings.Repeat("ab", 32), Size: 100, Origin: OriginReShade,
+	}})
+	if err := Save(dir, bad); err == nil {
+		t.Error("want an error saving an invalid registry, got nil")
 	}
-	raw, err := os.ReadFile(Path(dir))
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	if !strings.Contains(string(raw), `"hmac":`) {
-		t.Errorf("saved registry should carry a signature:\n%s", raw)
-	}
-	if _, err := Load(dir); err != nil {
-		t.Errorf("Load() of a signed registry: %v", err)
-	}
-
-	// Tamper with one byte of a path: verification must fail closed.
-	tampered := strings.Replace(string(raw), "dxgi.dll", "dxgi.dlX", 1)
-	if tampered == string(raw) {
-		t.Fatal("test setup failed to alter the file")
-	}
-	if err := os.WriteFile(Path(dir), []byte(tampered), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if _, err := Load(dir); !errors.Is(err, ErrIntegrity) {
-		t.Errorf("Load() of a tampered registry = %v, want %v", err, ErrIntegrity)
-	}
-}
-
-// Files from before signing carry no HMAC: they load trust-on-first-use
-// and pick up a signature on the next save.
-func TestLegacyUnsignedRegistryLoads(t *testing.T) {
-	dir := t.TempDir()
-	legacy := `{"schema":1,"games":{"steam:700110":{"name":"Ember Hollow","provider":"steam","root":"/games/EH","installs":[]}}}`
-	if err := os.WriteFile(Path(dir), []byte(legacy), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	reg, err := Load(dir)
-	if err != nil {
-		t.Fatalf("Load() of an unsigned registry: %v", err)
-	}
-	if len(reg.Games) != 1 {
-		t.Errorf("got %d games, want 1", len(reg.Games))
-	}
-	if err := Save(dir, reg); err != nil {
-		t.Fatalf("Save(): %v", err)
-	}
-	if _, err := Load(dir); err != nil {
-		t.Errorf("Load() after re-signing: %v", err)
-	}
-	raw, _ := os.ReadFile(Path(dir))
-	if !strings.Contains(string(raw), `"hmac":`) {
-		t.Error("re-saved registry should be signed")
-	}
-}
-
-// A signed registry without its key is unverifiable: fail closed, with
-// recovery guidance, rather than acting on it.
-func TestSignedRegistryWithoutKeyFailsClosed(t *testing.T) {
-	dir := t.TempDir()
-	if err := Save(dir, validRegistry()); err != nil {
-		t.Fatalf("Save(): %v", err)
-	}
-	if err := os.Remove(filepath.Join(dir, keyFileName)); err != nil {
-		t.Fatalf("remove key: %v", err)
-	}
-	if _, err := Load(dir); !errors.Is(err, ErrIntegrity) {
-		t.Errorf("Load() without the key = %v, want %v", err, ErrIntegrity)
-	}
-}
-
-// The key file is owner-only: it is the one secret in the data dir.
-func TestKeyFilePermissions(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("owner-only bits do not apply on Windows")
-	}
-	dir := t.TempDir()
-	if err := Save(dir, Registry{}); err != nil {
-		t.Fatalf("Save(): %v", err)
-	}
-	info, err := os.Stat(filepath.Join(dir, keyFileName))
-	if err != nil {
-		t.Fatalf("stat: %v", err)
-	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("key file perms = %o, want 600", perm)
+	if _, err := os.Stat(Path(dir)); !os.IsNotExist(err) {
+		t.Errorf("an invalid save should write nothing, stat err = %v", err)
 	}
 }
 
 // Validation fails registries yarm could not have written: absolute and
-// escaping paths, non-hash digests, negative sizes, relative roots.
+// escaping paths, non-hash digests, negative sizes, relative roots,
+// unknown origins, duplicate paths, misshapen backups, absurd file
+// counts.
 func TestLoadRejectsMalformedRegistry(t *testing.T) {
 	file := File{Path: "Game/dxgi.dll", SHA256: strings.Repeat("ab", 32), Size: 100, Origin: OriginReShade}
 
@@ -306,6 +230,20 @@ func TestLoadRejectsMalformedRegistry(t *testing.T) {
 		g.Root = root
 		reg.Games["steam:700110"] = g
 		return reg
+	}
+	withBackups := func(reg Registry, backups []Backup) Registry {
+		g := reg.Games["steam:700110"]
+		in := g.Installs[0]
+		in.Backups = backups
+		g.Installs = []Install{in}
+		reg.Games["steam:700110"] = g
+		return reg
+	}
+	many := make([]File, 0, maxFilesPerInstall+1)
+	for i := range maxFilesPerInstall + 1 {
+		many = append(many, File{
+			Path: "Game/f" + strconv.Itoa(i) + ".fx", SHA256: file.SHA256, Size: 100, Origin: OriginReShade,
+		})
 	}
 
 	cases := map[string]Registry{
@@ -325,12 +263,29 @@ func TestLoadRejectsMalformedRegistry(t *testing.T) {
 			Path: file.Path, SHA256: file.SHA256, Size: -1, Origin: OriginReShade,
 		}}),
 		"relative root": withRoot(validRegistry(), "games/EH"),
+		"unknown origin": withFiles(validRegistry(), []File{{
+			Path: file.Path, SHA256: file.SHA256, Size: 100, Origin: "savegame",
+		}}),
+		"empty prefixed origin": withFiles(validRegistry(), []File{{
+			Path: file.Path, SHA256: file.SHA256, Size: 100, Origin: "package:",
+		}}),
+		"duplicate path": withFiles(validRegistry(), []File{file, file}),
+		"backup without suffix": withBackups(validRegistry(), []Backup{{
+			Path: "Game/dxgi.dll", Backup: "Game/dxgi.dll.bak",
+		}}),
+		"backup same as path": withBackups(validRegistry(), []Backup{{
+			Path: "Game/dxgi.dll", Backup: "Game/dxgi.dll",
+		}}),
+		"backup elsewhere": withBackups(validRegistry(), []Backup{{
+			Path: "Game/dxgi.dll", Backup: "Other/dxgi.dll.yarm-bak",
+		}}),
+		"too many files": withFiles(validRegistry(), many),
 	}
 
 	for name, reg := range cases {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
-			writeUnsigned(t, dir, reg)
+			writeRaw(t, dir, reg)
 			if _, err := Load(dir); err == nil {
 				t.Errorf("want a validation error for %s, got nil", name)
 			}
@@ -383,9 +338,7 @@ func TestSaveIsAtomic(t *testing.T) {
 		t.Fatalf("ReadDir: %v", err)
 	}
 	for _, e := range entries {
-		// installs.key is the registry's signature key, written
-		// alongside it on first save.
-		if filepath.Ext(e.Name()) == ".tmp" || (e.Name() != FileName && e.Name() != keyFileName) {
+		if filepath.Ext(e.Name()) == ".tmp" || e.Name() != FileName {
 			t.Errorf("unexpected leftover file %q", e.Name())
 		}
 	}

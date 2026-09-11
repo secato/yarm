@@ -370,7 +370,11 @@ func (j *journal) discardStaged() {
 }
 
 // pruneEmptyDirs removes directories left empty by the given
-// game-relative paths, deepest first, stopping at the game root.
+// game-relative paths, deepest first, stopping at the game root. Removal
+// itself is the guard: os.Remove only removes empty directories, so a
+// folder holding the game's own files is never touched. Callers only pass
+// paths that passed the uninstaller's shape checks, so nothing outside
+// yarm's own layout can nominate a directory here.
 func pruneEmptyDirs(root string, rels []string) {
 	seen := make(map[string]bool, len(rels))
 	var dirs []string

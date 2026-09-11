@@ -3,14 +3,13 @@
 package state
 
 import (
-	"crypto/hmac"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -21,12 +20,6 @@ import (
 
 // FileName is the registry's name inside the data directory.
 const FileName = "installs.json"
-
-// keyFileName is the registry signature key's name inside the data
-// directory. Random per machine, readable only by its owner: whoever can
-// read it can already rewrite the registry, so it proves the file came
-// from yarm rather than defending against yarm's own user.
-const keyFileName = "installs.key"
 
 // SchemaVersion is bumped when the on-disk shape changes incompatibly.
 const SchemaVersion = 1
@@ -123,32 +116,26 @@ type Registry struct {
 // YARM.
 var ErrSchemaTooNew = errors.New("installs.json schema is newer than this version of yarm")
 
-// ErrIntegrity is returned when installs.json fails its integrity check:
-// signed by someone without the key, or corrupted. The registry is the
-// only record of which files yarm put into game directories it does not
-// own, so acting on a file that fails this check could delete the wrong
-// things — hence an error rather than a warning. Recovery is deleting the
-// file to start over (tracked files stay on disk and can be re-adopted)
-// or restoring it from a backup.
-var ErrIntegrity = errors.New("installs.json failed its integrity check")
-
-// envelope is the on-disk shape: the registry plus a signature over
-// exactly the bytes it was written as. The Registry struct itself stays
-// signature-free, so in-memory copies never carry a stale one.
-type envelope struct {
-	Schema int             `json:"schema"`
-	Games  map[string]Game `json:"games"`
-	HMAC   string          `json:"hmac,omitempty"`
-}
-
 // Path returns the registry's full path inside dir.
 func Path(dir string) string { return filepath.Join(dir, FileName) }
 
+// backupSuffix is the suffix of files yarm displaced and saved beside
+// the original. Duplicated from install.BackupSuffix (which cannot be
+// imported here without a cycle): the two must stay identical, and the
+// uninstaller enforces it again at restore time.
+const backupSuffix = ".yarm-bak"
+
+// maxFilesPerInstall bounds one install's file list. Real installs number
+// in the hundreds of files; anything past this is hand-crafted, and the
+// uninstaller would otherwise walk it entry by entry.
+const maxFilesPerInstall = 20000
+
 // Validate rejects registries that could not have come from yarm. Every
-// path the uninstaller may delete has to be a clean relative slash-path,
-// every recorded hash a real SHA-256, every size sane, every game root an
-// absolute path — so a hand-edited or tampered file fails here, before
-// anything acts on it, rather than relying on every consumer to re-check.
+// path the uninstaller may delete has to be a clean relative slash-path
+// with a known origin, every recorded hash a real SHA-256, every size
+// sane, every game root an absolute path — so a hand-edited or tampered
+// file fails here, before anything acts on it, rather than relying on
+// every consumer to re-check.
 func (r Registry) Validate() error {
 	for id, g := range r.Games {
 		if g.Root == "" || !filepath.IsAbs(g.Root) {
@@ -158,8 +145,20 @@ func (r Registry) Validate() error {
 			if err := validRelPath(in.Exe); err != nil {
 				return fmt.Errorf("game %q exe %q: %w", id, in.Exe, err)
 			}
+			if len(in.Files) > maxFilesPerInstall {
+				return fmt.Errorf("game %q: %d files, more than the %d yarm ever writes",
+					id, len(in.Files), maxFilesPerInstall)
+			}
+			seen := make(map[string]bool, len(in.Files))
 			for _, f := range in.Files {
 				if err := validRelPath(f.Path); err != nil {
+					return fmt.Errorf("game %q file %q: %w", id, f.Path, err)
+				}
+				if seen[f.Path] {
+					return fmt.Errorf("game %q file %q: listed twice", id, f.Path)
+				}
+				seen[f.Path] = true
+				if err := validOrigin(f.Origin); err != nil {
 					return fmt.Errorf("game %q file %q: %w", id, f.Path, err)
 				}
 				if err := validSHA256(f.SHA256); err != nil {
@@ -176,10 +175,35 @@ func (r Registry) Validate() error {
 				if err := validRelPath(b.Backup); err != nil {
 					return fmt.Errorf("game %q backup %q: %w", id, b.Backup, err)
 				}
+				if !strings.HasSuffix(b.Backup, backupSuffix) {
+					return fmt.Errorf("game %q backup %q: must end in %q", id, b.Backup, backupSuffix)
+				}
+				if b.Backup == b.Path {
+					return fmt.Errorf("game %q backup %q: backup and original are the same file", id, b.Backup)
+				}
+				if path.Dir(b.Backup) != path.Dir(b.Path) {
+					return fmt.Errorf("game %q backup %q: must sit beside the file it displaced", id, b.Backup)
+				}
 			}
 		}
 	}
 	return nil
+}
+
+// validOrigin reports whether o is an origin yarm records: a fixed
+// keyword, or a prefixed id with something after the colon. Anything else
+// was not written by yarm.
+func validOrigin(o Origin) error {
+	switch o {
+	case OriginReShade, OriginD3DCompiler, OriginINI, OriginAdopted:
+		return nil
+	}
+	for _, prefix := range []string{"package:", "addon:", "renodx:", "custom:"} {
+		if rest, ok := strings.CutPrefix(string(o), prefix); ok && rest != "" {
+			return nil
+		}
+	}
+	return fmt.Errorf("unknown origin %q", o)
 }
 
 // validRelPath reports whether p is shaped like a path yarm records: a
@@ -223,7 +247,7 @@ func validSHA256(s string) error {
 // something to start fresh from: it is the only record of which files
 // YARM put into the user's game directories, and silently discarding it
 // would strand those files with nothing able to remove them. The same
-// goes for a registry that fails validation or its integrity check.
+// goes for a registry that fails validation.
 func Load(dir string) (Registry, error) {
 	raw, err := os.ReadFile(Path(dir))
 	if os.IsNotExist(err) {
@@ -233,114 +257,38 @@ func Load(dir string) (Registry, error) {
 		return Registry{}, err
 	}
 
-	var env envelope
-	if err := json.Unmarshal(raw, &env); err != nil {
+	var reg Registry
+	if err := json.Unmarshal(raw, &reg); err != nil {
 		return Registry{}, fmt.Errorf("parse %s: %w", Path(dir), err)
 	}
-	if env.Schema > SchemaVersion {
-		return Registry{}, fmt.Errorf("%w: found %d, support %d", ErrSchemaTooNew, env.Schema, SchemaVersion)
+	if reg.Schema > SchemaVersion {
+		return Registry{}, fmt.Errorf("%w: found %d, support %d", ErrSchemaTooNew, reg.Schema, SchemaVersion)
 	}
-	reg := Registry{Schema: SchemaVersion, Games: env.Games}
 	if reg.Games == nil {
 		reg.Games = map[string]Game{}
 	}
+	reg.Schema = SchemaVersion
 	if err := reg.Validate(); err != nil {
 		return Registry{}, fmt.Errorf("%s: %w", Path(dir), err)
 	}
-	if env.HMAC != "" {
-		if err := verify(dir, env); err != nil {
-			return Registry{}, err
-		}
-	}
-	// No HMAC is a legacy file from before signing: accepted
-	// trust-on-first-use, and signed on the next save.
 	return reg, nil
 }
 
-// Save writes the registry to dir atomically, signed.
+// Save writes the registry to dir atomically. It refuses a registry that
+// fails validation, so bad in-memory state can never reach the disk.
 func Save(dir string, reg Registry) error {
+	if err := reg.Validate(); err != nil {
+		return err
+	}
 	reg.Schema = SchemaVersion
 	if reg.Games == nil {
 		reg.Games = map[string]Game{}
 	}
-	inner, err := json.MarshalIndent(envelope{Schema: reg.Schema, Games: reg.Games}, "", "  ")
+	raw, err := json.MarshalIndent(reg, "", "  ")
 	if err != nil {
 		return err
 	}
-	key, err := ensureKey(dir)
-	if err != nil {
-		return err
-	}
-	mac := hmac.New(sha256.New, key)
-	mac.Write(inner)
-	signed, err := json.MarshalIndent(envelope{
-		Schema: reg.Schema,
-		Games:  reg.Games,
-		HMAC:   hex.EncodeToString(mac.Sum(nil)),
-	}, "", "  ")
-	if err != nil {
-		return err
-	}
-	return fsutil.AtomicWrite(Path(dir), signed, 0o644)
-}
-
-// ensureKey returns the registry signing key, creating it once with
-// owner-only permissions. A corrupt key file is replaced: the registry is
-// re-signed on this same save, so nothing dangles.
-func ensureKey(dir string) ([]byte, error) {
-	path := filepath.Join(dir, keyFileName)
-	if raw, err := os.ReadFile(path); err == nil {
-		if len(raw) == 32 {
-			return raw, nil
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, err
-	}
-	raw := make([]byte, 32)
-	if _, err := rand.Read(raw); err != nil {
-		return nil, err
-	}
-	if err := fsutil.AtomicWrite(path, raw, 0o600); err != nil {
-		return nil, err
-	}
-	return raw, nil
-}
-
-// verify checks the envelope's signature against the key. It recomputes
-// the signature over the re-encoded registry rather than trusting the
-// stored bytes, so equivalent-but-reordered JSON still verifies while any
-// changed value does not.
-func verify(dir string, env envelope) error {
-	key, err := loadKey(dir)
-	if err != nil {
-		return fmt.Errorf("%w in %s: %v", ErrIntegrity, Path(dir), err)
-	}
-	inner, err := json.MarshalIndent(envelope{Schema: env.Schema, Games: env.Games}, "", "  ")
-	if err != nil {
-		return fmt.Errorf("%w in %s: %v", ErrIntegrity, Path(dir), err)
-	}
-	mac := hmac.New(sha256.New, key)
-	mac.Write(inner)
-	sig, err := hex.DecodeString(env.HMAC)
-	if err != nil {
-		return fmt.Errorf("%w in %s: malformed signature", ErrIntegrity, Path(dir))
-	}
-	if !hmac.Equal(mac.Sum(nil), sig) {
-		return fmt.Errorf("%w in %s: signature mismatch (modified outside yarm or corrupted)", ErrIntegrity, Path(dir))
-	}
-	return nil
-}
-
-// loadKey reads the registry signing key.
-func loadKey(dir string) ([]byte, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, keyFileName))
-	if err != nil {
-		return nil, err
-	}
-	if len(raw) != 32 {
-		return nil, fmt.Errorf("key file has length %d, want 32", len(raw))
-	}
-	return raw, nil
+	return fsutil.AtomicWrite(Path(dir), raw, 0o644)
 }
 
 // FindInstall returns the install recorded for a game's executable.
