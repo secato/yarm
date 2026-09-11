@@ -170,6 +170,12 @@ func (u *Uninstaller) Run(req UninstallRequest) (UninstallResult, error) {
 
 	// Put back anything this install displaced.
 	for _, b := range in.Backups {
+		// The file a backup restores over must itself be one yarm could
+		// have displaced. Without this a forged manifest could drop the
+		// content of any .yarm-bak it planted anywhere under the root.
+		if !deletableShape(exeDir, state.File{Path: b.Path, Origin: state.OriginAdopted}) {
+			continue
+		}
 		dst, err := safeDest(root, b.Path)
 		if err != nil {
 			return UninstallResult{}, err

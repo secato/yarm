@@ -2,6 +2,7 @@ package artifacts
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,8 +78,9 @@ func ExtractAddonZip(zipPath, dstDir string, arch game.Arch) ([]string, error) {
 
 	want := addonExt(arch)
 	var (
-		written []string
-		sawAny  bool
+		written    []string
+		sawAny     bool
+		unsafeName int
 	)
 
 	for _, e := range entries {
@@ -98,12 +100,20 @@ func ExtractAddonZip(zipPath, dstDir string, arch game.Arch) ([]string, error) {
 		// directory structure inside the zip is discarded.
 		dst, err := archive.SafePath(dstDir, filepath.Base(strings.ReplaceAll(e.Name(), `\`, "/")))
 		if err != nil {
+			unsafeName++
 			continue
 		}
 		if err := budget.ExtractEntry(e, dst); err != nil {
 			return nil, fmt.Errorf("extract %s: %w", e.Name(), err)
 		}
 		written = append(written, dst)
+	}
+
+	// Reported once, not per entry: worth seeing, but a hostile archive
+	// must not get to flood the log with it.
+	if unsafeName > 0 {
+		slog.Warn("skipped add-on entries whose name could not be placed",
+			"archive", filepath.Base(zipPath), "count", unsafeName)
 	}
 
 	if !sawAny {

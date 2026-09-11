@@ -511,3 +511,61 @@ func TestRunDiscardsForeignFileWhenBackupIsOff(t *testing.T) {
 		t.Errorf("manifest records %d backups, want none", len(res.Install.Backups))
 	}
 }
+
+// A manifest entry says yarm wrote a regular file there. If something
+// else is standing at that path now, an upgrade must leave it where it
+// is: moving a symlink aside and then deleting it on commit would take
+// the user's own file out of the install's reach.
+func TestRunUpgradeLeavesNonRegularFilesAlone(t *testing.T) {
+	f := newFixture(t).WithReShade().
+		WithPackage("pkg", artifacts.PackageMeta{Name: "P"},
+			map[string]string{"Shaders/A.fx": "a"})
+
+	const secret = "the user's own file"
+	outside := filepath.Join(filepath.Dir(f.GameDir), "elsewhere.fx")
+	if err := os.WriteFile(outside, []byte(secret), 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+
+	// A previous install claims a shader that is now a link pointing out
+	// of the game folder.
+	f.GameFile("Game/dxgi.dll", "old reshade")
+	link := filepath.Join(f.GameDir, filepath.FromSlash("Game/reshade-shaders/Shaders/Dropped.fx"))
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	var reg state.Registry
+	reg.Record("steam:700110", state.Game{Root: f.GameDir}, state.Install{
+		Exe: "Game/emberhollow.exe",
+		Files: []state.File{
+			{Path: "Game/dxgi.dll", SHA256: sha256Of("old reshade"), Origin: state.OriginReShade},
+			{Path: "Game/reshade-shaders/Shaders/Dropped.fx", SHA256: sha256Of(secret), Origin: state.PackageOrigin("gone")},
+		},
+	})
+
+	req := f.Request()
+	req.Packages = []string{"pkg"}
+	plan, err := (Planner{Registry: reg}).Plan(req, f.Art)
+	if err != nil {
+		t.Fatalf("Plan(): %v", err)
+	}
+	if !slices.Contains(plan.Removed, "Game/reshade-shaders/Shaders/Dropped.fx") {
+		t.Fatalf("Removed = %v, want the dropped shader", plan.Removed)
+	}
+
+	if _, err := newExec(f).Run(context.Background(), plan, nil); err != nil {
+		t.Fatalf("Run(): %v", err)
+	}
+
+	if _, err := os.Lstat(link); err != nil {
+		t.Errorf("the link was moved aside: %v", err)
+	}
+	body, err := os.ReadFile(outside)
+	if err != nil || string(body) != secret {
+		t.Errorf("the file the link pointed at was disturbed: %q, %v", body, err)
+	}
+}

@@ -106,9 +106,21 @@ func (p Planner) Plan(req Request, art Artifacts) (Plan, error) {
 			wanted[f.Dest] = true
 		}
 		for _, old := range prev.Files {
-			if !wanted[old.Path] {
-				plan.Removed = append(plan.Removed, old.Path)
+			if wanted[old.Path] {
+				continue
 			}
+			// The previous manifest is what nominates a file for deletion
+			// here, so it gets the same shape check the uninstaller applies
+			// to it. A record naming something yarm never writes is left
+			// alone and reported: planning is where that decision belongs,
+			// since the review screen then shows what will really go.
+			if !deletableShape(exeDir, old) {
+				plan.Warnings = append(plan.Warnings, fmt.Sprintf(
+					"%s is recorded by the previous install but is not shaped like a file yarm writes; leaving it alone",
+					old.Path))
+				continue
+			}
+			plan.Removed = append(plan.Removed, old.Path)
 		}
 		slices.Sort(plan.Removed)
 	}

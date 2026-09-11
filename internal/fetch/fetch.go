@@ -13,7 +13,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -70,12 +72,73 @@ type Client struct {
 // New returns a Client with sensible defaults.
 func New(userAgent string) *Client {
 	return &Client{
-		HTTP:      &http.Client{Timeout: DefaultTimeout, Transport: DefaultTransport()},
+		HTTP: &http.Client{
+			Timeout:       DefaultTimeout,
+			Transport:     DefaultTransport(),
+			CheckRedirect: CheckRedirect,
+		},
 		UserAgent: userAgent,
 		Retries:   DefaultRetries,
 		Backoff:   DefaultBackoff,
 		MaxBytes:  DefaultMaxBytes,
 	}
+}
+
+// ErrInsecureURL reports a URL yarm refuses to fetch because the bytes
+// would not be authenticated in transit.
+var ErrInsecureURL = errors.New("refusing a URL that is not https")
+
+// maxRedirects mirrors net/http's own default. Setting CheckRedirect
+// replaces that default, so the cap has to be restated here.
+const maxRedirects = 10
+
+// EnsureSecureURL rejects anything yarm should not fetch: every artifact
+// it downloads ends up as a DLL loaded into a game process, so the bytes
+// have to be authenticated in transit. Package and add-on URLs come
+// verbatim out of a downloaded ini, which makes this the boundary where a
+// hostile catalog would otherwise get to choose "http".
+//
+// Plain http to loopback is allowed: it cannot be tampered with by anyone
+// who is not already inside the machine, and it is what lets the tests
+// drive real httptest servers instead of a mock.
+func EnsureSecureURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("parse %q: %w", raw, err)
+	}
+	switch u.Scheme {
+	case "https":
+		return nil
+	case "http":
+		if isLoopback(u.Hostname()) {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: %s", ErrInsecureURL, raw)
+}
+
+// isLoopback reports whether a host names this machine.
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// CheckRedirect refuses a redirect that drops out of https.
+//
+// Cross-host redirects are deliberately allowed: GitHub serves every
+// package archive by redirecting github.com to codeload.github.com, and
+// release assets to objects.githubusercontent.com, so pinning the host
+// across hops would break the catalog as it stands today. The scheme is
+// what matters — a downgrade to http is what would let someone rewrite
+// the bytes on the way.
+func CheckRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("stopped after %d redirects", maxRedirects)
+	}
+	return EnsureSecureURL(req.URL.String())
 }
 
 // DefaultTransport returns a transport with connection reuse tuned for a
@@ -111,8 +174,14 @@ var ErrChecksumMismatch = errors.New("checksum mismatch")
 // is deleted and ErrChecksumMismatch returned — a pinned artifact that
 // arrives wrong is never left on disk for a later run to trust.
 //
+// A URL that is not https is refused before anything is created on disk,
+// and so is a redirect that leaves https part-way through.
+//
 // onProgress may be nil.
 func (c *Client) Download(ctx context.Context, url, dst string, onProgress ProgressFunc, expectedSHA string) error {
+	if err := EnsureSecureURL(url); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}

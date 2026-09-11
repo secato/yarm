@@ -2,7 +2,9 @@ package install
 
 import (
 	"bufio"
+	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -44,17 +46,32 @@ var reshadeVersionLine = regexp.MustCompile(`Initializing crosire's ReShade vers
 // empty, since these are files ReShade itself writes, not yarm, and may
 // simply not exist yet.
 func InspectRuntime(root, exePath string) RuntimeInfo {
-	dir := filepath.Join(root, filepath.FromSlash(ExeDir(exePath)))
+	exeDir := ExeDir(exePath)
+	dir := filepath.Join(root, filepath.FromSlash(exeDir))
 
 	return RuntimeInfo{
 		Version:          readReshadeVersion(filepath.Join(dir, LogName)),
-		ActiveTechniques: readActiveTechniques(dir),
+		ActiveTechniques: readActiveTechniques(root, exeDir, dir),
 		AvailableEffects: listEffectFiles(filepath.Join(dir, filepath.FromSlash(ShadersDir))),
 	}
 }
 
+// maxLogPrefix bounds how much of ReShade.log is read looking for the
+// version banner. ReShade writes that line at startup, before anything
+// else, so the answer is always in the first few hundred bytes — while
+// the log itself grows for as long as the game runs, is written by a
+// third-party DLL inside that game, and is read once per discovered
+// folder every time the games screen loads.
+const maxLogPrefix = 64 << 10
+
 func readReshadeVersion(logPath string) string {
-	data, err := os.ReadFile(logPath)
+	f, err := os.Open(logPath)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = f.Close() }()
+
+	data, err := io.ReadAll(io.LimitReader(f, maxLogPrefix))
 	if err != nil {
 		return ""
 	}
@@ -69,7 +86,7 @@ func readReshadeVersion(logPath string) string {
 // active preset and reads its Techniques list — the effects ReShade's
 // overlay actually has switched on, not just what happens to be present
 // on disk.
-func readActiveTechniques(dir string) []string {
+func readActiveTechniques(root, exeDir, dir string) []string {
 	ini, err := loadReshadeINI(filepath.Join(dir, ININame))
 	if err != nil {
 		return nil
@@ -78,7 +95,20 @@ func readActiveTechniques(dir string) []string {
 	if !ok || presetRel == "" || isAbsoluteish(presetRel) {
 		return nil
 	}
-	presetPath := filepath.Join(dir, filepath.FromSlash(strings.ReplaceAll(presetRel, `\`, "/")))
+	// ReShade.ini is written by a third-party DLL running inside a game,
+	// so its PresetPath answers to the same containment check as a
+	// destination yarm writes to: without it, a "..\..\.." here would make
+	// yarm open and parse a file outside the game folder and put strings
+	// out of it on screen.
+	//
+	// The boundary is the game root rather than the executable's own
+	// directory, because a preset picked through ReShade's overlay can
+	// legitimately sit elsewhere in the game folder and is then recorded
+	// relative to the DLL with a leading "..".
+	presetPath, err := safeDest(root, path.Join(exeDir, strings.ReplaceAll(presetRel, `\`, "/")))
+	if err != nil {
+		return nil
+	}
 
 	preset, err := loadReshadeINI(presetPath)
 	if err != nil {

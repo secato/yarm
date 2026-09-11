@@ -134,6 +134,14 @@ func (e *Executor) run(ctx context.Context, plan Plan, jr *journal, onProgress P
 		if err != nil {
 			return Result{}, err
 		}
+		// Regular files only, as at uninstall: the manifest claims yarm
+		// wrote this path, and yarm only ever writes regular files. A
+		// directory or a symlink standing there now belongs to someone
+		// else, and moving it aside would take whatever it holds with it.
+		if st, err := os.Lstat(abs); err == nil && !st.Mode().IsRegular() {
+			slog.Warn("leaving a previous install's path alone: not a regular file", "path", rel)
+			continue
+		}
 		staged := abs + removedSuffix
 		if err := os.Rename(abs, staged); err != nil {
 			if os.IsNotExist(err) {

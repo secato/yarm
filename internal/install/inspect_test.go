@@ -1,6 +1,9 @@
 package install
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -101,5 +104,67 @@ func TestSplitReshadeListHandlesEscapedCommas(t *testing.T) {
 func TestSplitReshadeListEmpty(t *testing.T) {
 	if got := splitReshadeList(""); got != nil {
 		t.Errorf("got %v, want nil", got)
+	}
+}
+
+// ReShade.ini is written by a third-party DLL running inside a game, so a
+// PresetPath climbing out of the game folder must not be followed: the
+// strings it yields end up on screen.
+func TestInspectRuntimeRefusesPresetPathOutsideTheGame(t *testing.T) {
+	f := newFixture(t)
+	f.GameFile("Game/emberhollow.exe", "the game")
+	f.GameFile("Game/"+ININame, `[GENERAL]`+"\n"+`PresetPath=..\..\secrets.ini`+"\n")
+
+	// A readable file where the traversal points, so only the containment
+	// check can be what stops it being read.
+	outside := filepath.Join(filepath.Dir(f.GameDir), "secrets.ini")
+	if err := os.WriteFile(outside, []byte("Techniques=Leaked@Secret.fx\n"), 0o644); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+
+	info := InspectRuntime(f.GameDir, "Game/emberhollow.exe")
+	if info.ActiveTechniques != nil {
+		t.Errorf("ActiveTechniques = %v, want nil: a preset outside the game root was read",
+			info.ActiveTechniques)
+	}
+}
+
+// A preset one level up but still inside the game folder is legitimate —
+// ReShade records it that way when it is picked through the overlay.
+func TestInspectRuntimeFollowsPresetPathInsideTheGame(t *testing.T) {
+	f := newFixture(t)
+	f.GameFile("Game/emberhollow.exe", "the game")
+	f.GameFile("Game/"+ININame, `[GENERAL]`+"\n"+`PresetPath=..\presets\mine.ini`+"\n")
+	f.GameFile("presets/mine.ini", "Techniques=Deband@Deband.fx\n")
+
+	info := InspectRuntime(f.GameDir, "Game/emberhollow.exe")
+	want := []string{"Deband"}
+	if len(info.ActiveTechniques) != 1 || info.ActiveTechniques[0] != want[0] {
+		t.Errorf("ActiveTechniques = %v, want %v", info.ActiveTechniques, want)
+	}
+}
+
+// The log is written by that same DLL and grows for as long as the game
+// runs, and it is read once per folder every time the games screen loads.
+func TestInspectRuntimeBoundsTheLogRead(t *testing.T) {
+	f := newFixture(t)
+	f.GameFile("Game/emberhollow.exe", "the game")
+
+	banner := "12:34:56:789 [1234] | INFO  | Initializing crosire's ReShade version '6.8.0' " +
+		"(64-bit) loaded from 'dxgi.dll' into 'emberhollow.exe' ...\n"
+	f.GameFile("Game/"+LogName, banner+strings.Repeat("x", 4*maxLogPrefix))
+
+	info := InspectRuntime(f.GameDir, "Game/emberhollow.exe")
+	if info.Version != "6.8.0" {
+		t.Errorf("Version = %q, want 6.8.0 from the banner at the top", info.Version)
+	}
+
+	// The banner past the cap is not found, which is what proves the read
+	// stopped rather than scanning the whole file.
+	f2 := newFixture(t)
+	f2.GameFile("Game/emberhollow.exe", "the game")
+	f2.GameFile("Game/"+LogName, strings.Repeat("x", maxLogPrefix)+banner)
+	if v := InspectRuntime(f2.GameDir, "Game/emberhollow.exe").Version; v != "" {
+		t.Errorf("Version = %q, want empty: the whole log was read", v)
 	}
 }

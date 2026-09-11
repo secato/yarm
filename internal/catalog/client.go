@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/secato/yarm/internal/fetch"
 	"github.com/secato/yarm/internal/fsutil"
 )
 
@@ -337,6 +338,12 @@ func (c *Client) store(path string, body []byte) error {
 
 // get performs one GET and returns the body.
 func (c *Client) get(ctx context.Context, url string) ([]byte, error) {
+	// The sources are constants, but they are struct fields rather than
+	// literals, and what comes back from them decides what yarm downloads
+	// next — so they answer to the same rule as a download.
+	if err := fetch.EnsureSecureURL(url); err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err

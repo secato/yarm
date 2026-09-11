@@ -175,3 +175,100 @@ func TestDiscoverNoSteamInstalled(t *testing.T) {
 		t.Errorf("Discover() = %+v, want empty", games)
 	}
 }
+
+// installdir is a string out of a file yarm does not own, and it decides
+// the directory yarm later writes DLLs into — so it may name a folder
+// under the library's common/ and nothing else.
+func TestSafeInstallDir(t *testing.T) {
+	const common = "/games/steamapps/common"
+
+	tests := []struct {
+		name       string
+		installDir string
+		want       string
+	}{
+		{"plain folder", "Ember Hollow", filepath.Join(common, "Ember Hollow")},
+		{"nested", "Game/Bin", filepath.Join(common, "Game", "Bin")},
+		{"parent", "../../../escape", ""},
+		{"parent deeper in", "Game/../../escape", ""},
+		{"absolute", "/etc", ""},
+		{"windows absolute", `C:\Windows`, ""},
+		{"unc", `\\server\share`, ""},
+		{"backslash parent", `..\..\escape`, ""},
+		{"empty", "", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := safeInstallDir(common, tt.installDir)
+			if tt.want == "" {
+				if ok {
+					t.Errorf("safeInstallDir(%q) = %q, want refusal", tt.installDir, got)
+				}
+				return
+			}
+			if !ok {
+				t.Fatalf("safeInstallDir(%q) refused, want %q", tt.installDir, tt.want)
+			}
+			if got != tt.want {
+				t.Errorf("safeInstallDir(%q) = %q, want %q", tt.installDir, got, tt.want)
+			}
+		})
+	}
+}
+
+// The same thing end to end: a manifest that points outside the library
+// yields no game at all, even though the directory it names exists.
+func TestScanLibraryRefusesEscapingInstallDir(t *testing.T) {
+	root := t.TempDir()
+	lib := filepath.Join(root, "library")
+	steamapps := filepath.Join(lib, "steamapps")
+	if err := os.MkdirAll(filepath.Join(steamapps, "common"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// The directory the escaping manifest points at: present, so only the
+	// path check can be what refuses it.
+	if err := os.MkdirAll(filepath.Join(root, "escape"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(steamapps, "common", "Ember Hollow"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	manifest := func(appID, name, installDir string) {
+		acf := fmt.Sprintf("\"AppState\"\n{\n\t\"appid\"\t\t%q\n\t\"name\"\t\t%q\n\t\"installdir\"\t\t%q\n}\n",
+			appID, name, installDir)
+		path := filepath.Join(steamapps, "appmanifest_"+appID+".acf")
+		if err := os.WriteFile(path, []byte(acf), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	manifest("1", "Escaper", "../../../escape")
+	manifest("2", "Ember Hollow", "Ember Hollow")
+
+	games := scanLibrary(lib)
+	if len(games) != 1 {
+		t.Fatalf("scanLibrary() found %d games, want only the legitimate one: %+v", len(games), games)
+	}
+	if games[0].Name != "Ember Hollow" {
+		t.Errorf("scanLibrary() = %q, want Ember Hollow", games[0].Name)
+	}
+}
+
+// A relative library path would resolve against yarm's working directory
+// rather than anywhere Steam pointed it.
+func TestParseLibraryFoldersRefusesRelativePaths(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "libraryfolders.vdf")
+	vdf := "\"libraryfolders\"\n{\n\t\"0\"\n\t{\n\t\t\"path\"\t\t\"../../elsewhere\"\n\t}\n}\n"
+	if err := os.WriteFile(path, []byte(vdf), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	paths, err := parseLibraryFolders(path)
+	if err != nil {
+		t.Fatalf("parseLibraryFolders() error = %v", err)
+	}
+	if len(paths) != 0 {
+		t.Errorf("parseLibraryFolders() = %v, want none", paths)
+	}
+}

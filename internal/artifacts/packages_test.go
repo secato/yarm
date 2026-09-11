@@ -177,3 +177,41 @@ func sortStrings(s []string) {
 		}
 	}
 }
+
+// Everything a package delivers is copied into a game directory later, so
+// only the file types a shader pack is made of survive normalization —
+// a .dll inside the archive's Shaders/ directory must not ride along on
+// the strength of its parent directory's name.
+func TestNormalizePackageRejectsForeignFileTypes(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "pkg.zip")
+
+	writeZip(t, zipPath, map[string]string{
+		"repo-main/Shaders/Real.fx":     "// effect",
+		"repo-main/Shaders/Helper.fxh":  "// header",
+		"repo-main/Shaders/payload.dll": "MZ...",
+		"repo-main/Shaders/setup.exe":   "MZ...",
+		"repo-main/Shaders/notes.txt":   "readme",
+		"repo-main/Textures/look.png":   "png-bytes",
+		"repo-main/Textures/dummy":      "",
+	})
+
+	dst := filepath.Join(dir, "out")
+	if err := NormalizePackage(zipPath, dst, PackageMeta{ID: "pkg", Name: "Pkg"}); err != nil {
+		t.Fatalf("NormalizePackage() error = %v", err)
+	}
+
+	want := []string{
+		"Shaders/Helper.fxh",
+		"Shaders/Real.fx",
+		"Textures/look.png",
+		MetaFile,
+	}
+	got := listFiles(t, dst)
+	sortStrings(got)
+	sortStrings(want)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("normalized layout mismatch (-want +got):\n%s", diff)
+		t.Log("only .fx/.fxh under Shaders/ and images under Textures/ may be installed")
+	}
+}

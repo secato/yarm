@@ -3,6 +3,7 @@ package artifacts
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,7 +75,7 @@ func NormalizePackage(zipPath, dstDir string, meta PackageMeta) error {
 	shadersRoot := archive.FindDir(entries, ShadersDir, maxPackageDepth)
 	texturesRoot := archive.FindDir(entries, TexturesDir, maxPackageDepth)
 
-	var copied int
+	var copied, wrongType, unsafePath int
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -85,17 +86,34 @@ func NormalizePackage(zipPath, dstDir string, meta PackageMeta) error {
 		if !ok {
 			continue
 		}
+		// Everything that survives here is copied into the game directory
+		// later, so a package only gets to deliver the file types a shader
+		// pack is made of. Without this, any file at all inside the
+		// archive's Shaders/ directory — a .dll, an .exe — rode along on
+		// the strength of its parent directory's name alone.
+		if !installableContent(rel) {
+			wrongType++
+			continue
+		}
 
 		dst, err := archive.SafePath(dstDir, rel)
 		if err != nil {
 			// A traversing entry is skipped, not fatal: the rest of the
-			// package is still usable and the entry is logged upstream.
+			// package is still usable.
+			unsafePath++
 			continue
 		}
 		if err := budget.ExtractEntry(e, dst); err != nil {
 			return fmt.Errorf("extract %s: %w", name, err)
 		}
 		copied++
+	}
+	// Counted and reported once rather than per entry: a package that
+	// carries things yarm will not install is worth seeing in the log,
+	// but a noisy archive must not be able to flood it.
+	if wrongType > 0 || unsafePath > 0 {
+		slog.Warn("skipped entries while normalizing a package",
+			"package", meta.ID, "wrong_type", wrongType, "unsafe_path", unsafePath)
 	}
 
 	if copied == 0 {
@@ -140,6 +158,36 @@ func isShaderFile(name string) bool {
 	default:
 		return false
 	}
+}
+
+// isTextureFile reports whether a name is an image ReShade can sample.
+// The list is what ReShade's own texture loader accepts, plus .dds.
+func isTextureFile(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".png", ".jpg", ".jpeg", ".bmp", ".dds", ".tga", ".psd", ".gif":
+		return true
+	default:
+		return false
+	}
+}
+
+// installableContent reports whether a normalized destination is a file
+// yarm will put in a game directory: effects and headers under Shaders/,
+// images under Textures/.
+//
+// Checked against the real packages (crosire's slim branch, qUINT,
+// Depth3D): their Shaders/ directories hold nothing but .fx and .fxh, and
+// their Textures/ nothing but images and a zero-byte git placeholder. So
+// this rejects what a shader pack does not contain rather than guessing
+// at what it might.
+func installableContent(rel string) bool {
+	switch {
+	case strings.HasPrefix(rel, ShadersDir+"/"):
+		return isShaderFile(rel)
+	case strings.HasPrefix(rel, TexturesDir+"/"):
+		return isTextureFile(rel)
+	}
+	return false
 }
 
 // ReadPackageMeta loads the package.json written beside a normalized

@@ -203,7 +203,11 @@ func newCache(dirs paths.Dirs, cfg config.Config) *cache.Cache {
 
 func newCatalogClient(dirs paths.Dirs, cfg config.Config) *catalog.Client {
 	cl := catalog.New(
-		&http.Client{Timeout: 30 * time.Second, Transport: fetch.DefaultTransport()},
+		&http.Client{
+			Timeout:       30 * time.Second,
+			Transport:     fetch.DefaultTransport(),
+			CheckRedirect: fetch.CheckRedirect,
+		},
 		filepath.Join(cacheRoot(dirs, cfg), "catalog"),
 		time.Duration(cfg.RenodxTTLHours)*time.Hour,
 		userAgent(),

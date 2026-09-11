@@ -585,3 +585,39 @@ func TestPlanRenoDXMissingArtifact(t *testing.T) {
 		t.Fatalf("Plan() error = %v, want ErrMissingArtifact", err)
 	}
 }
+
+// The previous manifest is what nominates a file for deletion during an
+// upgrade, so an entry shaped like nothing yarm writes is left alone and
+// reported — the same rule the uninstaller applies, applied at the point
+// the plan is made so the review screen shows the truth.
+func TestPlanUpgradeLeavesForeignManifestEntriesAlone(t *testing.T) {
+	f := newFixture(t).WithReShade()
+
+	var reg state.Registry
+	reg.Record("steam:700110", state.Game{Root: f.GameDir}, state.Install{
+		Exe: "Game/emberhollow.exe",
+		Files: []state.File{
+			{Path: "Game/dxgi.dll", SHA256: "old", Origin: state.OriginReShade},
+			// Shaped like nothing yarm installs: a savegame that a forged
+			// or corrupted manifest claims as a package file.
+			{Path: "Game/saves/profile.sav", SHA256: "old", Origin: state.PackageOrigin("gone")},
+			// Right origin, wrong place: an add-on is only ever written
+			// beside the executable.
+			{Path: "Game/saves/evil.addon64", SHA256: "old", Origin: state.AddonOrigin("gone")},
+		},
+	})
+
+	plan, err := (Planner{Registry: reg}).Plan(f.Request(), f.Art)
+	if err != nil {
+		t.Fatalf("Plan(): %v", err)
+	}
+
+	for _, rel := range plan.Removed {
+		if strings.Contains(rel, "saves/") {
+			t.Errorf("Removed = %v, want nothing under saves/", plan.Removed)
+		}
+	}
+	if len(plan.Warnings) < 2 {
+		t.Errorf("Warnings = %v, want one for each entry left alone", plan.Warnings)
+	}
+}

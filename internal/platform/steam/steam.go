@@ -103,7 +103,10 @@ func scanLibrary(libraryRoot string) []game.Game {
 			continue
 		}
 
-		root := filepath.Join(libraryRoot, "steamapps", "common", m.installDir)
+		root, ok := safeInstallDir(filepath.Join(libraryRoot, "steamapps", "common"), m.installDir)
+		if !ok {
+			continue
+		}
 		if _, err := os.Stat(root); err != nil {
 			continue
 		}
@@ -116,6 +119,42 @@ func scanLibrary(libraryRoot string) []game.Game {
 		})
 	}
 	return games
+}
+
+// safeInstallDir resolves a manifest's installdir under a library's
+// common/ directory, refusing anything that would land somewhere else.
+//
+// Every manifest Steam writes holds a plain folder name here, but it is a
+// string out of a file yarm does not own, and filepath.Join cleans as it
+// joins: "../../.." would quietly resolve to a directory outside the
+// library and become a game root yarm writes DLLs into. The rule is the
+// one internal/archive applies to zip entries — reject, never sanitize —
+// spelled out again rather than borrowed, since that package is about
+// archives and this is a Steam manifest. Backslashes are treated as
+// separators and drive letters refused on every platform: the manifest
+// was written by Windows Steam even when it is read from Linux.
+func safeInstallDir(common, installDir string) (string, bool) {
+	norm := strings.ReplaceAll(installDir, `\`, "/")
+	if norm == "" || strings.HasPrefix(norm, "/") || hasVolumeName(norm) {
+		return "", false
+	}
+	for _, seg := range strings.Split(norm, "/") {
+		if seg == ".." {
+			return "", false
+		}
+	}
+	return filepath.Join(common, filepath.FromSlash(norm)), true
+}
+
+// hasVolumeName reports whether a normalized path starts with a Windows
+// drive letter or a UNC share. filepath.VolumeName only recognizes those
+// on Windows, so the check is written out to hold everywhere.
+func hasVolumeName(name string) bool {
+	if strings.HasPrefix(name, "//") {
+		return true
+	}
+	return len(name) >= 2 && name[1] == ':' &&
+		((name[0] >= 'a' && name[0] <= 'z') || (name[0] >= 'A' && name[0] <= 'Z'))
 }
 
 func isSkippedApp(m appManifest) bool {
@@ -155,7 +194,10 @@ func parseLibraryFolders(path string) ([]string, error) {
 		if !ok {
 			continue
 		}
-		if p, ok := entry["path"].(string); ok && p != "" {
+		// Absolute only: Steam writes one absolute path per library, and a
+		// relative one would resolve against yarm's working directory —
+		// a library somewhere the user never pointed it at.
+		if p, ok := entry["path"].(string); ok && p != "" && filepath.IsAbs(p) {
 			paths = append(paths, p)
 		}
 	}

@@ -302,3 +302,108 @@ func TestDownloadAllowsExactlyMaxBytes(t *testing.T) {
 		t.Errorf("a body exactly at the cap should succeed, got %v", err)
 	}
 }
+
+// Every artifact yarm downloads ends up as a DLL loaded into a game
+// process, and package URLs come verbatim out of a downloaded ini — so
+// the scheme is checked before anything is fetched.
+func TestEnsureSecureURL(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		ok   bool
+	}{
+		{"https", "https://github.com/x/y/archive/main.zip", true},
+		{"plain http", "http://github.com/x/y/archive/main.zip", false},
+		{"http to loopback ip", "http://127.0.0.1:8080/pkg.zip", true},
+		{"http to loopback name", "http://localhost:8080/pkg.zip", true},
+		{"http to ipv6 loopback", "http://[::1]:8080/pkg.zip", true},
+		{"http to a host that merely starts with localhost", "http://localhost.evil.test/pkg.zip", false},
+		{"file", "file:///etc/passwd", false},
+		{"ftp", "ftp://example.test/pkg.zip", false},
+		{"no scheme", "example.test/pkg.zip", false},
+		{"empty", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := EnsureSecureURL(tt.url)
+			if tt.ok && err != nil {
+				t.Errorf("EnsureSecureURL(%q) = %v, want nil", tt.url, err)
+			}
+			if !tt.ok && err == nil {
+				t.Errorf("EnsureSecureURL(%q) = nil, want an error", tt.url)
+			}
+		})
+	}
+}
+
+func TestDownloadRefusesInsecureURL(t *testing.T) {
+	dst := filepath.Join(t.TempDir(), "pkg.zip")
+
+	err := (&Client{HTTP: http.DefaultClient}).
+		Download(context.Background(), "http://example.invalid/pkg.zip", dst, nil, "")
+	if !errors.Is(err, ErrInsecureURL) {
+		t.Fatalf("Download() error = %v, want ErrInsecureURL", err)
+	}
+	// Refused before anything touches the disk: not even the directory
+	// or the .part file may appear.
+	for _, p := range []string{dst, dst + PartSuffix, filepath.Dir(dst)} {
+		if _, err := os.Stat(p); err == nil && p != filepath.Dir(dst) {
+			t.Errorf("%s exists after a refused download", p)
+		}
+	}
+}
+
+// A redirect is the other half of the same rule: a host may hand the
+// download off (GitHub sends every archive to codeload), but never down
+// to plain http.
+func TestCheckRedirect(t *testing.T) {
+	req := func(url string) *http.Request {
+		r, err := http.NewRequest(http.MethodGet, url, nil)
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		return r
+	}
+
+	if err := CheckRedirect(req("https://codeload.github.com/x/y/zip/main"), []*http.Request{
+		req("https://github.com/x/y/archive/main.zip"),
+	}); err != nil {
+		t.Errorf("cross-host https redirect refused: %v", err)
+	}
+
+	if err := CheckRedirect(req("http://evil.test/payload.zip"), []*http.Request{
+		req("https://github.com/x/y/archive/main.zip"),
+	}); !errors.Is(err, ErrInsecureURL) {
+		t.Errorf("https to http redirect = %v, want ErrInsecureURL", err)
+	}
+
+	var via []*http.Request
+	for range maxRedirects {
+		via = append(via, req("https://example.test/"))
+	}
+	if err := CheckRedirect(req("https://example.test/"), via); err == nil {
+		t.Error("a redirect loop past the cap was allowed")
+	}
+}
+
+// End to end: the first hop is a loopback test server, which is allowed,
+// and the hop it points at is not.
+func TestDownloadRefusesRedirectOffHTTPS(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://evil.invalid/payload.zip", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	c := testClient(srv)
+	c.HTTP = &http.Client{Transport: srv.Client().Transport, CheckRedirect: CheckRedirect}
+	c.Retries = 0
+
+	dst := filepath.Join(t.TempDir(), "pkg.zip")
+	if err := c.Download(context.Background(), srv.URL+"/pkg.zip", dst, nil, ""); err == nil {
+		t.Fatal("Download() followed a redirect off https")
+	}
+	if _, err := os.Stat(dst); err == nil {
+		t.Error("a file was written despite the refused redirect")
+	}
+}
