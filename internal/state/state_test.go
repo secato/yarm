@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -38,7 +39,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 
 	reg.Record("steam:700110", Game{
-		Name: "Ember Hollow", Provider: "steam", Root: "/games/EH",
+		Name: "Ember Hollow", Provider: "steam", Root: testRoot("/games/EH"),
 	}, sampleInstall("Game/emberhollow.exe"))
 
 	if err := Save(dir, reg); err != nil {
@@ -59,7 +60,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 
 func TestRecordReplacesSameExe(t *testing.T) {
 	var reg Registry
-	g := Game{Name: "G", Provider: "steam", Root: "/games/g"}
+	g := Game{Name: "G", Provider: "steam", Root: testRoot("/games/g")}
 
 	reg.Record("steam:1", g, sampleInstall("a.exe"))
 	reg.Record("steam:1", g, sampleInstall("b.exe"))
@@ -83,8 +84,8 @@ func TestRecordReplacesSameExe(t *testing.T) {
 // A game can move between Steam libraries; the registry must follow it.
 func TestRecordRefreshesGameIdentity(t *testing.T) {
 	var reg Registry
-	reg.Record("steam:1", Game{Name: "G", Provider: "steam", Root: "/old"}, sampleInstall("a.exe"))
-	reg.Record("steam:1", Game{Name: "G Renamed", Provider: "steam", Root: "/new"}, sampleInstall("b.exe"))
+	reg.Record("steam:1", Game{Name: "G", Provider: "steam", Root: testRoot("/old")}, sampleInstall("a.exe"))
+	reg.Record("steam:1", Game{Name: "G Renamed", Provider: "steam", Root: testRoot("/new")}, sampleInstall("b.exe"))
 
 	g := reg.Games["steam:1"]
 	if g.Root != "/new" {
@@ -100,7 +101,7 @@ func TestRecordRefreshesGameIdentity(t *testing.T) {
 
 func TestRemove(t *testing.T) {
 	var reg Registry
-	g := Game{Name: "G", Provider: "steam", Root: "/games/g"}
+	g := Game{Name: "G", Provider: "steam", Root: testRoot("/games/g")}
 	reg.Record("steam:1", g, sampleInstall("a.exe"))
 	reg.Record("steam:1", g, sampleInstall("b.exe"))
 
@@ -126,7 +127,7 @@ func TestRemove(t *testing.T) {
 
 func TestFindInstallAndOwnedFile(t *testing.T) {
 	var reg Registry
-	reg.Record("steam:1", Game{Root: "/g"}, sampleInstall("a.exe"))
+	reg.Record("steam:1", Game{Root: testRoot("/g")}, sampleInstall("a.exe"))
 
 	in, ok := reg.FindInstall("steam:1", "a.exe")
 	if !ok {
@@ -175,7 +176,7 @@ func TestLoadRejectsNewerSchema(t *testing.T) {
 func validRegistry() Registry {
 	reg := Registry{Schema: SchemaVersion, Games: map[string]Game{}}
 	reg.Record("steam:700110", Game{
-		Name: "Ember Hollow", Provider: "steam", Root: "/games/EH",
+		Name: "Ember Hollow", Provider: "steam", Root: testRoot("/games/EH"),
 	}, sampleInstall("Game/emberhollow.exe"))
 	return reg
 }
@@ -295,9 +296,9 @@ func TestLoadRejectsMalformedRegistry(t *testing.T) {
 
 func TestInstallsSorted(t *testing.T) {
 	var reg Registry
-	reg.Record("steam:2", Game{Root: "/b"}, sampleInstall("z.exe"))
-	reg.Record("steam:1", Game{Root: "/a"}, sampleInstall("b.exe"))
-	reg.Record("steam:1", Game{Root: "/a"}, sampleInstall("a.exe"))
+	reg.Record("steam:2", Game{Root: testRoot("/b")}, sampleInstall("z.exe"))
+	reg.Record("steam:1", Game{Root: testRoot("/a")}, sampleInstall("b.exe"))
+	reg.Record("steam:1", Game{Root: testRoot("/a")}, sampleInstall("a.exe"))
 
 	got := reg.Installs()
 	want := []struct{ id, exe string }{
@@ -328,7 +329,7 @@ func TestOriginHelpers(t *testing.T) {
 func TestSaveIsAtomic(t *testing.T) {
 	dir := t.TempDir()
 	var reg Registry
-	reg.Record("steam:1", Game{Root: "/g"}, sampleInstall("a.exe"))
+	reg.Record("steam:1", Game{Root: testRoot("/g")}, sampleInstall("a.exe"))
 
 	if err := Save(dir, reg); err != nil {
 		t.Fatalf("Save(): %v", err)
@@ -342,4 +343,14 @@ func TestSaveIsAtomic(t *testing.T) {
 			t.Errorf("unexpected leftover file %q", e.Name())
 		}
 	}
+}
+
+// testRoot spells a game root the way the host OS does. Registry
+// validation requires a recorded root to be absolute, and a Unix-shaped
+// path is not absolute on Windows — where these tests also run.
+func testRoot(unix string) string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(`C:\`, filepath.FromSlash(unix))
+	}
+	return unix
 }

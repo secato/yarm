@@ -6,28 +6,54 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
 )
 
 const fixtureDir = "../../../testdata/steam"
 
+// The committed fixture is a real Linux libraryfolders.vdf. Its paths are
+// absolute there and not on Windows, where "/mnt/games" names nothing —
+// which is the point of the absolute-path rule, so the expectation is
+// written per OS rather than the fixture being bent to satisfy both.
 func TestParseLibraryFolders(t *testing.T) {
 	paths, err := parseLibraryFolders(filepath.Join(fixtureDir, "libraryfolders.vdf"))
 	if err != nil {
 		t.Fatalf("parseLibraryFolders() error = %v", err)
 	}
-
 	sort.Strings(paths)
+
 	want := []string{"/home/f/.local/share/Steam", "/mnt/games/SteamLibrary"}
-	if len(paths) != len(want) {
-		t.Fatalf("parseLibraryFolders() = %v, want %v", paths, want)
+	if runtime.GOOS == "windows" {
+		want = nil
 	}
-	for i := range want {
-		if paths[i] != want[i] {
-			t.Errorf("paths[%d] = %q, want %q", i, paths[i], want[i])
-		}
+	if diff := cmp.Diff(want, paths); diff != "" {
+		t.Errorf("parseLibraryFolders() mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// The same file as Steam writes it on Windows, so the parser is covered on
+// the platform it is mainly used on rather than only on the one the
+// fixture came from.
+func TestParseLibraryFoldersWindowsPaths(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("drive-letter paths are only absolute on Windows")
+	}
+	path := filepath.Join(t.TempDir(), "libraryfolders.vdf")
+	writeVDF(t, path, []string{`C:\Program Files (x86)\Steam`, `D:\SteamLibrary`})
+
+	paths, err := parseLibraryFolders(path)
+	if err != nil {
+		t.Fatalf("parseLibraryFolders() error = %v", err)
+	}
+	sort.Strings(paths)
+	want := []string{`C:\Program Files (x86)\Steam`, `D:\SteamLibrary`}
+	if diff := cmp.Diff(want, paths); diff != "" {
+		t.Errorf("parseLibraryFolders() mismatch (-want +got):\n%s", diff)
 	}
 }
 

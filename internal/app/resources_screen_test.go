@@ -296,7 +296,7 @@ func TestResourcesScreenRefreshPackage(t *testing.T) {
 func TestResourcesScreenDetectsInUse(t *testing.T) {
 	deps, _ := resourcesTestDeps(t)
 	reg := state.Registry{Schema: state.SchemaVersion, Games: map[string]state.Game{}}
-	reg.Record("steam:1", state.Game{Name: "X", Provider: "steam", Root: "/games/x"}, state.Install{
+	reg.Record("steam:1", state.Game{Name: "X", Provider: "steam", Root: testRoot("/games/x")}, state.Install{
 		Exe:      "x.exe",
 		ReShade:  state.ReShadeInfo{Version: "6.8.0", Flavor: "normal"},
 		Packages: []string{"standard-effects"},
@@ -671,7 +671,7 @@ func TestClearCacheWarnsAboutEntriesAnInstallUses(t *testing.T) {
 		t.Fatalf("EnsureReShade: %v", err)
 	}
 	reg := state.Registry{Schema: state.SchemaVersion, Games: map[string]state.Game{}}
-	reg.Record("steam:1", state.Game{Name: "X", Provider: "steam", Root: "/games/x"}, state.Install{
+	reg.Record("steam:1", state.Game{Name: "X", Provider: "steam", Root: testRoot("/games/x")}, state.Install{
 		Exe:     "x.exe",
 		ReShade: state.ReShadeInfo{Version: "6.8.0", Flavor: "normal"},
 	})
@@ -798,7 +798,7 @@ func TestResourcesScreenDetectsARenoDXModInUse(t *testing.T) {
 		t.Fatalf("EnsureRenoDX: %v", err)
 	}
 	reg := state.Registry{Schema: state.SchemaVersion, Games: map[string]state.Game{}}
-	reg.Record("steam:1", state.Game{Name: "X", Provider: "steam", Root: "/games/x"}, state.Install{
+	reg.Record("steam:1", state.Game{Name: "X", Provider: "steam", Root: testRoot("/games/x")}, state.Install{
 		Exe: "x.exe", ReShade: state.ReShadeInfo{Version: "6.8.0", Flavor: "addon"}, RenoDX: "cp2077",
 	})
 	if err := state.Save(deps.StateDir, reg); err != nil {

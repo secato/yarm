@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 
@@ -250,4 +251,14 @@ func fakeDeps() Deps {
 		CacheStatus: fakeCacheStatus{},
 		Defaults:    config.DefaultsConfig{ReshadeFlavor: "addon", Packages: []string{"standard"}},
 	}
+}
+
+// testRoot spells a game root the way the host OS does. Registry
+// validation requires a recorded root to be absolute, and a Unix-shaped
+// path is not absolute on Windows — where these tests also run.
+func testRoot(unix string) string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(`C:\`, filepath.FromSlash(unix))
+	}
+	return unix
 }

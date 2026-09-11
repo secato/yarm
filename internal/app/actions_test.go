@@ -13,7 +13,7 @@ import (
 func uninstallTestEntry(t *testing.T) (GameEntry, string) {
 	t.Helper()
 	entry := GameEntry{
-		Game: game.Game{ID: "steam:1", Name: "G", Provider: "steam", Root: "/games/g"},
+		Game: game.Game{ID: "steam:1", Name: "G", Provider: "steam", Root: testRoot("/games/g")},
 		Exes: []Executable{{
 			Executable: game.Executable{Path: "Game/g.exe", Arch: game.ArchX64, API: game.APID3D12},
 		}},
