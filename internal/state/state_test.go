@@ -88,8 +88,8 @@ func TestRecordRefreshesGameIdentity(t *testing.T) {
 	reg.Record("steam:1", Game{Name: "G Renamed", Provider: "steam", Root: testRoot("/new")}, sampleInstall("b.exe"))
 
 	g := reg.Games["steam:1"]
-	if g.Root != "/new" {
-		t.Errorf("Root = %q, want /new", g.Root)
+	if want := testRoot("/new"); g.Root != want {
+		t.Errorf("Root = %q, want %q", g.Root, want)
 	}
 	if g.Name != "G Renamed" {
 		t.Errorf("Name = %q", g.Name)
