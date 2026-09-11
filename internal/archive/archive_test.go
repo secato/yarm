@@ -57,6 +57,11 @@ func TestSafePathRejectsEscapes(t *testing.T) {
 		"foo/../bar/../../evil", //
 		`C:\\evil.txt`,          // drive letter, rejected on every OS
 		"",                      //
+		// ":" anywhere: an NTFS alternate data stream on Windows, and a
+		// character state.validRelPath refuses, which would fail the whole
+		// install at Save rather than here.
+		"Shaders/shader.fx:payload.exe",
+		"dir:stream/file.fx",
 	}
 	for _, name := range escapes {
 		got, err := SafePath(dst, name)

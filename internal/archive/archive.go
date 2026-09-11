@@ -101,7 +101,7 @@ type Entry interface {
 
 // SafePath joins dst and an archive entry name, rejecting anything that
 // could escape dst: absolute paths, Windows drive letters and UNC paths,
-// and any ".." component at all.
+// any ".." component at all, and a ":" anywhere in a segment.
 //
 // Note that it rejects rather than sanitizes. Cleaning "../evil.txt" would
 // yield a path safely inside dst, but at a location the archive never
@@ -112,6 +112,14 @@ type Entry interface {
 // Backslashes are normalized first, because zips written on Windows
 // sometimes use them as separators and would otherwise slip past a
 // slash-only check.
+//
+// ":" is refused past the drive-letter check as well, for two reasons that
+// point the same way: on Windows "shader.fx:payload" writes an NTFS
+// alternate data stream rather than the file the name shows, and
+// state.validRelPath refuses the character outright — so without this an
+// entry like that extracted cleanly and then failed the whole install at
+// state.Save, rolling back every other file. Refused here it costs one
+// skipped entry.
 func SafePath(dst, name string) (string, error) {
 	reject := func() (string, error) {
 		return "", fmt.Errorf("%w: %q", ErrUnsafePath, name)
@@ -130,6 +138,9 @@ func SafePath(dst, name string) (string, error) {
 		case "..":
 			return reject()
 		default:
+			if strings.Contains(p, ":") {
+				return reject()
+			}
 			parts = append(parts, p)
 		}
 	}
