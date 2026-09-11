@@ -3,8 +3,10 @@
 package steam
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -170,16 +172,78 @@ func isSkippedApp(m appManifest) bool {
 	return false
 }
 
-// parseLibraryFolders reads a libraryfolders.vdf and returns each entry's
-// "path" field — one absolute filesystem path per Steam library.
-func parseLibraryFolders(path string) ([]string, error) {
+// Bounds on the two Valve files yarm parses. Both live in folders yarm
+// does not own, and both are handed to a recursive-descent parser.
+//
+// The depth limit is the one that matters: the vdf parser recurses once per
+// "{", and a file that is nothing but opening braces exhausts the goroutine
+// stack. A Go stack overflow is fatal and cannot be recovered — no defer,
+// no recover, no error path — so it has to be refused before parsing, not
+// handled during it. Real files nest three or four levels; 32 leaves room
+// for a format that grows without leaving room for an attack.
+//
+// The size limit exists because these are read into memory, and because a
+// depth check has to scan the whole file first. The real ones are a few
+// kilobytes.
+const (
+	maxVDFBytes = 8 << 20
+	maxVDFDepth = 32
+)
+
+// parseVDF reads and parses one Valve KeyValues file within those bounds.
+func parseVDF(path string) (map[string]interface{}, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
 
-	root, err := vdf.NewParser(f).Parse()
+	data, err := io.ReadAll(io.LimitReader(f, maxVDFBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxVDFBytes {
+		return nil, fmt.Errorf("steam: %s: larger than the %d byte limit", path, maxVDFBytes)
+	}
+	if err := checkVDFDepth(data, path); err != nil {
+		return nil, err
+	}
+	return vdf.NewParser(bytes.NewReader(data)).Parse()
+}
+
+// checkVDFDepth reports how deeply the braces in data nest, refusing
+// anything past maxVDFDepth. Quoted strings are tracked so a brace inside
+// a game's name does not count, with the parser's own escape rule.
+func checkVDFDepth(data []byte, path string) error {
+	var depth int
+	var inQuote, escaped bool
+
+	for _, b := range data {
+		switch {
+		case escaped:
+			escaped = false
+		case inQuote && b == '\\':
+			escaped = true
+		case b == '"':
+			inQuote = !inQuote
+		case inQuote:
+			// Braces inside a quoted value are text.
+		case b == '{':
+			depth++
+			if depth > maxVDFDepth {
+				return fmt.Errorf("steam: %s: nested deeper than %d levels", path, maxVDFDepth)
+			}
+		case b == '}':
+			depth--
+		}
+	}
+	return nil
+}
+
+// parseLibraryFolders reads a libraryfolders.vdf and returns each entry's
+// "path" field — one absolute filesystem path per Steam library.
+func parseLibraryFolders(path string) ([]string, error) {
+	root, err := parseVDF(path)
 	if err != nil {
 		return nil, err
 	}
@@ -213,13 +277,7 @@ type appManifest struct {
 
 // parseAppManifest reads one appmanifest_<appid>.acf.
 func parseAppManifest(path string) (appManifest, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return appManifest{}, err
-	}
-	defer func() { _ = f.Close() }()
-
-	root, err := vdf.NewParser(f).Parse()
+	root, err := parseVDF(path)
 	if err != nil {
 		return appManifest{}, err
 	}

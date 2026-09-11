@@ -1,11 +1,13 @@
 package steam
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -297,5 +299,55 @@ func TestScanLibraryCleansUntrustedNames(t *testing.T) {
 	}
 	if got, want := games[0].Name, "[31mEmber Hollow"; got != want {
 		t.Errorf("game name = %q, want %q", got, want)
+	}
+}
+
+// A Go stack overflow is fatal and unrecoverable, so a file deep enough to
+// cause one has to be refused before the parser sees it.
+func TestParseVDFRefusesDeepNesting(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "libraryfolders.vdf")
+
+	// Well-formed, so only the depth check can be what refuses it: without
+	// one this parses, and a file with enough levels takes the process
+	// down with it rather than returning an error.
+	depth := maxVDFDepth + 5
+	var b strings.Builder
+	b.WriteString("\"libraryfolders\"\n")
+	for i := 0; i < depth; i++ {
+		b.WriteString("{\n\"k\"\n")
+	}
+	b.WriteString("\"v\"\n")
+	b.WriteString(strings.Repeat("}\n", depth))
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	_, err := parseLibraryFolders(path)
+	if err == nil {
+		t.Fatal("parseLibraryFolders() on a deeply nested file: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "nested deeper") {
+		t.Errorf("parseLibraryFolders() error = %v, want the depth limit", err)
+	}
+}
+
+// A brace inside a quoted value is text, not nesting: refusing on it would
+// drop a real library over a game named "{}".
+func TestCheckVDFDepthIgnoresBracesInStrings(t *testing.T) {
+	braces := strings.Repeat("{", maxVDFDepth*10)
+	data := []byte("\"libraryfolders\"\n{\n\t\"0\"\n\t{\n\t\t\"label\"\t\t\"" + braces + "\"\n\t}\n}\n")
+	if err := checkVDFDepth(data, "test.vdf"); err != nil {
+		t.Errorf("checkVDFDepth() = %v, want nil", err)
+	}
+}
+
+// The size cap is checked before the depth scan, which reads the file.
+func TestParseVDFRefusesOversizedFiles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "appmanifest_1.acf")
+	if err := os.WriteFile(path, bytes.Repeat([]byte("x"), maxVDFBytes+1), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := parseAppManifest(path); err == nil {
+		t.Fatal("parseAppManifest() on an oversized file: want error, got nil")
 	}
 }

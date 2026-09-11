@@ -45,6 +45,35 @@ const DefaultRenoDXTTL = 7 * 24 * time.Hour
 // endpoint from filling the cache directory.
 const maxCatalogBytes = 8 << 20
 
+// maxCatalogMetaBytes caps the sidecar that records when a catalog was
+// fetched. It holds one timestamp.
+const maxCatalogMetaBytes = 64 << 10
+
+// readCapped reads a cached catalog file, refusing one larger than max.
+//
+// The same cap applies on the way in from the network, and the disk copy
+// is not automatically the same file that was written there: the cache
+// directory is an ordinary folder under the user's cache root, which
+// anything on the machine can write to, and these bytes are parsed and
+// held in memory. A cache read that fails is treated like a missing one —
+// the caller refetches.
+func readCapped(path string, max int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+
+	data, err := io.ReadAll(io.LimitReader(f, max+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > max {
+		return nil, fmt.Errorf("cached catalog %s is larger than the %d byte limit", path, max)
+	}
+	return data, nil
+}
+
 // StatusError is a non-200 response from a catalog source, exposed as a
 // typed error (rather than only a formatted string) so a caller — the TUI,
 // showing a friendlier message for a GitHub rate limit — can inspect the
@@ -256,7 +285,7 @@ func (c *Client) RefreshCatalog(ctx context.Context) error {
 // failed fetch falls back to any cached copy.
 func (c *Client) loadStatic(ctx context.Context, url, name string) ([]byte, error) {
 	path := filepath.Join(c.Dir, name)
-	if data, err := os.ReadFile(path); err == nil {
+	if data, err := readCapped(path, maxCatalogBytes); err == nil {
 		return data, nil
 	}
 	return c.fetchAndStore(ctx, url, path)
@@ -285,7 +314,7 @@ func (c *Client) loadTTL(ctx context.Context, url, name string, ttl time.Duratio
 func (c *Client) fetchAndStore(ctx context.Context, url, path string) ([]byte, error) {
 	body, err := c.get(ctx, url)
 	if err != nil {
-		if stale, readErr := os.ReadFile(path); readErr == nil {
+		if stale, readErr := readCapped(path, maxCatalogBytes); readErr == nil {
 			slog.Warn("catalog fetch failed, using cached copy",
 				"url", url, "error", err)
 			return stale, nil
@@ -304,7 +333,7 @@ func (c *Client) fetchAndStore(ctx context.Context, url, path string) ([]byte, e
 // readFreshTTL returns the cached file when its recorded fetch time is
 // within the trust window.
 func (c *Client) readFreshTTL(path string, ttl time.Duration) ([]byte, bool) {
-	raw, err := os.ReadFile(path + metaSuffix)
+	raw, err := readCapped(path+metaSuffix, maxCatalogMetaBytes)
 	if err != nil {
 		return nil, false
 	}
@@ -317,7 +346,7 @@ func (c *Client) readFreshTTL(path string, ttl time.Duration) ([]byte, bool) {
 		return nil, false
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := readCapped(path, maxCatalogBytes)
 	if err != nil {
 		return nil, false
 	}
