@@ -53,6 +53,8 @@ type RenoArtifact struct {
 
 // RenoMod is one RenoDX mod: a game, or an engine, or a utility.
 type RenoMod struct {
+	// ID is upstream's mod id, slugified and de-duplicated — see
+	// ParseRenoDX for why it cannot be taken at face value.
 	ID    string
 	Title string
 	// Status is upstream's own confidence in the mod: "stable", "beta",
@@ -164,13 +166,21 @@ func ParseRenoDX(r io.Reader) ([]RenoMod, error) {
 	}
 
 	extras := renodxExtras()
+
+	// The hand-kept ids are referenced by name elsewhere (curated.go,
+	// the wizard's utility rows), so they claim their slugs first: an
+	// upstream mod that collides with one is the one that gets suffixed.
+	taken := make(map[string]bool, len(doc.Mods)+len(extras))
+	for _, e := range extras {
+		taken[e.ID] = true
+	}
+
 	out := make([]RenoMod, 0, len(doc.Mods)+len(extras))
 	for _, m := range doc.Mods {
 		if m.ID == "" {
 			continue
 		}
 		mod := RenoMod{
-			ID:          m.ID,
 			Title:       m.Title,
 			Status:      m.Status,
 			SteamAppID:  m.Deploy.SteamAppID,
@@ -192,6 +202,17 @@ func ParseRenoDX(r io.Reader) ([]RenoMod, error) {
 		if len(mod.Artifacts) == 0 {
 			continue
 		}
+		// Slugified for the same reason resolveArtifact rebuilds the URL
+		// rather than trusting the one in the file: this id arrives in a
+		// document yarm downloaded, and it becomes a directory name
+		// under the cache root (cache.EnsureRenoDX) and a manifest
+		// Origin. Slugify keeps nothing but letters and digits, so a
+		// separator or a ".." cannot survive to choose where a download
+		// lands, and uniqueSlug stops two mods from sharing one cache
+		// directory — exactly what packages and add-ons already do.
+		// Claimed after the skips above, so a mod with no installable
+		// artifact does not take a slug a later one could use.
+		mod.ID = uniqueSlug(Slugify(m.ID), taken)
 		out = append(out, mod)
 	}
 

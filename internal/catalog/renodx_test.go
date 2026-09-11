@@ -273,3 +273,86 @@ func TestUtilityExtrasAreMarkedApart(t *testing.T) {
 		t.Error("generic.Utility = true, want false: it replaces a game's shaders like a per-game mod")
 	}
 }
+
+// The id in this file chooses a directory under the cache root and is
+// written into installs.json as an Origin, so it gets the same treatment
+// as a package name rather than being trusted as written.
+func TestParseRenoDXSlugifiesModIDs(t *testing.T) {
+	const doc = `{"schema_version":"1.0.0","mods":[
+		{"id":"../../escape","title":"Escape","artifacts":[{"name":"renodx-a.addon64","arch":"x64"}]},
+		{"id":"Final_Fantasy XVI","title":"FFXVI","artifacts":[{"name":"renodx-b.addon64","arch":"x64"}]},
+		{"id":"...","title":"Punctuation","artifacts":[{"name":"renodx-c.addon64","arch":"x64"}]}
+	]}`
+
+	mods, err := ParseRenoDX(strings.NewReader(doc))
+	if err != nil {
+		t.Fatalf("ParseRenoDX: %v", err)
+	}
+
+	want := map[string]string{
+		"Escape":      "escape",
+		"FFXVI":       "final-fantasy-xvi",
+		"Punctuation": "unnamed",
+	}
+	for _, m := range mods {
+		if w, ok := want[m.Title]; ok && m.ID != w {
+			t.Errorf("%s id = %q, want %q", m.Title, m.ID, w)
+		}
+		if got := Slugify(m.ID); got != m.ID {
+			t.Errorf("id %q is not a slug (Slugify gives %q)", m.ID, got)
+		}
+	}
+}
+
+// Two mods sharing an id would share a cache directory and be
+// indistinguishable in the manifest, and the hand-kept extras are
+// referenced by name in curated.go, so they keep their own ids.
+func TestParseRenoDXKeepsModIDsUnique(t *testing.T) {
+	const doc = `{"schema_version":"1.0.0","mods":[
+		{"id":"cp2077","title":"First","artifacts":[{"name":"renodx-a.addon64","arch":"x64"}]},
+		{"id":"CP2077!","title":"Second","artifacts":[{"name":"renodx-b.addon64","arch":"x64"}]},
+		{"id":"generic","title":"Impostor","artifacts":[{"name":"renodx-c.addon64","arch":"x64"}]},
+		{"id":"nothing-installable","title":"Skipped","artifacts":[{"name":"renodx-d.pdb","arch":"x64"}]}
+	]}`
+
+	mods, err := ParseRenoDX(strings.NewReader(doc))
+	if err != nil {
+		t.Fatalf("ParseRenoDX: %v", err)
+	}
+
+	seen := map[string]bool{}
+	for _, m := range mods {
+		if seen[m.ID] {
+			t.Errorf("duplicate id %q", m.ID)
+		}
+		seen[m.ID] = true
+	}
+	if id := findMod(t, mods, "cp2077").Title; id != "First" {
+		t.Errorf("cp2077 = %q, want the first mod to keep the plain slug", id)
+	}
+	if got := findMod(t, mods, "cp2077-2").Title; got != "Second" {
+		t.Errorf("cp2077-2 = %q, want Second", got)
+	}
+	// The extra claimed "generic" before upstream was read.
+	if got := findMod(t, mods, "generic").Title; got != "RenoDX Generic" {
+		t.Errorf("generic = %q, want the hand-kept extra", got)
+	}
+	if got := findMod(t, mods, "generic-2").Title; got != "Impostor" {
+		t.Errorf("generic-2 = %q, want the upstream mod to be the one suffixed", got)
+	}
+	// A mod with no installable artifact is dropped before it claims a
+	// slug, so the name stays free.
+	if m := modByID(mods, "nothing-installable"); m != nil {
+		t.Error("a mod with no installable artifact must not appear")
+	}
+}
+
+// The extras' ids are written by hand and used as map keys elsewhere, so
+// a typo that made one unslugifiable would shift it under uniqueSlug.
+func TestRenoDXExtraIDsAreSlugs(t *testing.T) {
+	for _, m := range renodxExtras() {
+		if got := Slugify(m.ID); got != m.ID {
+			t.Errorf("extra id %q is not a slug (Slugify gives %q)", m.ID, got)
+		}
+	}
+}
