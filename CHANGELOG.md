@@ -7,104 +7,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Removed
+## [0.1.0-alpha.1] — 2026-09-11
 
-- The command line interface. yarm is a terminal application, and a second
-  way to drive it was a second surface to document, test and keep honest
-  for no one's benefit: the subcommands existed so each build step could be
-  demonstrated before the TUI could. `games ls`, `catalog ls`, `cache
-  ls|clean`, `fetch`, `install`, `uninstall`, `installs`, `paths` and
-  `version` are gone, and with them cobra as a dependency — `main.go` went
-  from 1249 lines to 277.
-
-  What is left is `-debug`, `-no-color` and `-version`, parsed with stdlib
-  `flag`, because a binary that ignores `--version` or `--help` is a
-  nuisance to package. `--verbose` is gone too: it streamed the log to
-  stderr, which corrupts the alternate screen the TUI draws in. The
-  resolved directories `yarm paths` used to print are now logged at
-  startup, so `yarm.log` still answers the question it answered.
+The first release, and an alpha. Everything below works and is covered by
+tests on Linux and Windows, but yarm has not yet been used by anyone other
+than its author — which is what the alpha is for. It records every file it
+writes, so the way out of a bad install is the uninstall screen.
 
 ### Added
 
-- The edit wizard names what an edit changes instead of counting it. The
-  Apply row said "+3 shaders", which is not something anyone can confirm;
-  it now names them, and the review page gains a **Changes** block listing
-  every addition and removal in full, led by the ReShade swap since that
-  is the change that rewrites every other file in the folder.
+- **Game discovery.** Steam libraries are found automatically on Windows and
+  Linux, wherever they live, by reading Steam's own `libraryfolders.vdf` and
+  `appmanifest_*.acf`. Anything else — GOG, Epic, a folder unzipped
+  somewhere — is added by path. Discovery is cached for the session so the
+  games list is instant after the first scan.
 
-- RenoDX mods appear in the resources browser's add-ons pane, so they can
-  be downloaded ahead, seen with their size, and deleted like anything
-  else. They share that pane rather than getting a fifth — a fifth pane
-  would push the four-pane layout's floor from 88 columns to 110 — and the
-  shortlist keeps it readable: with ~200 mods, only the ones already
-  downloaded or in use show until `a` widens it.
+- **Executable inspection.** yarm reads a game's PE headers to work out
+  whether it is 32- or 64-bit and which graphics API it imports, then
+  preselects the matching ReShade build and proxy DLL. Every choice can be
+  overridden.
 
-- **RenoDX.** The wizard has a step for it whenever the add-on build is
-  chosen: it reads RenoDX's own release index, matches the mod to the game
-  you are installing into by Steam app id, and offers that one first.
-  Roughly 200 more are behind `/` search. One mod at a time — two would
-  hook the same swap chain and replace the same tone mapping, and which
-  won would be undefined.
+- **An install wizard.** ReShade version and flavor, effect packages,
+  add-ons, RenoDX, and paths — each a step, each explaining what it picked
+  for you and why. The package step opens on a hand-kept shortlist of what
+  people actually install, with the full catalog one key away. Add-on
+  dependencies are resolved and named ("AutoHDR needs this tone-mapping
+  shader").
 
-  RenoDX needs no core, runtime or framework: a mod is a single
-  self-contained add-on file, which is why it installs through the same
-  path as any other add-on and comes back out the same way. Rows say when
-  a mod has no build for the game's architecture, when it is flagged beta,
-  and when yarm cannot install it at all; the review page says when the
-  chosen ReShade is older than the 6.8.0 RenoDX requires, or when AutoHDR
-  is selected alongside it and would fight it for the tone mapping.
+- **A review page before anything is written.** It shows what is already in
+  the folder, what will happen to it, what still needs downloading, and how
+  much. Nothing touches a game directory until that page is confirmed.
 
-  Previously RenoDX appeared only in the add-ons list as "manual install
-  only", because crosire's catalog lists it with no download URL.
+- **A three-phase install engine.** Plan, execute, record: every file yarm
+  writes is recorded in `installs.json` with its hash and origin, a file it
+  had to replace is backed up first, and a failure part-way through rolls
+  the folder back to where it started.
 
-- Two more effect packages on the wizard's shortlist: **reshade-shaders by
-  Barbatos** (XeGTAO, NeoSSAO, DLAA-T — screen-space AO, GI and reflections
-  plus modern AA, where most of the shortlist is color grading) and
-  **ZenteonFX Shaders by Zenteon**. ZenteonFX also closes an
-  inconsistency: its `Zenteon_Framework.fx` is the only thing in the
-  catalog that satisfies BFBFX's dependency, so the wizard could tick it on
-  your behalf while the pack itself was reachable only behind the show-all
-  toggle. AstrayFX was already on the shortlist.
+- **Uninstall that gives the folder back.** It removes exactly the recorded
+  files, restores what it replaced, and leaves presets, screenshots and
+  edited configs alone. An install made by hand can be adopted and then
+  managed like any other.
 
-- `X` on the resources browser clears the whole download cache, which used
-  to be `yarm cache clean` and had no equivalent in the interface. The
-  confirmation counts what will go and how much it frees, warns when some
-  of it backs a recorded install, and says plainly that installed games
-  keep their files and that custom content is not in the cache. `x` still
-  deletes the single row under the cursor.
+- **RenoDX**, which rewrites a game's shaders to improve its HDR. yarm reads
+  RenoDX's own index, matches the mod to the game by Steam app id, offers
+  that one first and the other ~200 behind search, and says when a mod has
+  no build for the game's architecture or needs a newer ReShade than the
+  one selected.
 
-- The install result screen states how much was written, not just how many
-  files — the only place an install's footprint on disk is reported.
+- **A shared download cache.** Installing the same shader pack into a fifth
+  game copies files instead of downloading them again. The resources screen
+  shows what is cached, what it costs on disk, which games use it, and
+  deletes any of it.
 
-- The wizard's ReShade step says where a preselected build came from when
-  it was not the safe default: `defaults.reshade_flavor` in the config, or
-  the install already in the folder. A config written before that default
-  changed would silently preselect the add-on build with nothing on screen
-  explaining why.
+- **Custom content.** Shaders and add-ons dropped into yarm's `custom/`
+  folder appear in the wizard beside the catalog ones.
 
-### Fixed
+- **Warnings where they matter.** Something else already in ReShade's DLL
+  slot is reported before the install starts, not after; the add-on build is
+  flagged as anti-cheat-detectable in red on every screen it appears on; and
+  an unsupported API is said out loud while you are still choosing rather
+  than left to be discovered from a game that starts without ReShade.
 
-- On Windows, a rejected archive entry left its partial file on disk. The
-  extractor removed the file while its own handle was still open, which
-  Unix permits and Windows refuses — so the truncated artifact the entry
-  budget exists to refuse survived, silently, on the platform yarm is
-  mainly for. The handle is closed before the unlink now.
+- **A single binary** for Linux and Windows, with no runtime, no installer
+  and nothing running in the background. Three flags: `-debug`, `-no-color`,
+  `-version`.
 
-- The status bar is clipped to the window instead of wrapping. On screens
-  with many key bindings it ran past the terminal width, and the extra
-  rows made the frame taller than the window — which scrolled the header
-  off the top. A screen with more bindings than fit now loses the tail of
-  the list rather than the layout; `?` still lists all of them.
+### Known limitations
 
-### Changed
+- **Vulkan and D3D8 are not supported.** yarm says so in the wizard rather
+  than installing something that cannot work.
+- **Steam is the only library detected automatically.** Everything else is
+  added by path; providers for GOG, Epic, Heroic and Lutris are planned.
+- **Windows is the less-exercised platform.** The build and the full test
+  suite run on it in CI, but development happens on Linux.
+- **Nothing yarm downloads is signed or checksummed**, because nothing
+  upstream publishes signatures. Downloads are https-only on every redirect
+  hop, archive contents are restricted to the file types a shader pack is
+  made of, and every path is contained — but the trust is in the upstream
+  repositories, and that is worth knowing before installing into a game.
+- **No self-update.** Check the releases page.
 
-- Custom shaders and add-ons now live in the data directory
-  (`~/.local/share/yarm/custom`, `%LOCALAPPDATA%\yarm\custom`) instead of
-  under the cache. Everything else in the cache can be deleted and
-  re-downloaded; custom content is placed by hand and cannot be, and
-  `~/.cache` is a directory the XDG spec, cleanup tools and users all treat
-  as disposable. An existing `cache/custom` is moved on the next launch.
-
-- Releases build for Linux and Windows only. ReShade injects into Windows
-  games, which macOS does not run; the darwin binary built fine but could
-  only ever disappoint whoever downloaded it.
+[0.1.0-alpha.1]: https://github.com/secato/yarm/releases/tag/v0.1.0-alpha.1

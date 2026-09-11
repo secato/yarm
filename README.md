@@ -30,8 +30,12 @@ Proton.
 
 </div>
 
-> **Status: pre-release.** Everything described here works, but there is no
-> tagged release yet.
+> **Status: alpha.** Everything described here works and is covered by tests
+> on both platforms, but this is the first release and nobody but its author
+> has used it yet. It records every file it writes and the uninstall screen
+> puts the folder back, so a bad install is reversible — still, try it on a
+> game you are not in the middle of. Windows is the less-exercised platform.
+> [Report what breaks.](https://github.com/secato/yarm/issues)
 
 ## What it does for you
 
@@ -93,8 +97,10 @@ from a game that starts without ReShade.
 | Platform | How |
 | --- | --- |
 | **Windows / Linux** | Download the zip or tar.gz from [Releases](https://github.com/secato/yarm/releases) and run `yarm`. There is nothing to install. |
-| **Arch Linux** | `yay -S yarm-bin` |
 | **From source** | `go install github.com/secato/yarm/cmd/yarm@latest` |
+
+An Arch package (`yay -S yarm-bin`) follows the first stable release; the
+alpha ships as archives only.
 
 ### Requirements
 

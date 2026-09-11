@@ -75,6 +75,11 @@ release:
   github:
     owner: secato
     name: yarm
+  # A tag carrying a prerelease part (`v0.1.0-alpha.1`) publishes as a
+  # GitHub pre-release. This is a separate switch from the AUR's
+  # `skip_upload: auto` below, and it defaults to off — without it an alpha
+  # would be published as the latest stable release.
+  prerelease: auto
   # The tag's own release notes come from the changelog above; this points
   # at the file that carries the prose.
   footer: |
