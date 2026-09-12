@@ -14,13 +14,16 @@ import (
 // colors, because Bubble Tea v2 reports the real background color and
 // resolving up front keeps rendering pure.
 type Styles struct {
-	Title     lipgloss.Style
-	Subtitle  lipgloss.Style
-	Faint     lipgloss.Style
-	Accent    lipgloss.Style
-	Good      lipgloss.Style
-	Warn      lipgloss.Style
-	Bad       lipgloss.Style
+	Title    lipgloss.Style
+	Subtitle lipgloss.Style
+	Faint    lipgloss.Style
+	Accent   lipgloss.Style
+	Good     lipgloss.Style
+	Warn     lipgloss.Style
+	Bad      lipgloss.Style
+	// Info is the "in use" blue: a fact about state, distinct from Good's
+	// "downloaded" green.
+	Info      lipgloss.Style
 	Panel     lipgloss.Style
 	StatusBar lipgloss.Style
 	Selected  lipgloss.Style
@@ -60,6 +63,7 @@ func NewStyles(isDark bool) Styles {
 		good    = c(lipgloss.Color("#15803d"), lipgloss.Color("#4ade80"))
 		warn    = c(lipgloss.Color("#b45309"), lipgloss.Color("#fbbf24"))
 		bad     = c(lipgloss.Color("#b91c1c"), lipgloss.Color("#f87171"))
+		info    = c(lipgloss.Color("#1d4ed8"), lipgloss.Color("#60a5fa"))
 		border  = c(lipgloss.Color("#d4d4d8"), lipgloss.Color("#3f3f46"))
 		selBg   = c(lipgloss.Color("#ede9fe"), lipgloss.Color("#3b2f5e"))
 		panelBg = c(lipgloss.Color("#fafafa"), lipgloss.Color("#1c1c20"))
@@ -75,6 +79,7 @@ func NewStyles(isDark bool) Styles {
 		Good:     lipgloss.NewStyle().Foreground(good),
 		Warn:     lipgloss.NewStyle().Foreground(warn),
 		Bad:      lipgloss.NewStyle().Foreground(bad),
+		Info:     lipgloss.NewStyle().Foreground(info),
 		Panel: lipgloss.NewStyle().
 			Background(panelBg).
 			Border(lipgloss.RoundedBorder()).

@@ -93,7 +93,10 @@ type resourcesLoadedMsg struct {
 // resourceActionMsg reports a download, delete or refresh failure — a
 // success re-loads everything instead (a resourcesLoadedMsg), since it is
 // simplest to just recompute what changed rather than patch one row.
-type resourceActionMsg struct{ err error }
+type resourceActionMsg struct {
+	err    error
+	status string
+}
 
 // loadResources gathers everything the screen shows, off the UI
 // goroutine: the catalog/custom-content listing, the cache's own index,
@@ -435,10 +438,13 @@ var (
 	resourceDownloadBinding = key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "download"))
 	resourceDeleteBinding   = key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "delete"))
 	resourceCleanBinding    = key.NewBinding(key.WithKeys("X"), key.WithHelp("X", "clear cache"))
-	resourceRefreshBinding  = key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh package"))
-	resourcePaneLeft        = key.NewBinding(key.WithKeys("left"), key.WithHelp("←", "prev pane"))
-	resourcePaneRight       = key.NewBinding(key.WithKeys("right"), key.WithHelp("→", "next pane"))
-	resourceShowAllBinding  = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "show all"))
+	// resourcePruneBinding clears everything no recorded install uses —
+	// the reclaim-disk action for people whose installs are what matter.
+	resourcePruneBinding   = key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "clear except in use"))
+	resourceRefreshBinding = key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh package"))
+	resourcePaneLeft       = key.NewBinding(key.WithKeys("left"), key.WithHelp("←", "prev pane"))
+	resourcePaneRight      = key.NewBinding(key.WithKeys("right"), key.WithHelp("→", "next pane"))
+	resourceShowAllBinding = key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "show all"))
 )
 
 // KeyBindings implements Screen.
@@ -446,7 +452,7 @@ func (s *ResourcesScreen) KeyBindings() []key.Binding {
 	return []key.Binding{
 		s.keys.Up, s.keys.Down, resourcePaneLeft, resourcePaneRight,
 		resourceDownloadBinding, resourceDeleteBinding, resourceCleanBinding,
-		resourceRefreshBinding, resourceShowAllBinding, s.keys.Back,
+		resourcePruneBinding, resourceRefreshBinding, resourceShowAllBinding, s.keys.Back,
 	}
 }
 
@@ -474,7 +480,13 @@ func (s *ResourcesScreen) Update(msg tea.Msg, env Env) (Screen, tea.Cmd) {
 	case resourceActionMsg:
 		s.downloading = false
 		s.refreshing = false
-		return s, ReportError(msg.err)
+		if msg.err != nil {
+			return s, ReportError(msg.err)
+		}
+		if msg.status != "" {
+			return s, SetStatus(msg.status)
+		}
+		return s, nil
 
 	case tea.KeyPressMsg:
 		return s.handleKey(msg, env)
@@ -498,6 +510,8 @@ func (s *ResourcesScreen) handleKey(msg tea.KeyPressMsg, env Env) (Screen, tea.C
 		return s.confirmDelete()
 	case key.Matches(msg, resourceCleanBinding):
 		return s.confirmClean()
+	case key.Matches(msg, resourcePruneBinding):
+		return s.confirmPrune()
 	case key.Matches(msg, resourceRefreshBinding):
 		return s.startRefresh()
 	case key.Matches(msg, resourceShowAllBinding):
@@ -731,6 +745,86 @@ func (s *ResourcesScreen) cachedTotals() (items int, size int64, inUse int) {
 	return items, size, inUse
 }
 
+// confirmPrune clears everything the recorded installs do not use —
+// the same reclaim-the-disk action as confirmClean, minus the entries
+// installs would need to re-verify on their next edit. Reads the
+// registry itself (the screen already carries StateDir) rather than
+// asking the cache to know about installs.
+func (s *ResourcesScreen) confirmPrune() (Screen, tea.Cmd) {
+	deps := s.deps
+	reg, err := state.Load(deps.StateDir)
+	if err != nil {
+		return s, ReportError(err)
+	}
+
+	// In-use ids, as cache-entry prefixes: package/add-on/renodx entries
+	// carry date-and-arch suffixes, so exact ids never match.
+	prefixes := inUsePrefixes(reg)
+	keep := func(id string) bool {
+		for _, p := range prefixes {
+			if strings.HasPrefix(id, p) {
+				return true
+			}
+		}
+		return false
+	}
+
+	return s, Confirm(
+		"Clear the cache except what is in use?",
+		"Keeps every download a recorded install uses — edits resolve from them without re-downloading — "+
+			"and frees the rest. Custom content lives outside the cache and is untouched.",
+		func() tea.Msg {
+			// The index is read inside the action, so the confirm dialog
+			// decides the policy while the sweep sees current truth.
+			idx, err := deps.Cache.List(cache.SortByName, false)
+			if err != nil {
+				return resourceActionMsg{err: err}
+			}
+			var kept, freed int64
+			for _, e := range idx {
+				if keep(e.ID) {
+					kept++
+					freed -= e.Size
+				} else {
+					freed += e.Size
+				}
+			}
+			if kept == int64(len(idx)) {
+				return resourceActionMsg{status: "nothing to prune — everything cached is in use"}
+			}
+			if _, err := deps.Cache.CleanExcept(keep); err != nil {
+				return resourceActionMsg{err: err}
+			}
+			return tea.Batch(func() tea.Msg { return loadResources(deps) }, SetStatus(
+				fmt.Sprintf("pruned %s; kept %d item(s) in use", humanSize(freed), kept)))
+		})
+}
+
+// inUsePrefixes lists the cache-entry id prefixes every recorded install
+// depends on: the exact reshade and d3dcompiler ids (no suffixes) plus
+// one prefix per package, add-on and RenoDX mod id.
+func inUsePrefixes(reg state.Registry) []string {
+	var out []string
+	for _, gi := range reg.Installs() {
+		in := gi.Install
+		out = append(out,
+			"reshade:"+in.ReShade.Version+":"+in.ReShade.Flavor,
+			"d3dcompiler:"+in.ReShade.Arch,
+			"renodx:"+in.RenoDX,
+		)
+		for _, id := range in.Packages {
+			out = append(out, "package:"+id+":")
+		}
+		for _, id := range in.Addons {
+			// Utility RenoDX mods cache under the renodx bucket; catalog
+			// add-ons under the addon bucket. Keeping both prefixes for
+			// an id only ever over-retains, never deletes in error.
+			out = append(out, "addon:"+id+":", "renodx:"+id+":")
+		}
+	}
+	return out
+}
+
 // startRefresh re-fetches a cached package, picking up any upstream
 // change even within the same day — only packages carry enough of their
 // own metadata (package.json) to do this without the live catalog.
@@ -774,12 +868,17 @@ func (s *ResourcesScreen) View(env Env) string {
 		header += "   refreshing…"
 	}
 
+	// What the row colors mean, spelled once. Custom keeps its own
+	// accent and star; selected rows keep the selection style over all
+	// of it.
+	const legend = "green downloaded · blue in use · dim not downloaded · ★ custom"
+
 	// The focused row's own description, which the panes are far too
 	// narrow to carry: at four columns a pane has about twenty characters,
 	// which is a name and nothing else.
 	detail := s.renderDetail(env)
 
-	height := env.Height - 5 - countLines(detail)
+	height := env.Height - 6 - countLines(detail)
 	if height < 5 {
 		height = 5
 	}
@@ -793,7 +892,8 @@ func (s *ResourcesScreen) View(env Env) string {
 	const minPaneWidth = 20
 	const minGutter = 2
 	if env.Width < int(paneCount)*(minPaneWidth+minGutter) {
-		return env.Styles.Faint.Render(header) + "\n\n" +
+		return env.Styles.Faint.Render(header) + "\n" +
+			env.Styles.Faint.Render(clipTail(legend, env.Width)) + "\n\n" +
 			s.renderTabStrip(env) + "\n" +
 			s.renderPane(s.focus, env.Width-2, height, env) + "\n" + detail
 	}
@@ -804,7 +904,8 @@ func (s *ResourcesScreen) View(env Env) string {
 		cols = append(cols, s.renderPane(p, paneWidth, height, env))
 	}
 
-	return env.Styles.Faint.Render(header) + "\n\n" +
+	return env.Styles.Faint.Render(header) + "\n" +
+		env.Styles.Faint.Render(clipTail(legend, env.Width)) + "\n\n" +
 		lipgloss.JoinHorizontal(lipgloss.Top, cols...) + "\n" + detail
 }
 
@@ -950,6 +1051,8 @@ func (s *ResourcesScreen) renderRow(r resourceRow, selected bool, width int, env
 		return env.Styles.Selected.Render(line)
 	case r.Custom:
 		return env.Styles.Accent.Render(line)
+	case r.InUse:
+		return env.Styles.Info.Render(line)
 	case r.Cached:
 		return env.Styles.Good.Render(line)
 	default:

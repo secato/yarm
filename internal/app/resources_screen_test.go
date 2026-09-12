@@ -412,6 +412,55 @@ func TestRenderRowOmitsRedundantNotDownloadedTag(t *testing.T) {
 	}
 }
 
+// The row colors carry the state the caption names: green for cached,
+// blue for in use (overriding green — an install can reference content
+// whose cache entry is gone), dim for not downloaded, accent for custom.
+func TestRenderRowColorsFollowTheLegend(t *testing.T) {
+	env := Env{Styles: NewStyles(true), Width: 100, Height: 30}
+	s := &ResourcesScreen{}
+
+	open := func(s lipgloss.Style) string {
+		r := s.Render("x")
+		return r[:strings.Index(r, "x")]
+	}
+	cachedLine := s.renderRow(resourceRow{Name: "P", Cached: true}, false, 40, env)
+	if !strings.Contains(cachedLine, open(env.Styles.Good)) {
+		t.Errorf("a cached row should render green:\n%s", cachedLine)
+	}
+	inUse := s.renderRow(resourceRow{Name: "P", Cached: true, InUse: true}, false, 40, env)
+	if !strings.Contains(inUse, open(env.Styles.Info)) {
+		t.Errorf("an in-use row should render blue:\n%s", inUse)
+	}
+	// In use wins over cached, and applies even without a cache entry —
+	// the install's files are the evidence that matters.
+	inUseOnly := s.renderRow(resourceRow{Name: "P", InUse: true}, false, 40, env)
+	if !strings.Contains(inUseOnly, open(env.Styles.Info)) {
+		t.Errorf("an in-use row without a cache entry should still render blue:\n%s", inUseOnly)
+	}
+	plain := s.renderRow(resourceRow{Name: "P"}, false, 40, env)
+	if !strings.Contains(plain, open(env.Styles.Faint)) {
+		t.Errorf("a not-downloaded row should render dim:\n%s", plain)
+	}
+}
+
+// The caption names what the colors mean, once, above the panes.
+func TestResourcesScreenShowsTheLegend(t *testing.T) {
+	deps, _ := resourcesTestDeps(t)
+	s := NewResourcesScreen(deps)
+	drainCmd(s.Init())
+	s.loading = false // the legend renders regardless of load state
+	if s.loadErr != "" && s.total == 0 {
+		s.loadErr = ""
+	}
+
+	body := s.View(Env{Styles: NewStyles(true), Width: 120, Height: 30})
+	for _, want := range []string{"green downloaded", "blue in use", "not downloaded"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the legend should say %q:\n%s", want, body)
+		}
+	}
+}
+
 func TestSortCachedFirstPreservesOrderWithinGroups(t *testing.T) {
 	rows := []resourceRow{
 		{ID: "a", Cached: false},

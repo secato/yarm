@@ -7,6 +7,7 @@ import (
 
 	"github.com/secato/yarm/internal/catalog"
 	"github.com/secato/yarm/internal/game"
+	"github.com/secato/yarm/internal/install"
 )
 
 // WizardData is everything the install wizard needs from the catalog and
@@ -202,15 +203,18 @@ type CacheStatus interface {
 }
 
 // describeMissing names what an install still needs to download, for the
-// review step's warning list. isRenoDXAddon reports whether an add-on id
-// is actually one of RenoDX's utility mods, which are cached under a
-// different bucket than a catalog add-on and so need HasRenoDX rather
-// than HasAddon.
-func describeMissing(cache CacheStatus, version string, addon bool, packages, addons []string,
+// review step's warning list. needed is the demand-driven set from
+// NeededArtifacts: an edit whose installed files are unchanged resolves
+// from the manifest, so listing those groups as "to download" would be
+// false even when the cache is empty. isRenoDXAddon reports whether an
+// add-on id is actually one of RenoDX's utility mods, which are cached
+// under a different bucket than a catalog add-on and so need HasRenoDX
+// rather than HasAddon.
+func describeMissing(cache CacheStatus, needed install.Needed, version string, addon bool, packages, addons []string,
 	isRenoDXAddon func(string) bool, renodx string, arch game.Arch, needsD3D bool,
 ) []string {
 	var missing []string
-	if cache == nil || !cache.HasReShade(version, addon) {
+	if needed.ReShade && (cache == nil || !cache.HasReShade(version, addon)) {
 		flavor := "normal"
 		if addon {
 			flavor = "addon"
@@ -218,11 +222,14 @@ func describeMissing(cache CacheStatus, version string, addon bool, packages, ad
 		missing = append(missing, fmt.Sprintf("ReShade %s (%s)", version, flavor))
 	}
 	for _, id := range packages {
-		if cache == nil || !cache.HasPackage(id) {
+		if needed.Packages[id] && (cache == nil || !cache.HasPackage(id)) {
 			missing = append(missing, "package "+id)
 		}
 	}
 	for _, id := range addons {
+		if !needed.Addons[id] {
+			continue
+		}
 		cached := cache != nil
 		if cached {
 			if isRenoDXAddon(id) {
@@ -237,10 +244,10 @@ func describeMissing(cache CacheStatus, version string, addon bool, packages, ad
 	}
 	// Named with its size: a RenoDX mod is a couple of megabytes, which
 	// is worth saying when the rest of the list is shader packs.
-	if renodx != "" && (cache == nil || !cache.HasRenoDX(renodx)) {
+	if needed.RenoDX && renodx != "" && (cache == nil || !cache.HasRenoDX(renodx)) {
 		missing = append(missing, "RenoDX "+renodx+" (~2.5 MB)")
 	}
-	if needsD3D && (cache == nil || !cache.HasD3DCompiler(arch)) {
+	if needed.D3DCompiler && (cache == nil || !cache.HasD3DCompiler(arch)) {
 		missing = append(missing, "d3dcompiler_47.dll (~40 MB, once)")
 	}
 	return missing

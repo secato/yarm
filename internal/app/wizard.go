@@ -23,6 +23,14 @@ import (
 	"github.com/secato/yarm/internal/state"
 )
 
+// neededCache is one generation's demand-driven needed set, paired with
+// the version it was computed against.
+type neededCache struct {
+	gen     uint64
+	version string
+	val     install.Needed
+}
+
 // wizardStep is one page of the install wizard. Each page asks exactly one
 // question, and every page after the first carries a summary line of what
 // the earlier ones already answered — the reason a step sequence is
@@ -248,6 +256,8 @@ type WizardScreen struct {
 		gen uint64
 		val []string
 	}
+	// neededCache memoizes the demand-driven needed set per generation.
+	neededCache *neededCache
 }
 
 // NewWizardScreen returns a wizard targeting exe — every step but Paths
@@ -1328,12 +1338,33 @@ func (s *WizardScreen) missing() []string {
 	if !ok {
 		return nil
 	}
-	val := describeMissing(s.deps.CacheStatus, version.Version, s.flavor.Addon(),
+	needed := s.neededSet(version.Version)
+	val := describeMissing(s.deps.CacheStatus, *needed, version.Version, s.flavor.Addon(),
 		s.packages.selectedIDs(), addonsForDownload(s.flavor, s.addons), s.data.isRenoDXUtility,
 		renodxForDownload(s.flavor, s.renodxChoice),
 		s.exe.Arch, artifacts.NeedsD3DCompiler(s.targetOS))
 	s.missingCache.gen, s.missingCache.val = s.missingGen, val
 	return val
+}
+
+// neededSet works out which artifact groups this wizard's answers would
+// actually write through — an edit whose installed files are unchanged
+// resolves from the manifest, so those groups drop out of the download
+// list. Fresh installs need everything. Hashing the game folder is the
+// cost; the generation cache (shared with missing()) keeps it to one pass
+// per answer change.
+func (s *WizardScreen) neededSet(version string) *install.Needed {
+	if s.neededCache != nil && s.neededCache.gen == s.missingGen && s.neededCache.version == version {
+		return &s.neededCache.val
+	}
+	req, ok := s.buildRequest()
+	if !ok {
+		return &install.Needed{Packages: map[string]bool{}, Addons: map[string]bool{}}
+	}
+	req.Version = version
+	val := install.NeededArtifacts(req, s.existing)
+	s.neededCache = &neededCache{gen: s.missingGen, version: version, val: val}
+	return &val
 }
 
 // View implements Screen.

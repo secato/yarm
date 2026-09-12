@@ -3,9 +3,9 @@ package app
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"slices"
 
-	"github.com/secato/yarm/internal/artifacts"
 	"github.com/secato/yarm/internal/cache"
 	"github.com/secato/yarm/internal/catalog"
 	"github.com/secato/yarm/internal/fetch"
@@ -100,16 +100,19 @@ type RealInstaller struct {
 
 // Install implements Installer.
 func (r *RealInstaller) Install(ctx context.Context, req install.Request, send func(ProgressUpdate)) (install.Result, error) {
-	art, err := r.resolve(ctx, &req, send)
+	reg, err := state.Load(r.StateDir)
+	if err != nil {
+		return install.Result{}, err
+	}
+	prev, _ := reg.FindInstall(req.Game.ID, filepath.ToSlash(req.Exe.Path))
+	needed := install.NeededArtifacts(req, &prev)
+
+	art, err := r.resolve(ctx, &req, send, needed)
 	if err != nil {
 		return install.Result{}, err
 	}
 
 	send(ProgressUpdate{Label: "Planning install"})
-	reg, err := state.Load(r.StateDir)
-	if err != nil {
-		return install.Result{}, err
-	}
 	plan, err := install.Planner{Registry: reg}.Plan(req, art)
 	if err != nil {
 		return install.Result{}, err
@@ -125,11 +128,17 @@ func (r *RealInstaller) Install(ctx context.Context, req install.Request, send f
 	return result, nil
 }
 
-// resolve downloads and locates every artifact req names, mirroring
-// cmd/yarm's resolveArtifacts. req.Packages/Addons are already canonical
-// catalog ids here (selected straight from a list the wizard showed), so
-// unlike the CLI path there is no alias resolution to do.
-func (r *RealInstaller) resolve(ctx context.Context, req *install.Request, send func(ProgressUpdate)) (install.Artifacts, error) {
+// resolve downloads and locates the artifact groups needed says this
+// request can actually write through, mirroring cmd/yarm's
+// resolveArtifacts. req.Packages/Addons are already canonical catalog ids
+// here (selected straight from a list the wizard showed), so unlike the
+// CLI path there is no alias resolution to do.
+//
+// Groups the needed set excludes are resolved from the previous
+// manifest by the planner itself: their installed files are unchanged,
+// so no source is read and nothing is downloaded — an edit that only
+// removes an add-on fetches nothing at all, and runs offline.
+func (r *RealInstaller) resolve(ctx context.Context, req *install.Request, send func(ProgressUpdate), needed install.Needed) (install.Artifacts, error) {
 	art := install.Artifacts{
 		Packages: map[string]string{},
 		Addons:   map[string]string{},
@@ -142,19 +151,21 @@ func (r *RealInstaller) resolve(ctx context.Context, req *install.Request, send 
 		}
 	}
 
-	flavorWord := "normal"
-	if req.Flavor.Addon() {
-		flavorWord = "addon"
+	if needed.ReShade {
+		flavorWord := "normal"
+		if req.Flavor.Addon() {
+			flavorWord = "addon"
+		}
+		send(ProgressUpdate{Label: fmt.Sprintf("Downloading ReShade %s (%s)", req.Version, flavorWord)})
+		reshadeDir, err := r.Cache.EnsureReShade(ctx, req.Version, req.Flavor.Addon(),
+			progress(fmt.Sprintf("ReShade %s", req.Version)))
+		if err != nil {
+			return install.Artifacts{}, fmt.Errorf("reshade %s: %w", req.Version, err)
+		}
+		art.ReShadeDir = reshadeDir
 	}
-	send(ProgressUpdate{Label: fmt.Sprintf("Downloading ReShade %s (%s)", req.Version, flavorWord)})
-	reshadeDir, err := r.Cache.EnsureReShade(ctx, req.Version, req.Flavor.Addon(),
-		progress(fmt.Sprintf("ReShade %s", req.Version)))
-	if err != nil {
-		return install.Artifacts{}, fmt.Errorf("reshade %s: %w", req.Version, err)
-	}
-	art.ReShadeDir = reshadeDir
 
-	if artifacts.NeedsD3DCompiler(req.TargetOS) {
+	if needed.D3DCompiler {
 		send(ProgressUpdate{Label: "Downloading d3dcompiler_47.dll"})
 		dll, err := r.Cache.EnsureD3DCompiler(ctx, req.Exe.Arch, progress("d3dcompiler_47.dll"))
 		if err != nil {
@@ -164,15 +175,14 @@ func (r *RealInstaller) resolve(ctx context.Context, req *install.Request, send 
 	}
 
 	if len(req.Packages) > 0 {
-		packages, err := r.packages(ctx)
+		byID, err := r.packageLookup(ctx, needed.Packages)
 		if err != nil {
 			return install.Artifacts{}, err
 		}
-		byID := make(map[string]catalog.Package, len(packages))
-		for _, p := range packages {
-			byID[p.ID] = p
-		}
 		for _, id := range req.Packages {
+			if !needed.Packages[id] {
+				continue
+			}
 			p, ok := byID[id]
 			if !ok {
 				return install.Artifacts{}, fmt.Errorf("unknown package %q", id)
@@ -187,21 +197,27 @@ func (r *RealInstaller) resolve(ctx context.Context, req *install.Request, send 
 	}
 
 	if len(req.Addons) > 0 {
-		addons, err := r.addons(ctx)
-		if err != nil {
-			return install.Artifacts{}, err
-		}
-		byID := make(map[string]catalog.Addon, len(addons))
-		for _, a := range addons {
-			byID[a.ID] = a
+		var addonsByID map[string]catalog.Addon
+		var renoMods []catalog.RenoMod
+		if slices.ContainsFunc(req.Addons, func(id string) bool { return needed.Addons[id] }) {
+			addons, err := r.addons(ctx)
+			if err != nil {
+				return install.Artifacts{}, err
+			}
+			addonsByID = make(map[string]catalog.Addon, len(addons))
+			for _, a := range addons {
+				addonsByID[a.ID] = a
+			}
 		}
 		// RenoDX's utility mods (FPS Limiter, DLSS Fix) are not in
 		// crosire's catalog at all — they are RenoDX's own, fetched the
 		// same way req.RenoDX is below — so the RenoDX list is only
 		// loaded lazily, the first time an id misses byID.
-		var renoMods []catalog.RenoMod
 		for _, id := range req.Addons {
-			if a, ok := byID[id]; ok {
+			if !needed.Addons[id] {
+				continue
+			}
+			if a, ok := addonsByID[id]; ok {
 				if !a.Installable() {
 					return install.Artifacts{}, fmt.Errorf("add-on %q is manual only; see %s", id, a.RepositoryURL)
 				}
@@ -215,6 +231,7 @@ func (r *RealInstaller) resolve(ctx context.Context, req *install.Request, send 
 			}
 
 			if renoMods == nil {
+				var err error
 				renoMods, err = r.renoDX(ctx)
 				if err != nil {
 					return install.Artifacts{}, err
@@ -237,7 +254,7 @@ func (r *RealInstaller) resolve(ctx context.Context, req *install.Request, send 
 		}
 	}
 
-	if req.RenoDX != "" {
+	if needed.RenoDX {
 		mods, err := r.renoDX(ctx)
 		if err != nil {
 			return install.Artifacts{}, err
@@ -299,6 +316,31 @@ func (r *RealInstaller) packages(ctx context.Context) ([]catalog.Package, error)
 		return data.Packages, nil
 	}
 	return r.Catalog.Packages(ctx)
+}
+
+// packageLookup loads the catalog only when at least one needed package
+// actually has to be resolved; a lookup that skips the network entirely
+// is what makes an unchanged edit work offline.
+func (r *RealInstaller) packageLookup(ctx context.Context, needed map[string]bool) (map[string]catalog.Package, error) {
+	any := false
+	for _, want := range needed {
+		if want {
+			any = true
+			break
+		}
+	}
+	if !any {
+		return map[string]catalog.Package{}, nil
+	}
+	packages, err := r.packages(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]catalog.Package, len(packages))
+	for _, p := range packages {
+		byID[p.ID] = p
+	}
+	return byID, nil
 }
 
 func (r *RealInstaller) addons(ctx context.Context) ([]catalog.Addon, error) {

@@ -492,6 +492,42 @@ func TestCleanSkipsOutsideRoot(t *testing.T) {
 	}
 }
 
+// CleanExcept removes everything the predicate rejects, keeps everything
+// it accepts, and still sweeps partial downloads.
+func TestCleanExcept(t *testing.T) {
+	c, _, _ := newCache(t, func(w http.ResponseWriter, r *http.Request) {})
+
+	for _, id := range []string{"package:keep:20260905-aaa", "package:drop:20260905-bbb", "reshade:6.8.0:normal"} {
+		rel := filepath.Join("test", id)
+		if err := os.MkdirAll(c.abs(rel), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(c.abs(rel), "f"), []byte("x"), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		if err := c.record(Entry{ID: id, Kind: KindPackage, Path: rel}); err != nil {
+			t.Fatalf("record: %v", err)
+		}
+	}
+
+	removed, err := c.CleanExcept(func(id string) bool {
+		return strings.HasPrefix(id, "package:keep:") || id == "reshade:6.8.0:normal"
+	})
+	if err != nil {
+		t.Fatalf("CleanExcept() error = %v", err)
+	}
+	if removed != 1 {
+		t.Errorf("removed %d entries, want 1", removed)
+	}
+	if err := c.Delete("package:keep:20260905-aaa"); err != nil {
+		t.Error("the kept entry should still be deletable, so still indexed")
+	}
+	// And a full Clean after it still works.
+	if n, err := c.Clean(); err != nil || n != 1 {
+		t.Errorf("Clean() after prune = %d, %v; want 1, nil", n, err)
+	}
+}
+
 // CleanPartials sweeps interrupted downloads but nothing else: the .part
 // suffix is fetch-exclusive, so a completed download never matches it.
 func TestCleanPartials(t *testing.T) {

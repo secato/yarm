@@ -404,6 +404,44 @@ func (c *Cache) Delete(id string) error {
 	return saveIndex(c.Root, idx)
 }
 
+// CleanExcept removes every downloadable entry except the ids keep
+// accepts, leaving custom content alone. keep is a predicate over entry
+// ids (callers match prefixes, since package/add-on/renodx ids carry
+// date-and-arch suffixes). Downloads-dir partials go either way.
+func (c *Cache) CleanExcept(keep func(id string) bool) (removed int, err error) {
+	idx, err := loadIndex(c.Root)
+	if err != nil {
+		return 0, err
+	}
+	var firstErr error
+	for id, e := range idx.Entries {
+		if keep != nil && keep(id) {
+			continue
+		}
+		target := c.abs(e.Path)
+		if !withinRoot(c.Root, target) {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("refusing to delete %q: outside the cache root", e.Path)
+			}
+			continue
+		}
+		if rmErr := os.RemoveAll(target); rmErr != nil {
+			if firstErr == nil {
+				firstErr = rmErr
+			}
+			continue
+		}
+		delete(idx.Entries, id)
+		removed++
+	}
+	// Partial downloads are not indexed, so clear them explicitly.
+	_ = os.RemoveAll(c.abs(DirDownloads))
+	if saveErr := saveIndex(c.Root, idx); saveErr != nil && firstErr == nil {
+		firstErr = saveErr
+	}
+	return removed, firstErr
+}
+
 // Clean removes every downloadable entry, leaving custom content alone.
 // The index is read and written once for the whole sweep, not once per
 // entry. Entries that fail keep their rows; the first error is reported

@@ -839,7 +839,11 @@ func TestDescribeMissing(t *testing.T) {
 		addons:   map[string]bool{},
 	}
 
-	got := describeMissing(cache, "6.8.0", true,
+	got := describeMissing(cache, install.Needed{
+		ReShade: true, D3DCompiler: true,
+		Packages: map[string]bool{"standard-effects": true, "sweetfx-by-ceejay-dk": true},
+		Addons:   map[string]bool{"swap-chain-override-by-crosire": true},
+	}, "6.8.0", true,
 		[]string{"standard-effects", "sweetfx-by-ceejay-dk"},
 		[]string{"swap-chain-override-by-crosire"},
 		func(string) bool { return false },
@@ -866,7 +870,10 @@ func TestDescribeMissingNothingMissing(t *testing.T) {
 		reshade:     map[string]bool{"6.8.0:normal": true},
 		d3dcompiler: true,
 	}
-	got := describeMissing(cache, "6.8.0", false, nil, nil, func(string) bool { return false }, "", game.ArchX64, true)
+	got := describeMissing(cache, install.Needed{
+		ReShade: true, D3DCompiler: true,
+		Packages: map[string]bool{}, Addons: map[string]bool{},
+	}, "6.8.0", false, nil, nil, func(string) bool { return false }, "", game.ArchX64, true)
 	if len(got) != 0 {
 		t.Errorf("describeMissing() = %v, want none (everything already cached)", got)
 	}
@@ -875,7 +882,10 @@ func TestDescribeMissingNothingMissing(t *testing.T) {
 // A nil CacheStatus (no cache wired up at all) must report everything as
 // missing rather than panicking or, worse, claiming nothing is needed.
 func TestDescribeMissingNilCache(t *testing.T) {
-	got := describeMissing(nil, "6.8.0", true, []string{"standard-effects"}, nil,
+	got := describeMissing(nil, install.Needed{
+		ReShade: true, D3DCompiler: true,
+		Packages: map[string]bool{"standard-effects": true}, Addons: map[string]bool{},
+	}, "6.8.0", true, []string{"standard-effects"}, nil,
 		func(string) bool { return false }, "", game.ArchX64, true)
 	want := []string{"ReShade 6.8.0 (addon)", "package standard-effects", "d3dcompiler_47.dll (~40 MB, once)"}
 	if len(got) != len(want) {

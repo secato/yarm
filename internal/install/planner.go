@@ -61,13 +61,13 @@ func (p Planner) Plan(req Request, art Artifacts) (Plan, error) {
 	plan := Plan{Request: req}
 	exeDir := req.ExeDir()
 
-	files, err := p.collect(req, art, exeDir)
+	prev, hasPrev := p.Registry.FindInstall(req.Game.ID, filepath.ToSlash(req.Exe.Path))
+	plan.Upgrade = hasPrev
+
+	files, err := p.collect(req, art, exeDir, prev, hasPrev)
 	if err != nil {
 		return Plan{}, err
 	}
-
-	prev, hasPrev := p.Registry.FindInstall(req.Game.ID, filepath.ToSlash(req.Exe.Path))
-	plan.Upgrade = hasPrev
 
 	// One lookup table for the whole plan: OwnedFile scans the manifest
 	// linearly, and classifying every file against it would be quadratic
@@ -131,48 +131,69 @@ func (p Planner) Plan(req Request, art Artifacts) (Plan, error) {
 
 // collect builds the full list of files the install would place, before
 // any conflict analysis.
-func (p Planner) collect(req Request, art Artifacts, exeDir string) ([]PlannedFile, error) {
+//
+// An artifact group that was not resolved (the pipeline skips groups
+// whose installed files are unchanged) falls back to the previous
+// manifest for its file list: those entries classify as Skip, so no
+// source is ever read. A group with no manifest to fall back on is a
+// genuine missing artifact.
+func (p Planner) collect(req Request, art Artifacts, exeDir string, prev state.Install, hasPrev bool) ([]PlannedFile, error) {
 	var files []PlannedFile
 
 	// The ReShade proxy DLL, named for the API the game uses.
 	if art.ReShadeDir == "" {
-		return nil, fmt.Errorf("%w: reshade %s", ErrMissingArtifact, req.Version)
+		derived, err := fromManifest(prev, hasPrev, state.OriginReShade)
+		if err != nil {
+			return nil, fmt.Errorf("%w: reshade %s", ErrMissingArtifact, req.Version)
+		}
+		files = append(files, derived...)
+	} else {
+		dll := artifacts.DLLFor(req.Exe.Arch != game.ArchX86)
+		src := filepath.Join(art.ReShadeDir, dll)
+		size, err := fileSize(src)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %s", ErrMissingArtifact, src)
+		}
+		files = append(files, PlannedFile{
+			Source: src,
+			Dest:   join(exeDir, req.DLLName),
+			Origin: state.OriginReShade,
+			Size:   size,
+		})
 	}
-	dll := artifacts.DLLFor(req.Exe.Arch != game.ArchX86)
-	src := filepath.Join(art.ReShadeDir, dll)
-	size, err := fileSize(src)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrMissingArtifact, src)
-	}
-	files = append(files, PlannedFile{
-		Source: src,
-		Dest:   join(exeDir, req.DLLName),
-		Origin: state.OriginReShade,
-		Size:   size,
-	})
 
 	// d3dcompiler_47.dll, on Linux only.
 	if artifacts.NeedsD3DCompiler(req.TargetOS) {
 		if art.D3DCompiler == "" {
-			return nil, fmt.Errorf("%w: %s", ErrMissingArtifact, artifacts.D3DCompiler)
+			derived, err := fromManifest(prev, hasPrev, state.OriginD3DCompiler)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %s", ErrMissingArtifact, artifacts.D3DCompiler)
+			}
+			files = append(files, derived...)
+		} else {
+			size, err := fileSize(art.D3DCompiler)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %s", ErrMissingArtifact, art.D3DCompiler)
+			}
+			files = append(files, PlannedFile{
+				Source: art.D3DCompiler,
+				Dest:   join(exeDir, artifacts.D3DCompiler),
+				Origin: state.OriginD3DCompiler,
+				Size:   size,
+			})
 		}
-		size, err := fileSize(art.D3DCompiler)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %s", ErrMissingArtifact, art.D3DCompiler)
-		}
-		files = append(files, PlannedFile{
-			Source: art.D3DCompiler,
-			Dest:   join(exeDir, artifacts.D3DCompiler),
-			Origin: state.OriginD3DCompiler,
-			Size:   size,
-		})
 	}
 
 	// Effect packages, filtered by the rules recorded at extraction time.
 	for _, id := range req.Packages {
 		dir, ok := art.Packages[id]
 		if !ok {
-			return nil, fmt.Errorf("%w: package %s", ErrMissingArtifact, id)
+			derived, err := fromManifest(prev, hasPrev, state.PackageOrigin(id))
+			if err != nil {
+				return nil, fmt.Errorf("%w: package %s", ErrMissingArtifact, id)
+			}
+			files = append(files, derived...)
+			continue
 		}
 		pkgFiles, err := packageFiles(dir, exeDir, state.PackageOrigin(id))
 		if err != nil {
@@ -200,20 +221,30 @@ func (p Planner) collect(req Request, art Artifacts, exeDir string) ([]PlannedFi
 	// is only its origin in the manifest.
 	if req.RenoDX != "" {
 		if art.RenoDX == "" {
-			return nil, fmt.Errorf("%w: renodx %s", ErrMissingArtifact, req.RenoDX)
+			derived, err := fromManifest(prev, hasPrev, state.RenoDXOrigin(req.RenoDX))
+			if err != nil {
+				return nil, fmt.Errorf("%w: renodx %s", ErrMissingArtifact, req.RenoDX)
+			}
+			files = append(files, derived...)
+		} else {
+			renoFiles, err := addonFiles(art.RenoDX, exeDir, state.RenoDXOrigin(req.RenoDX))
+			if err != nil {
+				return nil, fmt.Errorf("renodx %s: %w", req.RenoDX, err)
+			}
+			files = append(files, renoFiles...)
 		}
-		renoFiles, err := addonFiles(art.RenoDX, exeDir, state.RenoDXOrigin(req.RenoDX))
-		if err != nil {
-			return nil, fmt.Errorf("renodx %s: %w", req.RenoDX, err)
-		}
-		files = append(files, renoFiles...)
 	}
 
 	// Add-ons sit beside the ReShade DLL; ReShade scans the exe directory.
 	for _, id := range req.Addons {
 		dir, ok := art.Addons[id]
 		if !ok {
-			return nil, fmt.Errorf("%w: addon %s", ErrMissingArtifact, id)
+			derived, err := fromManifest(prev, hasPrev, state.AddonOrigin(id))
+			if err != nil {
+				return nil, fmt.Errorf("%w: addon %s", ErrMissingArtifact, id)
+			}
+			files = append(files, derived...)
+			continue
 		}
 		addonFiles, err := addonFiles(dir, exeDir, state.AddonOrigin(id))
 		if err != nil {
@@ -233,6 +264,32 @@ func (p Planner) collect(req Request, art Artifacts, exeDir string) ([]PlannedFi
 		return nil, err
 	}
 	return files, nil
+}
+
+// fromManifest derives a missing artifact group's planned files from the
+// previous install's manifest: same destinations, same sizes, no source.
+// classify then hashes them against what is on disk — an unchanged file
+// skips, a changed one is an error (its source was deliberately not
+// resolved, so there is nothing to rewrite it from). No manifest, no
+// fallback: a fresh install genuinely needs its artifacts.
+func fromManifest(prev state.Install, hasPrev bool, origin state.Origin) ([]PlannedFile, error) {
+	if !hasPrev {
+		return nil, ErrMissingArtifact
+	}
+	var out []PlannedFile
+	for _, f := range prev.Files {
+		if f.Origin == origin {
+			out = append(out, PlannedFile{
+				Dest:   f.Path,
+				Origin: f.Origin,
+				Size:   f.Size,
+			})
+		}
+	}
+	if len(out) == 0 {
+		return nil, ErrMissingArtifact
+	}
+	return out, nil
 }
 
 // classify decides what to do about one planned file, given what is on
@@ -278,11 +335,25 @@ func (p Planner) classify(req Request, owned map[string]state.File, f PlannedFil
 			return "", "", err
 		}
 		if sum == rec.SHA256 {
-			// Identical content already installed: nothing to do.
+			// Identical content already installed. A manifest-derived
+			// file has no source to compare — its group was skipped as
+			// unchanged, which is exactly the decision — so identical
+			// content is the end of it.
+			if f.Source == "" {
+				return ActionSkip, "", nil
+			}
 			if same, err := sameContent(f.Source, sum); err == nil && same {
 				return ActionSkip, "", nil
 			}
 			return ActionReplace, "", nil
+		}
+		if f.Source == "" {
+			// The group was skipped as unchanged, yet this file differs:
+			// there is no source to rewrite it from. The needed-set
+			// computation should have resolved this group; refusing here
+			// keeps a stale decision from half-rewriting an install.
+			return "", "", fmt.Errorf(
+				"%s changed since installation but its source was not resolved; retry the edit once the artifact is available", f.Dest)
 		}
 		// Same size, different bytes: edited without changing the length.
 		return ActionReplace, fmt.Sprintf(
