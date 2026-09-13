@@ -98,6 +98,78 @@ func TestPathsListToggleExpand(t *testing.T) {
 	}
 }
 
+// dualArchGame is one folder — the game root — mixing a 32-bit launcher
+// stub and the real 64-bit game, the exact shape Battle.net titles ship
+// (Diablo IV: "Diablo IV Launcher.exe" beside "Diablo IV.exe") and the
+// case primaryExe alone cannot safely resolve without a look from a human.
+func dualArchGame() GameEntry {
+	exes := []Executable{
+		{Executable: game.Executable{Path: "Diablo IV Launcher.exe", Arch: game.ArchX86}},
+		{Executable: game.Executable{Path: "Diablo IV.exe", Arch: game.ArchX64}},
+	}
+	return GameEntry{
+		Game:   game.Game{ID: "battlenet:fenris", Name: "Diablo IV", Root: "/games/D4"},
+		Exes:   exes,
+		Groups: groupByFolder("/games/D4", exes),
+	}
+}
+
+// A folder with two real candidates and nothing installed starts on
+// primaryExe's guess (the x64 one), renders both marked so the choice is
+// visible rather than silent, and cycleExe steps between them.
+func TestPathsListCycleExeSwitchesTheChosenExecutable(t *testing.T) {
+	e := dualArchGame()
+	p := newPathsList(e.Groups, []string{""}, true)
+	env := Env{Styles: NewStyles(true), Width: 80, Height: 20}
+
+	render := func() string {
+		var b strings.Builder
+		writePathsList(&b, env, p, env.Height)
+		return b.String()
+	}
+
+	if got := p.exeFor(e.Groups[0]).Path; got != "Diablo IV.exe" {
+		t.Fatalf("exeFor() = %q before any cycling, want the x64 default", got)
+	}
+	if body := render(); !strings.Contains(body, "● Diablo IV.exe") || !strings.Contains(body, "○ Diablo IV Launcher.exe") {
+		t.Errorf("the chosen exe should be marked and the other shown unmarked:\n%s", body)
+	}
+
+	p.cycleExe()
+	if got := p.exeFor(e.Groups[0]).Path; got != "Diablo IV Launcher.exe" {
+		t.Errorf("exeFor() = %q after cycling once, want the launcher", got)
+	}
+	if body := render(); !strings.Contains(body, "● Diablo IV Launcher.exe") {
+		t.Errorf("cycling should move the marker to the launcher:\n%s", body)
+	}
+
+	p.cycleExe()
+	if got := p.exeFor(e.Groups[0]).Path; got != "Diablo IV.exe" {
+		t.Errorf("exeFor() = %q after cycling twice, want it wrapped back to the x64 exe", got)
+	}
+}
+
+// cycleExe has nothing to do once a folder is no longer ambiguous — either
+// it never was (one real candidate) or an install already fixed its exe.
+func TestPathsListCycleExeIsNoOpWhenNotAmbiguous(t *testing.T) {
+	installed := state.Install{Exe: "Diablo IV.exe"}
+	exes := []Executable{
+		{Executable: game.Executable{Path: "Diablo IV Launcher.exe", Arch: game.ArchX86}},
+		{Executable: game.Executable{Path: "Diablo IV.exe", Arch: game.ArchX64}, Installed: &installed},
+	}
+	groups := groupByFolder("/games/D4", exes)
+	p := newPathsList(groups, []string{""}, true)
+
+	before := p.exeFor(groups[0]).Path
+	p.cycleExe()
+	if got := p.exeFor(groups[0]).Path; got != before {
+		t.Errorf("cycleExe() changed the pick from %q to %q on an already-installed folder", before, got)
+	}
+	if got := p.exeFor(groups[0]).Path; got != "Diablo IV.exe" {
+		t.Errorf("exeFor() = %q, want the installed exe regardless of primaryExe's guess", got)
+	}
+}
+
 // Past a handful of folders, showing every one's executables in full
 // would defeat the point of the pane — comparing folders at a glance —
 // so it falls back to a count until a folder is expanded by hand.
@@ -189,5 +261,43 @@ func TestWizardAppliesToEveryFolderCheckedOnThePathsStep(t *testing.T) {
 	}
 	if !dirs["Release"] || !dirs["Ship"] {
 		t.Errorf("ops cover %v, want Release and Ship", dirs)
+	}
+}
+
+// Tabbing on the Paths step to switch a folder's chosen executable must
+// carry all the way through to what actually gets installed: the request
+// buildOps hands to the executor, and (for the reference folder) the
+// architecture the DLL step's recommendation is based on. This is the
+// fix for installing the wrong-bitness ReShade build into a folder like
+// Diablo IV's, which mixes a 32-bit launcher stub with the real 64-bit
+// game and used to leave primaryExe to guess between them silently.
+func TestTabOnPathsStepSwitchesTheInstalledExecutable(t *testing.T) {
+	e := dualArchGame()
+	s := loadWizardAtPaths(t, e, 1, fakeDeps()) // preselect Diablo IV.exe (x64)
+	if s.exe.Path != "Diablo IV.exe" {
+		t.Fatalf("wizard opened on %q, want Diablo IV.exe", s.exe.Path)
+	}
+
+	s = pressSpecial(t, s, tea.KeyTab)
+	if s.exe.Path != "Diablo IV Launcher.exe" {
+		t.Fatalf("tab should switch exe to the launcher, s.exe = %q", s.exe.Path)
+	}
+	if got := s.paths.exeFor(s.paths.groups[0]).Path; got != "Diablo IV Launcher.exe" {
+		t.Errorf("paths.exeFor() = %q, want it to agree with s.exe", got)
+	}
+
+	s = advance(t, s, stepReview)
+	ops, ok := s.buildOps()
+	if !ok {
+		t.Fatal("buildOps() should succeed")
+	}
+	if len(ops) != 1 || ops[0].Install == nil {
+		t.Fatalf("ops = %+v, want exactly one install", ops)
+	}
+	if got := ops[0].Install.Exe.Path; got != "Diablo IV Launcher.exe" {
+		t.Errorf("request targets %q, want the tabbed-to launcher", got)
+	}
+	if got := ops[0].Install.Exe.Arch; got != game.ArchX86 {
+		t.Errorf("request arch = %q, want x86 (the launcher's own)", got)
 	}
 }

@@ -89,18 +89,40 @@ func sortedDetailGroups(groups []FolderGroup) []FolderGroup {
 	return out
 }
 
-// primaryExe is the executable an install should be tied to: the first
-// one not flagged as an installer, crash handler or similar, falling back
-// to the first executable at all if every one of them was. Used both for
-// a freshly adopted install and to decide which executable a fresh
-// install/update targets by default.
+// primaryExe is the executable an install should be tied to by default:
+// among the ones not flagged as an installer, crash handler or similar,
+// the first x64 one — a folder mixing architectures is almost always a
+// legacy 32-bit stub (an updater, a launcher) beside the real 64-bit game
+// rather than a genuine 32-bit-only title, Battle.net titles being the
+// routine example — falling back to the first non-skipped executable, or
+// simply the first executable at all if every one of them was skipped.
+// Used for a freshly adopted install, and as the pick offered — visibly,
+// and overridable via the Paths step when needsExeChoice is true — when a
+// fresh install/update targets a folder with more than one candidate.
 func (g FolderGroup) primaryExe() Executable {
+	for _, e := range g.Exes {
+		if !e.Skipped && e.Arch == game.ArchX64 {
+			return e
+		}
+	}
 	for _, e := range g.Exes {
 		if !e.Skipped {
 			return e
 		}
 	}
 	return g.Exes[0]
+}
+
+// needsExeChoice reports whether this folder has more than one candidate
+// executable and nothing installed yet — the one situation where which
+// exe is "the game" is a real, visible decision (a 32-bit launcher stub
+// beside the real 64-bit binary, say) rather than something primaryExe
+// can safely guess alone, since the wrong guess picks the wrong ReShade
+// build's bitness with no error until the game silently fails to load it.
+// An existing install's exe is already fixed on disk, so there is nothing
+// to choose once Installed is set.
+func (g FolderGroup) needsExeChoice() bool {
+	return g.Installed == nil && g.playableCount() > 1
 }
 
 // installedExe returns the executable Installed was actually recorded

@@ -277,6 +277,88 @@ func TestFolderLevelInstallTargetsTheActuallyInstalledExe(t *testing.T) {
 	}
 }
 
+// Battle.net bundles a native, 32-bit Launcher.exe beside the real 64-bit
+// game in the same folder (Diablo IV is the case that surfaced this):
+// alphabetically "Launcher.exe" sorts first and neither name matches
+// skipExeName, so primaryExe used to hand back the 32-bit stub — which
+// then had the wrong-bitness ReShade build installed for it, silently,
+// since nothing checks a proxy DLL's bitness against the process that
+// will actually load it.
+func TestPrimaryExePrefersX64OverAlphabeticalOrder(t *testing.T) {
+	exes := []Executable{
+		{Executable: game.Executable{Path: "Diablo IV Launcher.exe", Arch: game.ArchX86}},
+		{Executable: game.Executable{Path: "Diablo IV.exe", Arch: game.ArchX64}},
+	}
+	groups := groupByFolder("/games/D4", exes)
+	if len(groups) != 1 {
+		t.Fatalf("groups = %d, want 1", len(groups))
+	}
+	if got := groups[0].primaryExe().Path; got != "Diablo IV.exe" {
+		t.Errorf("primaryExe() = %q, want the x64 exe over the alphabetically-first x86 one", got)
+	}
+}
+
+// Skipped executables (uninstallers, redistributables) never count toward
+// primaryExe's x64 preference or needsExeChoice's ambiguity — they are
+// never something ReShade could attach to.
+func TestPrimaryExeStillSkipsNonGameExecutables(t *testing.T) {
+	exes := []Executable{
+		{Executable: game.Executable{Path: "unins000.exe", Arch: game.ArchX64, Skipped: true}},
+		{Executable: game.Executable{Path: "Game.exe", Arch: game.ArchX86}},
+	}
+	groups := groupByFolder("/games/G", exes)
+	if got := groups[0].primaryExe().Path; got != "Game.exe" {
+		t.Errorf("primaryExe() = %q, want the one non-skipped exe despite it being x86", got)
+	}
+}
+
+// needsExeChoice is what tells the Paths step to surface (and let tab
+// cycle) a folder's executable choice instead of silently trusting
+// primaryExe: only when there is more than one real candidate and nothing
+// is installed yet. An install already fixes which exe applies, and a
+// folder with one candidate has nothing to choose between.
+func TestNeedsExeChoice(t *testing.T) {
+	installed := state.Install{Exe: "Diablo IV.exe"}
+	cases := []struct {
+		name string
+		exes []Executable
+		want bool
+	}{
+		{
+			name: "two real candidates, nothing installed",
+			exes: []Executable{
+				{Executable: game.Executable{Path: "Diablo IV Launcher.exe", Arch: game.ArchX86}},
+				{Executable: game.Executable{Path: "Diablo IV.exe", Arch: game.ArchX64}},
+			},
+			want: true,
+		},
+		{
+			name: "two candidates but one already installed",
+			exes: []Executable{
+				{Executable: game.Executable{Path: "Diablo IV Launcher.exe", Arch: game.ArchX86}},
+				{Executable: game.Executable{Path: "Diablo IV.exe", Arch: game.ArchX64}, Installed: &installed},
+			},
+			want: false,
+		},
+		{
+			name: "one real candidate, one skipped",
+			exes: []Executable{
+				{Executable: game.Executable{Path: "unins000.exe", Skipped: true}},
+				{Executable: game.Executable{Path: "Game.exe"}},
+			},
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			groups := groupByFolder("/games/G", tc.exes)
+			if got := groups[0].needsExeChoice(); got != tc.want {
+				t.Errorf("needsExeChoice() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // A game with two distinct folders — one installed, one holding an
 // unmanaged install — must let the cursor move between them, and offer
 // the right action for whichever one is current.

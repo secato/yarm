@@ -96,6 +96,13 @@ var (
 // so a game with several folders still fits on one screen.
 var wizardExpand = key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→", "expand"))
 
+// wizardCycleExe switches which executable a Paths row's folder is tied
+// to, when it has more than one candidate and nothing installed yet
+// (FolderGroup.needsExeChoice) — the folder's directory is what a fresh
+// install always writes into either way, but which exe's architecture and
+// API pick the ReShade build is otherwise a silent guess.
+var wizardCycleExe = key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "switch exe"))
+
 // wizardShowAll widens the shaders and add-ons steps from the curated
 // shortlist to the whole catalog. Not a global binding: it means nothing
 // on the other three steps.
@@ -162,7 +169,9 @@ type wizardDataLoadedMsg struct {
 // folders) it applies to, which version and build, which proxy DLL, which
 // effect shaders and add-ons, then a review before running. ReShade
 // intercepts by directory, so there is nothing per-executable to ask about
-// beyond which folder.
+// beyond which folder — except which executable's architecture and API
+// decide the build, when a folder offers more than one candidate and
+// nothing is installed yet (see FolderGroup.needsExeChoice).
 //
 // It is one Screen implementation holding a step index and one field group
 // per step, rather than several pushed screens, so the in-progress Request
@@ -297,13 +306,21 @@ func NewWizardScreen(entry GameEntry, exe Executable, targets []FolderGroup, dep
 	filter.Prompt = "/"
 	filter.SetWidth(30)
 
+	// exe may not be the reference folder's primaryExe guess — an existing
+	// install names its own exe, and openWizard can pass any of a folder's
+	// candidates. Recording it here keeps buildOps (which reads the same
+	// map through exeFor) from silently disagreeing with what every other
+	// step just built its answers around.
+	paths := newPathsList(targets, []string{install.ExeDir(exe.Path)}, true)
+	paths.chosen[install.ExeDir(exe.Path)] = exe.Path
+
 	return &WizardScreen{
 		keys:         DefaultKeyMap(),
 		renodxFilter: filter,
 		step:         step,
 		editing:      existing != nil,
 		entry:        entry,
-		paths:        newPathsList(targets, []string{install.ExeDir(exe.Path)}, true),
+		paths:        paths,
 		exe:          exe,
 		deps:         deps,
 		targetOS:     artifacts.CurrentTargetOS(),
@@ -382,9 +399,11 @@ func (s *WizardScreen) KeyBindings() []key.Binding {
 	case stepHub:
 		return []key.Binding{s.keys.Up, s.keys.Down, s.keys.Enter, wizardApply, s.keys.Back}
 	case stepPaths:
-		return []key.Binding{
-			s.keys.Up, s.keys.Down, s.keys.Toggle, wizardExpand, s.keys.Enter, s.keys.Back,
+		keys := []key.Binding{s.keys.Up, s.keys.Down, s.keys.Toggle, wizardExpand}
+		if g, ok := s.paths.current(); ok && g.needsExeChoice() {
+			keys = append(keys, wizardCycleExe)
 		}
+		return append(keys, s.keys.Enter, s.keys.Back)
 	case stepReShade:
 		return []key.Binding{s.keys.Up, s.keys.Down, wizardPaneLeft, wizardPaneRight, s.keys.Enter, s.keys.Back}
 	case stepShaders, stepAddons:
@@ -1006,11 +1025,6 @@ func (o applyOverlay) view(env Env) string {
 			b.WriteString(env.Styles.Faint.Render(wrap(note, w)))
 			b.WriteString("\n")
 		}
-	} else if !s.overwrite() {
-		b.WriteString("\n")
-		b.WriteString(env.Styles.Warn.Render(wrap(
-			"Files not created by yarm are left in place unless overwrite is on.", w)))
-		b.WriteString("\n")
 	}
 
 	b.WriteString("\n")
@@ -1162,10 +1176,30 @@ func (s *WizardScreen) handlePathsKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		s.paths.toggle()
 	case key.Matches(msg, wizardExpand):
 		s.paths.toggleExpand()
+	case key.Matches(msg, wizardCycleExe):
+		s.paths.cycleExe()
+		s.syncExeFromPaths()
 	case key.Matches(msg, s.keys.Enter):
 		s.step = s.afterStep(stepPaths)
 	}
 	return s, nil
+}
+
+// syncExeFromPaths refreshes exe when cycleExe just changed the pick for
+// the reference folder specifically — the one every other step's answer
+// (build, version, DLL, packages) is shown and diffed against. Cycling
+// some other checked folder still changes what buildOps sends for it, but
+// has nothing to do with what those steps display.
+func (s *WizardScreen) syncExeFromPaths() {
+	g, ok := s.paths.current()
+	if !ok || g.Dir != install.ExeDir(s.exe.Path) {
+		return
+	}
+	if exe := s.paths.exeFor(g); exe.Path != s.exe.Path {
+		s.exe = exe
+		s.dllCursor.setCursor(s.recommendedDLLIndex())
+		s.missingGen++
+	}
 }
 
 func (s *WizardScreen) handleReShadeKey(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
@@ -1302,11 +1336,7 @@ func (s *WizardScreen) buildOps() ([]folderOp, bool) {
 	groups := s.paths.selectedGroups()
 	ops := make([]folderOp, 0, len(groups)+len(s.paths.removedInstalls()))
 	for _, g := range groups {
-		target := g.primaryExe()
-		if installed, ok := g.installedExe(); ok {
-			target = installed
-		}
-		req, ok := s.buildRequestFor(target)
+		req, ok := s.buildRequestFor(s.paths.exeFor(g))
 		if !ok {
 			return nil, false
 		}
@@ -1887,20 +1917,6 @@ func (s *WizardScreen) viewReview(b *strings.Builder, env Env, height int) {
 		files.WriteString("\n")
 	}
 
-	// Whether files yarm did not create survive is decided when applying,
-	// in the confirmation there — but the default still earns its line
-	// here when nothing concrete was found: with a conflicts block above,
-	// it would repeat what that block already said about actual files.
-	// Measured like a section, since the download list below is the only
-	// part that can grow, so it is what gives way on a short terminal.
-	var note strings.Builder
-	if !s.overwrite() && len(conflicts) == 0 {
-		note.WriteString("\n")
-		note.WriteString(env.Styles.Warn.Render(wrap(
-			"Files not created by yarm are left in place unless overwrite is on.", env.Width-1)))
-		note.WriteString("\n")
-	}
-
 	// An unmet requirement is the one thing on this page that can make the
 	// install do nothing once it runs, so it goes above the download list
 	// and is not allowed to scroll away. Built into its own builder
@@ -1929,9 +1945,9 @@ func (s *WizardScreen) viewReview(b *strings.Builder, env Env, height int) {
 		page.WriteString(env.Styles.Faint.Render("  nothing — everything is already cached"))
 		page.WriteString("\n")
 	}
-	// -2 for this section's own header and the blank line before the note;
-	// whatever the Check block above already took comes off too.
-	room := height - countLines(note.String()) - countLines(check.String()) -
+	// -2 for this section's own header and its blank line; whatever the
+	// Check block above already took comes off too.
+	room := height - countLines(check.String()) -
 		countLines(files.String()) - countLines(diff.String()) - 2
 	if room < 1 {
 		room = 1
@@ -1940,7 +1956,6 @@ func (s *WizardScreen) viewReview(b *strings.Builder, env Env, height int) {
 		page.WriteString(clipTail("  "+missing[i], env.Width))
 		page.WriteString("\n")
 	})
-	page.WriteString(note.String())
 
 	// Backstop: on a terminal too short for even a one-row download list
 	// plus the note, the arithmetic above cannot win, and a page that

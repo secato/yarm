@@ -15,6 +15,15 @@ import (
 // on offer, as the first thing the wizard shows: a pane naming each path,
 // what is already there, and its executables — checked or not, depending
 // on what brought the wizard up.
+//
+// A folder can itself be ambiguous: two executables of different
+// architectures sharing one directory (a 32-bit launcher stub beside the
+// real 64-bit game, which Battle.net titles ship routinely) mean two
+// different answers for which ReShade build fits. FolderGroup.primaryExe
+// guesses the more likely one so the common case needs no extra step, but
+// the guess is shown — marked among the folder's listed executables — and
+// tab (pathsList.cycleExe) switches it, rather than leaving a silent guess
+// as the only way that decision ever gets made.
 
 // pathsList is the folder-choice state behind that pane: a cursor over a
 // game's folders, which of them are checked, and which have their
@@ -28,7 +37,13 @@ type pathsList struct {
 	// nets out to no change at all.
 	initial  map[string]bool // by Dir
 	expanded map[string]bool // by Dir
-	cursor   cursorList
+	// chosen is which executable's path stands for each folder, by Dir —
+	// primaryExe's guess to start, cycleExe's answer from then on for
+	// whichever folder needsExeChoice. Read through exeFor rather than
+	// directly: a folder that already has an install overrides it with
+	// installedExe regardless of what is recorded here.
+	chosen map[string]string
+	cursor cursorList
 	// multi allows more than one folder checked at once. Uninstalling and
 	// editing only ever act on what is already installed, several folders
 	// at a time if several qualify; a fresh install defaults to the one
@@ -70,11 +85,16 @@ func newPathsList(groups []FolderGroup, preselected []string, multi bool) pathsL
 	for dir := range sel {
 		initial[dir] = true
 	}
+	chosen := make(map[string]string, len(groups))
+	for _, g := range groups {
+		chosen[g.Dir] = g.primaryExe().Path
+	}
 	return pathsList{
 		groups:   groups,
 		selected: sel,
 		initial:  initial,
 		expanded: expanded,
+		chosen:   chosen,
 		cursor:   newCursorList(len(groups), start),
 		multi:    multi,
 	}
@@ -124,6 +144,58 @@ func (p *pathsList) toggleExpand() {
 		return
 	}
 	p.expanded[g.Dir] = !p.expanded[g.Dir]
+}
+
+// exeFor is the executable g's install plan should use: whichever one it
+// is already installed against, when it has an install, otherwise the
+// chosen pick recorded for its directory (primaryExe's guess until
+// cycleExe changes it), falling back to primaryExe itself if the chosen
+// path no longer matches anything (a rescan changed the folder's exe list
+// out from under a stale pick).
+func (p pathsList) exeFor(g FolderGroup) Executable {
+	if installed, ok := g.installedExe(); ok {
+		return installed
+	}
+	if path, ok := p.chosen[g.Dir]; ok {
+		for _, e := range g.Exes {
+			if e.Path == path {
+				return e
+			}
+		}
+	}
+	return g.primaryExe()
+}
+
+// cycleExe advances the cursor's folder to its next non-skipped
+// executable — the only choice worth exposing once a folder mixes
+// architectures, since ReShade still attaches to the folder as a whole
+// but the build it needs depends on whichever executable actually
+// renders, and primaryExe's guess is not always the right one. A no-op
+// outside needsExeChoice: an installed folder's exe is already fixed, and
+// a folder with only one candidate has nothing to cycle to.
+func (p *pathsList) cycleExe() {
+	g, ok := p.current()
+	if !ok || !g.needsExeChoice() {
+		return
+	}
+	var candidates []string
+	for _, e := range g.Exes {
+		if !e.Skipped {
+			candidates = append(candidates, e.Path)
+		}
+	}
+	idx := 0
+	for i, path := range candidates {
+		if path == p.chosen[g.Dir] {
+			idx = i
+			break
+		}
+	}
+	p.chosen[g.Dir] = candidates[(idx+1)%len(candidates)]
+	// Cycling expresses "let me see the choice" as much as "change it" —
+	// a collapsed folder switching its pick with nothing on screen to show
+	// for it would look like the key did nothing.
+	p.expanded[g.Dir] = true
 }
 
 // selectedGroups returns every checked folder, in the order groups lists
@@ -212,7 +284,8 @@ func writePathRow(b *strings.Builder, env Env, p pathsList, i int) {
 	b.WriteString(env.Styles.Faint.Render(clipTail("      "+folderSummary(grp), env.Width)))
 	b.WriteString("\n")
 
-	shown, hidden := pickerExes(grp)
+	ambiguous := grp.needsExeChoice()
+	shown, hidden := pickerExes(grp, p.chosen[grp.Dir])
 	switch {
 	case !p.expanded[grp.Dir] && len(shown)+hidden > 0:
 		n := len(shown) + hidden
@@ -228,8 +301,16 @@ func writePathRow(b *strings.Builder, env Env, p pathsList, i int) {
 		b.WriteString("\n")
 	default:
 		for _, ex := range shown {
-			b.WriteString(clipTail("        "+ex.name, env.Width))
-			b.WriteString(env.Styles.Faint.Render(clipTail("  "+ex.detail, env.Width-lipgloss.Width(ex.name)-8)))
+			name := ex.name
+			if ambiguous {
+				marker := "○ "
+				if ex.chosen {
+					marker = "● "
+				}
+				name = marker + name
+			}
+			b.WriteString(clipTail("        "+name, env.Width))
+			b.WriteString(env.Styles.Faint.Render(clipTail("  "+ex.detail, env.Width-lipgloss.Width(name)-8)))
 			b.WriteString("\n")
 		}
 		if hidden > 0 {
@@ -267,9 +348,13 @@ func folderSummary(grp FolderGroup) string {
 	}
 }
 
-// pickerExe is one executable as the paths pane shows it: its name, and
-// the architecture and graphics API that decide which ReShade build fits.
-type pickerExe struct{ name, detail string }
+// pickerExe is one executable as the paths pane shows it: its name, the
+// architecture and graphics API that decide which ReShade build fits, and
+// whether it is the folder's chosen exe when more than one is on offer.
+type pickerExe struct {
+	name, detail string
+	chosen       bool
+}
 
 // maxPickerExesPerFolder keeps one folder full of executables from
 // pushing every other folder off the screen — the point of the list is to
@@ -279,8 +364,9 @@ const maxPickerExesPerFolder = 3
 // pickerExes lists a folder's offered executables, with the folder's own
 // path trimmed off the front (it is already the heading), and says how
 // many did not fit. Skipped ones — uninstallers, redistributables — are
-// left out: ReShade would never attach to them.
-func pickerExes(grp FolderGroup) (shown []pickerExe, hidden int) {
+// left out: ReShade would never attach to them. chosenPath marks which one
+// is currently picked; pass "" when the caller only needs the count.
+func pickerExes(grp FolderGroup, chosenPath string) (shown []pickerExe, hidden int) {
 	stripPrefix := ""
 	if grp.Dir != "" {
 		stripPrefix = grp.Dir + "/"
@@ -296,6 +382,7 @@ func pickerExes(grp FolderGroup) (shown []pickerExe, hidden int) {
 		shown = append(shown, pickerExe{
 			name:   strings.TrimPrefix(ex.Path, stripPrefix),
 			detail: fmt.Sprintf("%s · %s", ex.Arch, apiLabel(ex.API)),
+			chosen: chosenPath != "" && ex.Path == chosenPath,
 		})
 	}
 	return shown, hidden
@@ -307,7 +394,7 @@ func pickerExes(grp FolderGroup) (shown []pickerExe, hidden int) {
 func maxPickerExes(groups []FolderGroup) int {
 	most := 0
 	for _, g := range groups {
-		shown, hidden := pickerExes(g)
+		shown, hidden := pickerExes(g, "")
 		n := len(shown)
 		if hidden > 0 {
 			n++
