@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -495,6 +496,9 @@ func TestCleanSkipsOutsideRoot(t *testing.T) {
 // CleanExcept removes everything the predicate rejects, keeps everything
 // it accepts, and still sweeps partial downloads.
 func TestCleanExcept(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses colons in directory names, which are invalid on Windows")
+	}
 	c, _, _ := newCache(t, func(w http.ResponseWriter, r *http.Request) {})
 
 	for _, id := range []string{"package:keep:20260905-aaa", "package:drop:20260905-bbb", "reshade:6.8.0:normal"} {
