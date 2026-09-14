@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.4] — 2026-09-14
+
+### Fixed
+
+- **Windows test compatibility.** Tests for Linux-specific game launcher integration
+  (Heroic, Lutris) now skip on non-Linux platforms. Fixed cache test that used
+  invalid Windows path characters.
+
 ## [0.1.0-alpha.3] — 2026-09-14
 
 ### Added
