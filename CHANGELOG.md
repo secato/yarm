@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.3] — 2026-09-14
+
+### Added
+
+- **Demand-driven dependency resolution.** ReShade, packages, and add-ons are
+  now resolved only when needed, showing an honest download list before
+  confirming the install. Package search is faster and the wizard steps are
+  clearer about what will be fetched.
+
+### Changed
+
+- **Platform column wider.** The games list now gives more space to platform
+  names so longer ones (Battle.net) display fully.
+
+### Fixed
+
+- **Architecture selection improved.** yarm now defaults to x64 when both
+  architectures are available, and the wizard's Paths step lets you override
+  that choice.
+
 ## [0.1.0-alpha.2] — 2026-09-11
 
 The first release, and an alpha. Everything below works and is covered by
