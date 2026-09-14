@@ -3,6 +3,7 @@ package fsutil
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -24,6 +25,39 @@ func requirePOSIXPermissions(t *testing.T) {
 	}
 	if os.Getuid() == 0 {
 		t.Skip("running as root ignores directory permissions")
+	}
+}
+
+func TestReadFileMax(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "file.txt")
+	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ReadFileMax(path, 5)
+	if err != nil {
+		t.Fatalf("ReadFileMax() error = %v", err)
+	}
+	if string(got) != "hello" {
+		t.Errorf("ReadFileMax() = %q, want %q", got, "hello")
+	}
+}
+
+func TestReadFileMaxOversized(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "file.txt")
+	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ReadFileMax(path, 4); !errors.Is(err, ErrTooLarge) {
+		t.Errorf("ReadFileMax() error = %v, want ErrTooLarge", err)
+	}
+}
+
+func TestReadFileMaxMissing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.txt")
+	if _, err := ReadFileMax(path, 5); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("ReadFileMax() error = %v, want os.ErrNotExist", err)
 	}
 }
 

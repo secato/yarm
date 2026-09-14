@@ -80,13 +80,26 @@ foreign injector in the proxy-DLL slot, a config it must not touch);
 that last ran and which effects are enabled.
 
 ### Games and executables (`internal/game`, `internal/platform`)
-
-`platform.Provider` is the discovery interface (`Name`, `Discover`) — `steam`
-and `manual` today; `DiscoverAll` joins errors so one broken provider does not
-hide the rest. A provider that finds nothing returns an empty slice, not an
-error. `game/pe.go` parses executables to determine arch (x86/x64) and guess
-the graphics API from imported DLLs, which is what picks the ReShade build and
-proxy DLL name. Vulkan and D3D8 are deliberately unsupported.
+`platform.Provider` is the discovery interface (`Name`, `Discover`) —
+`steam`, the store providers `gog`, `epic` and `battlenet`, and
+`manual` today; `DiscoverAll` joins errors so one broken provider does
+not hide the rest. A provider that finds nothing returns an empty
+slice, not an error. The store providers are **store-centric**: the
+same game id (`gog:<product id>`, `epic:<app name>`, `battlenet:<uid>`)
+whether it was discovered from the store's own data on Windows (GOG
+registry keys, Epic manifest files, Battle.net's `product.db` protobuf)
+or from the launchers that manage those stores on Linux — the
+read-only readers under `internal/platform/sources` (`heroic`,
+`lutris`) normalize Heroic's and Lutris' metadata into
+one `sources.Entry` (Heroic records its Epic installs in the embedded
+legendary client's `installed.json`, so reading that file is part of
+reading Heroic), and `lutris` reads pga.db through the pure-Go
+`modernc.org/sqlite` driver (opened `mode=ro` — CGO is off, and the
+file belongs to Lutris). Battle.net on Linux reads the same
+`product.db` out of the wine prefix Lutris installed the client into.
+`game/pe.go` parses executables to determine arch (x86/x64) and guess
+the graphics API from imported DLLs, which is what picks the ReShade
+build and proxy DLL name. Vulkan and D3D8 are deliberately unsupported.
 
 ### Content sources (`internal/catalog`, `cache`, `artifacts`, `fetch`)
 

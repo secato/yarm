@@ -20,7 +20,31 @@ import (
 	"github.com/secato/yarm/internal/fetch"
 	"github.com/secato/yarm/internal/game"
 	"github.com/secato/yarm/internal/install"
+	"github.com/secato/yarm/internal/state"
 )
+
+// A fresh install (nothing recorded yet) must reach NeededArtifacts as nil,
+// not a pointer to a zero-value Install — see the comment on
+// findPrevInstall for what goes wrong otherwise (d3dcompiler_47.dll and
+// any other artifact with no prior file to compare against reads as
+// unchanged and is silently never downloaded).
+func TestFindPrevInstallNilForFreshInstall(t *testing.T) {
+	reg := state.Registry{Games: map[string]state.Game{}}
+	if got := findPrevInstall(reg, "battlenet:fenris", "Diablo IV.exe"); got != nil {
+		t.Errorf("findPrevInstall() = %+v, want nil for a game with no recorded installs", got)
+	}
+}
+
+// A recorded install is still found and handed through as a real pointer.
+func TestFindPrevInstallFindsRecordedInstall(t *testing.T) {
+	reg := state.Registry{Games: map[string]state.Game{
+		"battlenet:fenris": {Installs: []state.Install{{Exe: "Diablo IV.exe", ReShade: state.ReShadeInfo{Version: "6.8.0"}}}},
+	}}
+	got := findPrevInstall(reg, "battlenet:fenris", "Diablo IV.exe")
+	if got == nil || got.ReShade.Version != "6.8.0" {
+		t.Errorf("findPrevInstall() = %+v, want the recorded install", got)
+	}
+}
 
 // resolveUsesMemoData checks the install pipeline resolves what the wizard
 // showed rather than re-reading the catalogs: the same data, no network.

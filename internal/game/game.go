@@ -4,12 +4,14 @@ package game
 
 // Game is a discovered or manually added game.
 type Game struct {
-	// ID is "steam:<appid>" or "manual:<sha1(root)[:12]>".
+	// ID is "steam:<appid>", "gog:<product id>", "epic:<app name>",
+	// "battlenet:<uid>" or "manual:<sha1(root)[:12]>": the provider's
+	// name and the store's own identifier, stable across platforms.
 	ID string
 	// Name is the display name.
 	Name string
 	// Provider is the name of the platform.Provider that discovered this
-	// game ("steam", "manual").
+	// game ("steam", "gog", "epic", "battlenet", "manual").
 	Provider string
 	// Root is the absolute path to the game's install directory.
 	Root string

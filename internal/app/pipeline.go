@@ -104,8 +104,7 @@ func (r *RealInstaller) Install(ctx context.Context, req install.Request, send f
 	if err != nil {
 		return install.Result{}, err
 	}
-	prev, _ := reg.FindInstall(req.Game.ID, filepath.ToSlash(req.Exe.Path))
-	needed := install.NeededArtifacts(req, &prev)
+	needed := install.NeededArtifacts(req, findPrevInstall(reg, req.Game.ID, filepath.ToSlash(req.Exe.Path)))
 
 	art, err := r.resolve(ctx, &req, send, needed)
 	if err != nil {
@@ -126,6 +125,23 @@ func (r *RealInstaller) Install(ctx context.Context, req install.Request, send f
 	}
 	r.Games.Clear()
 	return result, nil
+}
+
+// findPrevInstall adapts Registry.FindInstall's (value, ok) result to the
+// nil-or-pointer NeededArtifacts expects. Getting this wrong is not
+// cosmetic: passing a non-nil pointer to a zero-value Install for a fresh
+// install makes NeededArtifacts diff req against an empty manifest instead
+// of taking its "nothing recorded yet, need everything" path — every group
+// with no prior file to compare against (d3dcompiler_47.dll on Linux,
+// wherever nothing was ever written for it) then reads as unchanged and is
+// silently skipped, and the plan fails downstream with ErrMissingArtifact
+// instead of ever downloading it.
+func findPrevInstall(reg state.Registry, gameID, exe string) *state.Install {
+	prev, ok := reg.FindInstall(gameID, exe)
+	if !ok {
+		return nil
+	}
+	return &prev
 }
 
 // resolve downloads and locates the artifact groups needed says this

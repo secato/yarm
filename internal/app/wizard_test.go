@@ -725,9 +725,12 @@ func TestWizardReviewListsWhatItWillDownload(t *testing.T) {
 	if strings.Contains(body, "Options") {
 		t.Errorf("the options belong to the apply confirmation, not the review page:\n%s", body)
 	}
+	// A fresh install into an empty folder has nothing Preflight found to
+	// conflict with, so the overwrite disclaimer would be pure noise here
+	// — it belongs only where there is an actual file it applies to.
 	const disclaimer = "Files not created by yarm are left in place unless overwrite is on."
-	if !strings.Contains(body, wizardEnv().Styles.Warn.Render(disclaimer)) {
-		t.Errorf("the disclaimer should be styled as a warning (yellow):\n%s", body)
+	if strings.Contains(body, disclaimer) {
+		t.Errorf("a fresh install with no conflicts should not show the overwrite disclaimer:\n%s", body)
 	}
 }
 

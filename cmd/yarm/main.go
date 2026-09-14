@@ -28,6 +28,9 @@ import (
 	"github.com/secato/yarm/internal/fetch"
 	"github.com/secato/yarm/internal/paths"
 	"github.com/secato/yarm/internal/platform"
+	"github.com/secato/yarm/internal/platform/battlenet"
+	"github.com/secato/yarm/internal/platform/epic"
+	"github.com/secato/yarm/internal/platform/gog"
 	"github.com/secato/yarm/internal/platform/manual"
 	"github.com/secato/yarm/internal/platform/steam"
 )
@@ -182,12 +185,23 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 }
 
 // buildProviders assembles the discovery providers from config. The one
-// place providers are registered: adding a launcher means implementing
-// platform.Provider and appending it here.
+// place providers are registered: adding a store means implementing
+// platform.Provider and appending it here. The store providers each
+// resolve their own per-OS sources (registry, launcher metadata, wine
+// prefixes) inside New.
 func buildProviders(cfg config.Config) []platform.Provider {
 	var providers []platform.Provider
 	if cfg.Steam.Enabled {
 		providers = append(providers, steam.New(cfg.Steam.ExtraLibraryPaths))
+	}
+	if cfg.GOG.Enabled {
+		providers = append(providers, gog.New())
+	}
+	if cfg.Epic.Enabled {
+		providers = append(providers, epic.New())
+	}
+	if cfg.BattleNet.Enabled {
+		providers = append(providers, battlenet.New())
 	}
 	manualEntries := make([]manual.Entry, len(cfg.ManualGames))
 	for i, g := range cfg.ManualGames {

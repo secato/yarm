@@ -585,8 +585,8 @@ func TestAdoptKeyNoOpWithoutUnmanaged(t *testing.T) {
 }
 
 // The welcome banner shows once, only on a genuine first run, counts
-// Steam-provided games specifically (not manual ones), and disappears on
-// the very next keypress without swallowing it.
+// what each provider found, and disappears on the very next keypress
+// without swallowing it.
 func TestFirstRunWelcomeBanner(t *testing.T) {
 	m := New(NewGamesScreen(fakeLoader{entries: sampleEntries()}, fakeDeps(), true))
 	m = drive(t, m,
@@ -602,10 +602,11 @@ func TestFirstRunWelcomeBanner(t *testing.T) {
 	if !strings.Contains(body, "Welcome to yarm") {
 		t.Errorf("the welcome banner should be shown:\n%s", body)
 	}
-	// sampleEntries has 3 steam-provider games (Vantage Point, Ridgeline, Ember Hollow
-	// RING) and 1 manual one; the banner counts only the Steam ones.
-	if !strings.Contains(body, "Steam found 3 games") {
-		t.Errorf("banner should count only Steam-provided games:\n%s", body)
+	// sampleEntries has 3 steam-provider games (Vantage Point, Ridgeline,
+	// Ember Hollow RING) and 1 manual one; the banner counts both, with
+	// a per-provider breakdown.
+	if !strings.Contains(body, "Found 4 games (manual 1, steam 3)") {
+		t.Errorf("banner should break the count down per provider:\n%s", body)
 	}
 
 	// Any keypress dismisses it — and still does what it would normally
@@ -638,8 +639,8 @@ func TestFirstRunWelcomeBannerWithNoGames(t *testing.T) {
 	if !strings.Contains(body, "Welcome to yarm") {
 		t.Errorf("the banner should show even with zero games found:\n%s", body)
 	}
-	if !strings.Contains(body, "No Steam library was found") {
-		t.Errorf("banner should say no Steam library was found:\n%s", body)
+	if !strings.Contains(body, "No games were found") {
+		t.Errorf("banner should say no games were found:\n%s", body)
 	}
 }
 

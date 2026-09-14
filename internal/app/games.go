@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -113,7 +114,7 @@ func arrowKeyMap() table.KeyMap {
 // up as a gap between the two.
 func gamesColumns(width int) []table.Column {
 	const (
-		sourceW  = 8
+		sourceW  = 10
 		statusW  = 16
 		minNameW = 16
 	)
@@ -525,14 +526,12 @@ func (s *GamesScreen) View(env Env) string {
 
 // renderDetail draws the side panel for one game.
 // welcomeBanner summarizes the first run: that yarm's directories were
-// just created, what Steam found (if anything), and how to add a folder
-// it did not find on its own.
+// just created, what discovery found per provider, and how to add a
+// folder it did not find on its own.
 func (s *GamesScreen) welcomeBanner(env Env) string {
-	steamGames := 0
+	counts := make(map[string]int)
 	for _, e := range s.entries {
-		if e.Provider == "steam" {
-			steamGames++
-		}
+		counts[e.Provider]++
 	}
 
 	var b strings.Builder
@@ -541,13 +540,29 @@ func (s *GamesScreen) welcomeBanner(env Env) string {
 	b.WriteString(env.Styles.Faint.Render("Your config, data and cache directories were just created."))
 	b.WriteString("\n")
 
-	switch steamGames {
-	case 0:
-		b.WriteString(env.Styles.Faint.Render("No Steam library was found."))
-	case 1:
-		b.WriteString(env.Styles.Faint.Render("Steam found 1 game."))
+	// Providers are listed sorted, so the banner reads the same on two
+	// machines that found the same games through different orders of
+	// provider.
+	switch n := len(s.entries); {
+	case n == 0:
+		b.WriteString(env.Styles.Faint.Render("No games were found."))
+	case len(counts) == 1:
+		if n == 1 {
+			b.WriteString(env.Styles.Faint.Render("Found 1 game."))
+		} else {
+			b.WriteString(env.Styles.Faint.Render(fmt.Sprintf("Found %d games.", n)))
+		}
 	default:
-		b.WriteString(env.Styles.Faint.Render(fmt.Sprintf("Steam found %d games.", steamGames)))
+		providers := make([]string, 0, len(counts))
+		for p := range counts {
+			providers = append(providers, p)
+		}
+		sort.Strings(providers)
+		parts := make([]string, 0, len(providers))
+		for _, p := range providers {
+			parts = append(parts, fmt.Sprintf("%s %d", p, counts[p]))
+		}
+		b.WriteString(env.Styles.Faint.Render(fmt.Sprintf("Found %d games (%s).", n, strings.Join(parts, ", "))))
 	}
 	b.WriteString(" ")
 	b.WriteString(env.Styles.Accent.Render("Press a to add a folder yourself."))

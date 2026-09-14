@@ -5,11 +5,39 @@ package fsutil
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 )
+
+// ErrTooLarge is the error ReadFileMax wraps when a file exceeds its limit.
+var ErrTooLarge = errors.New("file larger than the size limit")
+
+// ReadFileMax reads path fully, refusing anything over max bytes rather
+// than reading an unbounded amount into memory. It exists for files yarm
+// does not own — third-party launcher metadata, Steam's VDFs, Battle.net's
+// product.db — where oversized most likely means corrupt or adversarial,
+// not a bigger library. A missing file returns the raw *PathError so
+// callers can still errors.Is it against os.ErrNotExist.
+func ReadFileMax(path string, max int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+
+	data, err := io.ReadAll(io.LimitReader(f, max+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > max {
+		return nil, fmt.Errorf("%s: %w (%d bytes)", path, ErrTooLarge, max)
+	}
+	return data, nil
+}
 
 // AtomicWrite writes data to path by writing a temp file in the same
 // directory, fsyncing it, then renaming it into place. This avoids leaving a

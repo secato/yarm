@@ -21,6 +21,9 @@ type Config struct {
 	CacheDir       string         `yaml:"cache_dir"`
 	ManualGames    []ManualGame   `yaml:"manual_games"`
 	Steam          SteamConfig    `yaml:"steam"`
+	GOG            ProviderConfig `yaml:"gog"`
+	Epic           ProviderConfig `yaml:"epic"`
+	BattleNet      ProviderConfig `yaml:"battlenet"`
 	Defaults       DefaultsConfig `yaml:"defaults"`
 	RenodxTTLHours int            `yaml:"renodx_ttl_hours"`
 	// CatalogTTLHours is the pre-rename name of RenodxTTLHours, kept so
@@ -39,6 +42,14 @@ type ManualGame struct {
 type SteamConfig struct {
 	Enabled           bool     `yaml:"enabled"`
 	ExtraLibraryPaths []string `yaml:"extra_library_paths"`
+}
+
+// ProviderConfig controls one auto-detected store provider (gog, epic,
+// battlenet). Enabled defaults to true, so a config.yaml written
+// before the provider existed — and so missing its section entirely —
+// keeps the provider on, the same deal Steam gets.
+type ProviderConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 // DefaultsConfig holds install-wizard preselections.
@@ -61,6 +72,9 @@ func Default() Config {
 			Enabled:           true,
 			ExtraLibraryPaths: []string{},
 		},
+		GOG:       ProviderConfig{Enabled: true},
+		Epic:      ProviderConfig{Enabled: true},
+		BattleNet: ProviderConfig{Enabled: true},
 		Defaults: DefaultsConfig{
 			// Normal, not addon: the add-on build is what anti-cheat
 			// detects, so it has to be something the user asked for.
@@ -79,6 +93,12 @@ manual_games: []               # folders added by the user
 steam:
   enabled: true
   extra_library_paths: []     # if auto-detection misses a library
+gog:
+  enabled: true                # registry on Windows; Heroic/Lutris on Linux
+epic:
+  enabled: true                # launcher manifests on Windows; Heroic/Lutris on Linux
+battlenet:
+  enabled: true                # Battle.net agent's product.db (wine prefixes on Linux)
 defaults:
   reshade_flavor: normal      # normal | addon (addon builds are detectable by anti-cheat)
   packages: ["standard"]      # package ids preselected in the wizard

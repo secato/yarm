@@ -6,13 +6,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/andygrunwald/vdf"
 
+	"github.com/secato/yarm/internal/fsutil"
 	"github.com/secato/yarm/internal/game"
 	"github.com/secato/yarm/internal/safetext"
 )
@@ -192,18 +192,9 @@ const (
 
 // parseVDF reads and parses one Valve KeyValues file within those bounds.
 func parseVDF(path string) (map[string]interface{}, error) {
-	f, err := os.Open(path)
+	data, err := fsutil.ReadFileMax(path, maxVDFBytes)
 	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-
-	data, err := io.ReadAll(io.LimitReader(f, maxVDFBytes+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(data) > maxVDFBytes {
-		return nil, fmt.Errorf("steam: %s: larger than the %d byte limit", path, maxVDFBytes)
+		return nil, fmt.Errorf("steam: %w", err)
 	}
 	if err := checkVDFDepth(data, path); err != nil {
 		return nil, err

@@ -30,9 +30,9 @@ the background. It runs on **Windows and Linux**, including Steam Deck.
 ## What it does for you
 
 **Finds your games.** Steam libraries are detected automatically, wherever they
-live. Anything else — GOG, Epic, a folder you unzipped somewhere — you add by
-path, once. Automatic discovery for GOG, Epic and the other launchers is
-planned.
+live — and so are GOG, Epic Games Store and Battle.net games, from the stores'
+own data on Windows and from Heroic and Lutris on Linux. Anything else — a
+folder you unzipped somewhere — you add by path, once.
 
 **Installs ReShade the right way for each game.** YARM looks at the game's
 executable to work out whether it is 32- or 64-bit and which graphics API it

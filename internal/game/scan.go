@@ -27,6 +27,15 @@ var skipDirNames = map[string]bool{
 	"redist":        true,
 	"easyanticheat": true,
 	"support":       true,
+	// Blizzard bundles these with every Battle.net title (Diablo IV,
+	// Overwatch 2, ...): an embedded CEF browser for in-game social/shop
+	// panels and a crash-report uploader, neither of which is the game's
+	// own render process. Both ship a full DLL set of their own —
+	// BlizzardBrowser even carries its own d3dcompiler_47.dll — so
+	// unskipped, one sorts alphabetically ahead of the game's own
+	// executable and looks like a perfectly installable folder.
+	"blizzardbrowser": true,
+	"blizzarderror":   true,
 }
 
 // skipDirSequences are multi-component path suffixes to skip, matched

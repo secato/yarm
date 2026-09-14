@@ -41,6 +41,8 @@ func TestScan(t *testing.T) {
 		"_CommonRedist/vcredist_x64.exe",            // "_CommonRedist" is a skip dir
 		"Support/EasyAntiCheat/EasyAntiCheat.exe",   // "Support" is a skip dir
 		"Engine/Extras/ThirdPartyNotices/notes.exe", // "Engine/Extras" is a skip sequence
+		"BlizzardBrowser/BlizzardBrowser.exe",       // "BlizzardBrowser" is a skip dir
+		"BlizzardError/BlizzardError.exe",           // "BlizzardError" is a skip dir
 	}
 	notAnExe := "notes.txt"
 
