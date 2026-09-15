@@ -1,9 +1,8 @@
-//go:build linux
-
 package epic
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -97,7 +96,7 @@ func writeHeroicEpicDir(t *testing.T, appName, title, installPath string) string
 		t.Fatal(err)
 	}
 	body := `{
-		"` + appName + `": {"app_name": "` + appName + `", "title": "` + title + `", "install_path": "` + installPath + `", "is_dlc": false}
+		"` + appName + `": {"app_name": "` + appName + `", "title": "` + title + `", "install_path": "` + jsonEscape(installPath) + `", "is_dlc": false}
 	}`
 	if err := os.WriteFile(filepath.Join(dir, "legendaryConfig", "legendary", "installed.json"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
@@ -192,6 +191,15 @@ func TestName(t *testing.T) {
 	}
 }
 
+// withInstall substitutes the INSTALL placeholder with a path, JSON-escaped
+// so a Windows path's backslashes don't corrupt the surrounding JSON.
 func withInstall(body, install string) string {
-	return strings.Replace(body, "INSTALL", install, 1)
+	return strings.Replace(body, "INSTALL", jsonEscape(install), 1)
+}
+
+// jsonEscape returns s as it would appear inside a JSON string, without the
+// surrounding quotes.
+func jsonEscape(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b[1 : len(b)-1])
 }

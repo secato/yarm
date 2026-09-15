@@ -1,11 +1,10 @@
-//go:build linux
-
 package lutris
 
 import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/secato/yarm/internal/platform/sources/lutris/lutristest"
@@ -93,6 +92,9 @@ func TestPrefixOf(t *testing.T) {
 }
 
 func TestDSNEscapesPathCharacters(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("'?' is not a valid character in a Windows path")
+	}
 	// A path with a space and a '?' must survive the URI round trip;
 	// Games on it then proves the driver opens what dsn built.
 	path := filepath.Join(t.TempDir(), "lutris data?dir", "pga.db")

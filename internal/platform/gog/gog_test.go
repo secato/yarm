@@ -1,9 +1,8 @@
-//go:build linux
-
 package gog
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,6 +10,14 @@ import (
 	"github.com/secato/yarm/internal/game"
 	"github.com/secato/yarm/internal/platform/sources/lutris/lutristest"
 )
+
+// jsonEscape returns s as it would appear inside a JSON string, without the
+// surrounding quotes, so a Windows path's backslashes don't corrupt the
+// hand-built JSON test fixtures below.
+func jsonEscape(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b[1 : len(b)-1])
+}
 
 // fakeRegistry stands in for the Windows registry in tests.
 type fakeRegistry struct {
@@ -28,7 +35,7 @@ func writeHeroicDir(t *testing.T, appID, installPath string, isDLC bool) string 
 	if err := os.MkdirAll(filepath.Join(dir, "gog_store"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	body := `{"installed": [{"appName": "` + appID + `", "install_path": "` + installPath + `", "is_dlc": ` + boolText(isDLC) + `}]}`
+	body := `{"installed": [{"appName": "` + appID + `", "install_path": "` + jsonEscape(installPath) + `", "is_dlc": ` + boolText(isDLC) + `}]}`
 	if err := os.WriteFile(filepath.Join(dir, "gog_store", "installed.json"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
