@@ -14,6 +14,8 @@
 package main
 
 import (
+	"bytes"
+	"debug/pe"
 	"encoding/binary"
 	"fmt"
 	"os"
@@ -34,19 +36,25 @@ type fixture struct {
 	name    string
 	machine uint16
 	imports []importSpec
+	// corruptThunk overwrites the first import descriptor's
+	// OriginalFirstThunk with an RVA far outside the section, reproducing
+	// the malformed import table that panicked (*pe.File).ImportedSymbols
+	// with a slice-bounds-out-of-range on Go toolchains up to 1.25.x.
+	corruptThunk bool
 }
 
 var fixtures = []fixture{
-	{"x64_dxgi.bin", machineAMD64, []importSpec{{"dxgi.dll", "CreateDXGIFactory"}}},
-	{"x64_d3d11.bin", machineAMD64, []importSpec{{"d3d11.dll", "D3D11CreateDevice"}, {"dxgi.dll", "CreateDXGIFactory"}}},
-	{"x64_d3d12.bin", machineAMD64, []importSpec{{"d3d12.dll", "D3D12CreateDevice"}}},
-	{"x86_d3d10.bin", machineI386, []importSpec{{"d3d10_1.dll", "D3D10CreateDevice1"}}},
-	{"x86_d3d9.bin", machineI386, []importSpec{{"d3d9.dll", "Direct3DCreate9"}}},
-	{"x86_d3d8.bin", machineI386, []importSpec{{"d3d8.dll", "Direct3DCreate8"}}},
-	{"x86_opengl.bin", machineI386, []importSpec{{"opengl32.dll", "wglCreateContext"}}},
-	{"x64_vulkan.bin", machineAMD64, []importSpec{{"vulkan-1.dll", "vkCreateInstance"}}},
-	{"x64_unknown.bin", machineAMD64, []importSpec{{"kernel32.dll", "GetModuleHandleA"}}},
-	{"x64_no_imports.bin", machineAMD64, nil},
+	{"x64_dxgi.bin", machineAMD64, []importSpec{{"dxgi.dll", "CreateDXGIFactory"}}, false},
+	{"x64_d3d11.bin", machineAMD64, []importSpec{{"d3d11.dll", "D3D11CreateDevice"}, {"dxgi.dll", "CreateDXGIFactory"}}, false},
+	{"x64_d3d12.bin", machineAMD64, []importSpec{{"d3d12.dll", "D3D12CreateDevice"}}, false},
+	{"x86_d3d10.bin", machineI386, []importSpec{{"d3d10_1.dll", "D3D10CreateDevice1"}}, false},
+	{"x86_d3d9.bin", machineI386, []importSpec{{"d3d9.dll", "Direct3DCreate9"}}, false},
+	{"x86_d3d8.bin", machineI386, []importSpec{{"d3d8.dll", "Direct3DCreate8"}}, false},
+	{"x86_opengl.bin", machineI386, []importSpec{{"opengl32.dll", "wglCreateContext"}}, false},
+	{"x64_vulkan.bin", machineAMD64, []importSpec{{"vulkan-1.dll", "vkCreateInstance"}}, false},
+	{"x64_unknown.bin", machineAMD64, []importSpec{{"kernel32.dll", "GetModuleHandleA"}}, false},
+	{"x64_no_imports.bin", machineAMD64, nil, false},
+	{"x64_malformed_import.bin", machineAMD64, []importSpec{{"dxgi.dll", "CreateDXGIFactory"}}, true},
 }
 
 func main() {
@@ -57,6 +65,9 @@ func main() {
 
 	for _, fx := range fixtures {
 		data := buildPE(fx.machine, fx.imports)
+		if fx.corruptThunk {
+			corruptFirstThunk(data)
+		}
 		path := filepath.Join(outDir, fx.name)
 		if err := os.WriteFile(path, data, 0o644); err != nil {
 			panic(err)
@@ -151,6 +162,21 @@ func buildPE(machine uint16, imports []importSpec) []byte {
 	}
 
 	return buf
+}
+
+// corruptFirstThunk overwrites the OriginalFirstThunk field of the first
+// import descriptor in data's .idata section with an RVA far past the end
+// of the section, in place.
+func corruptFirstThunk(data []byte) {
+	f, err := pe.NewFile(bytes.NewReader(data))
+	if err != nil {
+		panic(err)
+	}
+	sec := f.Section(".idata")
+	if sec == nil {
+		panic("corruptFirstThunk: no .idata section")
+	}
+	binary.LittleEndian.PutUint32(data[sec.Offset:], sec.VirtualAddress+0x7fff0000)
 }
 
 // buildImportSection lays out the import directory table, per-DLL import

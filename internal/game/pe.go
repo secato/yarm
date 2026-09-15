@@ -16,14 +16,31 @@ import (
 // library (it always returns nil, nil) — see its doc comment. We use
 // ImportedSymbols() instead, which actually parses the import directory,
 // and derive DLL names from its "func:dll" entries.
-func Inspect(path string) (Arch, API) {
+//
+// debug/pe's own package doc warns that "parsing malformed files may ...
+// cause panics", and that isn't hypothetical: a game with an import
+// directory pointing outside its section panicked ImportedSymbols with a
+// slice-bounds-out-of-range on Go's toolchain up to 1.25.x (fixed in
+// 1.26 — see go.mod). Real-world executables are exactly the untrusted,
+// arbitrarily-malformed input that warning is about, so the recover below
+// stays even after the toolchain bump: one unusual .exe must never take
+// down the whole games scan.
+func Inspect(path string) (arch Arch, api API) {
+	arch, api = ArchUnknown, APIUnknown
+
+	defer func() {
+		if recover() != nil {
+			arch, api = ArchUnknown, APIUnknown
+		}
+	}()
+
 	f, err := pe.Open(path)
 	if err != nil {
 		return ArchUnknown, APIUnknown
 	}
 	defer func() { _ = f.Close() }()
 
-	arch := archOf(f.Machine)
+	arch = archOf(f.Machine)
 
 	symbols, err := f.ImportedSymbols()
 	if err != nil {

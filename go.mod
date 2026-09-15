@@ -1,6 +1,6 @@
 module github.com/secato/yarm
 
-go 1.25.0
+go 1.26.1
 
 // Published from a repository state that no longer exists; use v0.1.0-alpha.2.
 retract v0.1.0-alpha.1

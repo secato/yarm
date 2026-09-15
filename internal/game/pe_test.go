@@ -89,3 +89,16 @@ func TestInspectMissingFile(t *testing.T) {
 		t.Errorf("Inspect(missing) = (%s, %s), want (%s, %s)", arch, api, ArchUnknown, APIUnknown)
 	}
 }
+
+// TestInspectMalformedImportDirectory guards against a real crash: an
+// import descriptor pointing outside its section panicked
+// (*pe.File).ImportedSymbols with a slice-bounds-out-of-range on Go
+// toolchains up to 1.25.x (fixed in 1.26, but debug/pe's own doc still
+// warns malformed input "may ... cause panics"). Inspect must survive any
+// such executable rather than take the whole games scan down with it.
+func TestInspectMalformedImportDirectory(t *testing.T) {
+	arch, api := Inspect(filepath.Join(fixtureDir, "x64_malformed_import.bin"))
+	if arch != ArchX64 || api != APIUnknown {
+		t.Errorf("Inspect(malformed) = (%s, %s), want (%s, %s)", arch, api, ArchX64, APIUnknown)
+	}
+}
