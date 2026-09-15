@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.5] — 2026-09-14
+
+### Fixed
+
+- **GOG and Epic discovery tests now actually run on Windows.** Alpha.4 gated
+  them behind a Linux-only build tag, which also hid their native-discovery
+  coverage (Windows registry, manifest files) — the opposite of the goal. The
+  real bug was a test-fixture helper embedding raw Windows paths into JSON
+  string literals, producing invalid JSON; fixed by escaping the path first.
+
 ## [0.1.0-alpha.4] — 2026-09-14
 
 ### Fixed
