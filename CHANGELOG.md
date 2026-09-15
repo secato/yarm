@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.6] — 2026-09-15
+
+### Fixed
+
+- **First run could crash entirely while scanning games.** An executable
+  with a malformed import directory (some packers produce these) panicked
+  deep inside Go's `debug/pe.ImportedSymbols` instead of returning an error,
+  taking down the whole games list rather than just that one executable.
+  Fixed by bumping the Go toolchain to 1.26.1, where the standard library no
+  longer panics on this input, and by having `game.Inspect` recover
+  defensively regardless — `debug/pe`'s own docs warn malformed files "may
+  ... cause panics" in general.
+
 ## [0.1.0-alpha.5] — 2026-09-14
 
 ### Fixed
