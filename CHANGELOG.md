@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.7] — 2026-09-25
+
+### Fixed
+
+- **Installing over a foreign file needed an extra toggle.** When another
+  file holds ReShade's DLL name, "Overwrite existing files" now starts on
+  (backups remain on by default), since ReShade cannot load otherwise. The
+  apply confirmation now lists what is in the way in every target folder,
+  and hides the options entirely when there is nothing foreign to decide.
+
 ## [0.1.0-alpha.6] — 2026-09-15
 
 ### Fixed
