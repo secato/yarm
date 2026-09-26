@@ -638,22 +638,63 @@ func modalMove(t *testing.T, ov applyOverlay, code rune) applyOverlay {
 }
 
 // Overwrite is a checkbox in the apply confirmation, toggled the same way
-// shaders and add-ons are.
+// shaders and add-ons are, and starts on.
 func TestApplyModalOverwriteToggle(t *testing.T) {
-	s := loadWizard(t, sampleGameEntry(), 0, fakeDeps())
-	s = advance(t, s, stepReview)
+	entry := gameWithExistingFiles(t, map[string]int{"dxgi.dll": 25872384})
+	s := advance(t, loadWizard(t, entry, 0, fakeDeps()), stepReview)
 	ov := openApplyModal(t, s)
 
+	if !s.overwrite() {
+		t.Fatal("overwrite should start on")
+	}
+	modalToggle(t, ov)
 	if s.overwrite() {
-		t.Fatal("overwrite should start off")
+		t.Error("space should toggle overwrite off")
 	}
 	modalToggle(t, ov)
 	if !s.overwrite() {
-		t.Error("space should toggle overwrite on")
+		t.Error("space should toggle overwrite back on")
+	}
+}
+
+// With nothing foreign in the way the options decide nothing, so the
+// confirmation neither shows them nor lets a keypress flip them unseen —
+// and the request does not overwrite on the strength of an unseen default.
+func TestApplyModalHidesOptionsWithoutConflicts(t *testing.T) {
+	s := advance(t, loadWizard(t, gameWithExistingFiles(t, nil), 0, fakeDeps()), stepReview)
+	ov := openApplyModal(t, s)
+
+	if body := ov.view(wizardEnv()); strings.Contains(body, "Options") || strings.Contains(body, "Overwrite") {
+		t.Errorf("a clean folder should not offer overwrite options:\n%s", body)
 	}
 	modalToggle(t, ov)
-	if s.overwrite() {
-		t.Error("space should toggle overwrite back off")
+	if !s.overwrite() {
+		t.Error("space should do nothing while the options are hidden")
+	}
+	ops, ok := s.buildOps()
+	if !ok || ops[0].Install == nil {
+		t.Fatal("buildOps() failed")
+	}
+	if ops[0].Install.Overwrite {
+		t.Error("with no conflicts shown, the request must not overwrite")
+	}
+}
+
+// The confirmation names what is in the way, so what gets replaced is
+// seen at the moment of committing to it.
+func TestApplyModalListsWhatWillBeReplaced(t *testing.T) {
+	entry := gameWithExistingFiles(t, map[string]int{"dxgi.dll": 25872384})
+	s := advance(t, loadWizard(t, entry, 0, fakeDeps()), stepReview)
+	body := openApplyModal(t, s).view(wizardEnv())
+
+	for _, want := range []string{"Already in the folder", "dxgi.dll", "replaced, original saved", "Options"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the confirmation should show %q:\n%s", want, body)
+		}
+	}
+	ops, _ := s.buildOps()
+	if !ops[0].Install.Overwrite {
+		t.Error("with a foreign file shown and overwrite on, the request should overwrite")
 	}
 }
 
@@ -1433,6 +1474,7 @@ func TestConflictsKeepManagedFilesOnUpgrade(t *testing.T) {
 func TestWizardReviewShowsWhatIsAlreadyInTheFolder(t *testing.T) {
 	entry := gameWithExistingFiles(t, map[string]int{"dxgi.dll": 25872384})
 	s := advance(t, loadWizard(t, entry, 0, fakeDeps()), stepReview)
+	modalToggle(t, openApplyModal(t, s)) // overwrite off
 
 	body := s.View(wizardEnv())
 	if !strings.Contains(body, "Already in this folder") {
@@ -1455,7 +1497,7 @@ func TestWizardReviewShowsWhatIsAlreadyInTheFolder(t *testing.T) {
 func TestApplyModalSaysForeignFilesAreBackedUpWhenOverwriting(t *testing.T) {
 	entry := gameWithExistingFiles(t, map[string]int{"dxgi.dll": 25872384})
 	s := advance(t, loadWizard(t, entry, 0, fakeDeps()), stepReview)
-	ov := modalToggle(t, openApplyModal(t, s)) // overwrite on
+	ov := openApplyModal(t, s) // overwrite starts on
 
 	body := ov.view(wizardEnv())
 	// The advice wraps to the modal width, so assert on the halves either
@@ -1538,8 +1580,7 @@ func TestWizardBackupIsOnByDefault(t *testing.T) {
 func TestApplyModalBackupCanBeTurnedOff(t *testing.T) {
 	entry := gameWithExistingFiles(t, map[string]int{"dxgi.dll": 25872384})
 	s := advance(t, loadWizard(t, entry, 0, fakeDeps()), stepReview)
-	ov := openApplyModal(t, s)
-	ov = modalToggle(t, ov) // overwrite on
+	ov := openApplyModal(t, s) // overwrite starts on
 	ov = modalMove(t, ov, tea.KeyDown)
 	ov = modalToggle(t, ov) // backup off
 
@@ -1561,10 +1602,10 @@ func TestApplyModalBackupCanBeTurnedOff(t *testing.T) {
 // default comes back with it rather than inheriting an earlier "no
 // backups" from a decision the user may not remember making.
 func TestApplyModalTurningOverwriteBackOnRestoresBackups(t *testing.T) {
-	s := advance(t, loadWizard(t, sampleGameEntry(), 0, fakeDeps()), stepReview)
-	ov := openApplyModal(t, s)
+	entry := gameWithExistingFiles(t, map[string]int{"dxgi.dll": 25872384})
+	s := advance(t, loadWizard(t, entry, 0, fakeDeps()), stepReview)
+	ov := openApplyModal(t, s) // overwrite starts on
 
-	ov = modalToggle(t, ov) // overwrite on
 	ov = modalMove(t, ov, tea.KeyDown)
 	ov = modalToggle(t, ov) // backup off
 	ov = modalMove(t, ov, tea.KeyUp)
@@ -1582,8 +1623,9 @@ func TestApplyModalTurningOverwriteBackOnRestoresBackups(t *testing.T) {
 // While nothing is being overwritten the option does nothing, and says so
 // rather than presenting a checkbox with no effect.
 func TestApplyModalBackupOptionSaysItOnlyAppliesWhenOverwriting(t *testing.T) {
-	s := advance(t, loadWizard(t, sampleGameEntry(), 0, fakeDeps()), stepReview)
-	ov := openApplyModal(t, s)
+	entry := gameWithExistingFiles(t, map[string]int{"dxgi.dll": 25872384})
+	s := advance(t, loadWizard(t, entry, 0, fakeDeps()), stepReview)
+	ov := modalToggle(t, openApplyModal(t, s)) // overwrite off
 
 	if !strings.Contains(ov.view(wizardEnv()), "only when overwriting") {
 		t.Errorf("the backup row should say when it applies:\n%s", ov.view(wizardEnv()))
@@ -1983,7 +2025,8 @@ func TestEditingSummaryMovesWithLeftAndRight(t *testing.T) {
 
 // Pressing 'a' at the hub summary must not apply anything by itself — it
 // opens the apply confirmation, and only confirming it runs the edit. The
-// confirmation also carries the overwrite/backup options.
+// confirmation offers the overwrite/backup options only when a foreign
+// file is in the way.
 func TestWizardHubApplyOpensConfirmation(t *testing.T) {
 	s := editWizard(t)
 
@@ -1999,8 +2042,10 @@ func TestWizardHubApplyOpensConfirmation(t *testing.T) {
 	if !ok {
 		t.Fatalf("overlay = %T, want applyOverlay", msg.overlay)
 	}
-	if body := ov.view(wizardEnv()); !strings.Contains(body, "Options") {
-		t.Errorf("the confirmation should carry the overwrite/backup options:\n%s", body)
+	// Nothing foreign sits in the edited folder, so there is nothing for
+	// the overwrite/backup options to decide and they stay out of the way.
+	if body := ov.view(wizardEnv()); strings.Contains(body, "Options") {
+		t.Errorf("the confirmation should not offer options with nothing to overwrite:\n%s", body)
 	}
 
 	next, push := ov.update(overlayKey('y', "y"))

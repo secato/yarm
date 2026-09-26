@@ -332,10 +332,12 @@ func NewWizardScreen(entry GameEntry, exe Executable, targets []FolderGroup, dep
 	}
 }
 
-// newOptions builds the apply confirmation's checklist. Backups start on:
-// the only irreversible thing an install does is replacing a file the user
-// had without keeping a copy, and that has to be something they chose
-// rather than something they failed to notice.
+// newOptions builds the apply confirmation's checklist. Both start on: the
+// checklist is only shown when something foreign is in the way, and then
+// the install is pointless unless it is replaced — ReShade will not load
+// behind another file holding its DLL name. Backups being on as well is
+// what makes that default safe: discarding a file the user had has to be
+// something they chose rather than something they failed to notice.
 func newOptions() multiSelect {
 	m := newMultiSelect([]selectItem{
 		{ID: "overwrite", Name: "Overwrite existing files"},
@@ -345,6 +347,7 @@ func newOptions() multiSelect {
 			Description: "saved as .yarm-bak beside each file, and put back when you uninstall",
 		},
 	})
+	m.selected["overwrite"] = true
 	m.selected["backup"] = true
 	return m
 }
@@ -966,7 +969,13 @@ type applyOverlay struct {
 
 func (o applyOverlay) update(msg tea.KeyPressMsg) (overlay, tea.Cmd) {
 	s := o.screen
+	// The checklist is not drawn when nothing foreign is in the way, so
+	// its keys must not reach it either: an invisible toggle is worse
+	// than none.
+	options := hasForeign(s.applyConflicts())
 	switch {
+	case !options && (key.Matches(msg, s.keys.Up) || key.Matches(msg, s.keys.Down) ||
+		key.Matches(msg, s.keys.Toggle)):
 	case key.Matches(msg, s.keys.Up):
 		s.options.up()
 	case key.Matches(msg, s.keys.Down):
@@ -1015,16 +1024,37 @@ func (o applyOverlay) view(env Env) string {
 		b.WriteString("\n")
 	}
 
-	if conflicts := s.conflicts(); len(conflicts) > 0 {
+	folders := s.applyConflicts()
+	var all []install.Conflict
+	for _, f := range folders {
+		all = append(all, f.conflicts...)
+	}
+	if len(all) > 0 {
 		b.WriteString("\n")
-		for _, c := range s.applyConflictLines(conflicts, env, w) {
-			b.WriteString(c)
-			b.WriteString("\n")
+		b.WriteString(env.Styles.Subtitle.Render("Already in the folder"))
+		b.WriteString("\n")
+		for _, f := range folders {
+			// Several folders can each hold a dxgi.dll; without the
+			// folder a row would not say which one is being replaced.
+			if len(folders) > 1 {
+				b.WriteString(env.Styles.Faint.Render(clipTail(" "+f.dir+"/", w)))
+				b.WriteString("\n")
+			}
+			for _, c := range s.applyConflictLines(f.conflicts, env, w) {
+				b.WriteString(c)
+				b.WriteString("\n")
+			}
 		}
-		if note := s.conflictAdvice(s.applyBlocking(conflicts)); note != "" {
+		if note := s.conflictAdvice(s.applyBlocking(all)); note != "" {
 			b.WriteString(env.Styles.Faint.Render(wrap(note, w)))
 			b.WriteString("\n")
 		}
+	}
+
+	if !hasForeign(folders) {
+		b.WriteString("\n")
+		b.WriteString(env.Styles.Faint.Render(clipTail("y confirms · n/esc/enter cancels", w)))
+		return b.String()
 	}
 
 	b.WriteString("\n")
@@ -1137,6 +1167,43 @@ func (s *WizardScreen) applySelectionSummary() string {
 		parts = append(parts, s.renodxSummary())
 	}
 	return strings.Join(parts, " · ")
+}
+
+// folderConflicts is what Preflight found in one folder the apply touches.
+type folderConflicts struct {
+	dir       string
+	conflicts []install.Conflict
+}
+
+// applyConflicts runs the Review page's conflict check against every
+// folder the apply will write into, not just the reference one — the
+// confirmation is the last chance to see what gets replaced, and a
+// second folder's dxgi.dll is replaced just the same.
+func (s *WizardScreen) applyConflicts() []folderConflicts {
+	var out []folderConflicts
+	for _, g := range s.paths.selectedGroups() {
+		req, ok := s.buildRequestFor(s.paths.exeFor(g))
+		if !ok {
+			continue
+		}
+		if cs := s.filterUnchangedManaged(req, install.Preflight(req, s.existing)); len(cs) > 0 {
+			out = append(out, folderConflicts{dir: g.Dir, conflicts: cs})
+		}
+	}
+	return out
+}
+
+// hasForeign reports whether anything in the way is a file yarm did not
+// write — the only kind the overwrite/backup options decide anything for.
+func hasForeign(folders []folderConflicts) bool {
+	for _, f := range folders {
+		for _, c := range f.conflicts {
+			if c.Kind == install.ConflictForeign {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // applyConflictLines renders what is already in the folder the way the
@@ -1339,6 +1406,14 @@ func (s *WizardScreen) buildOps() ([]folderOp, bool) {
 		req, ok := s.buildRequestFor(s.paths.exeFor(g))
 		if !ok {
 			return nil, false
+		}
+		// Overwrite starts on but is only offered when Preflight saw a
+		// foreign file here. Where it saw none, the user was never asked,
+		// so the planner must not replace anything Preflight does not
+		// stat (a hand-placed shader) on the strength of that default.
+		cs := install.Preflight(req, s.existing)
+		if !hasForeign([]folderConflicts{{conflicts: cs}}) {
+			req.Overwrite = false
 		}
 		ops = append(ops, folderOp{Dir: g.Dir, Install: &req})
 	}
