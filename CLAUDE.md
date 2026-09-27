@@ -17,6 +17,7 @@ anything replaced, and never delete a file that isn't in the manifest.
 ```sh
 make build                 # → bin/yarm, with version ldflags from git describe
 make test                  # go test -race -coverprofile=cover.out ./...
+make test-network          # same, plus the real-internet tests (YARM_NETWORK_TESTS=1)
 make lint                  # golangci-lint (gofumpt, revive, staticcheck, errcheck, misspell)
 make cover                 # per-package coverage table
 make snapshot              # goreleaser release --snapshot --clean → dist/

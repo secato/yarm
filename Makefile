@@ -1,4 +1,4 @@
-.PHONY: build test lint cover snapshot clean
+.PHONY: build test test-network lint cover snapshot clean
 
 BINARY := yarm
 LDFLAGS := -s -w \
@@ -11,6 +11,12 @@ build:
 
 test:
 	go test -race -coverprofile=cover.out ./...
+
+# The full suite plus the tests that hit the real internet (upstream
+# catalog, reshade.me, GitHub). Kept out of `test` so CI and offline runs
+# never depend on third-party servers.
+test-network:
+	YARM_NETWORK_TESTS=1 go test -race ./...
 
 lint:
 	golangci-lint run ./...
