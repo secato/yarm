@@ -58,6 +58,9 @@ type resourceRow struct {
 	// Downloadable is false for custom content (already on disk — there
 	// is nothing to fetch) and a manual-only add-on.
 	Downloadable bool
+	// Required mirrors the catalog flag, so the shortlist keeps it as the
+	// wizard does.
+	Required     bool
 	Cached       bool
 	Size         int64
 	DownloadedAt time.Time
@@ -127,9 +130,11 @@ func loadResources(deps Deps) resourcesLoadedMsg {
 	msg.panes[paneReShadeNormal], msg.panes[paneReShadeAddon] = buildReShadeRows(data, deps.Cache, entries, installs)
 	msg.panes[panePackages] = buildPackageRows(data, deps.Cache, entries, installs)
 	msg.panes[paneAddons] = buildAddonRows(data, deps.Cache, entries, installs)
-	for p := range msg.panes {
-		sortCachedFirst(msg.panes[p])
-	}
+	// Only the version panes put what is on disk first. Packages and
+	// add-ons keep catalog order, the order the wizard lists them in, so
+	// a pack sits in the same place on both screens.
+	sortCachedFirst(msg.panes[paneReShadeNormal])
+	sortCachedFirst(msg.panes[paneReShadeAddon])
 	msg.total, msg.free, msg.freeErr = total, free, freeErr
 	return msg
 }
@@ -221,6 +226,7 @@ func buildPackageRows(data WizardData, c *cache.Cache, entries []cache.Entry, in
 			ID:           p.ID,
 			Name:         p.Name,
 			Downloadable: true,
+			Required:     p.Required,
 			Cached:       c.HasPackage(p.ID),
 			Size:         sumSize(matches),
 			DownloadedAt: latestDownload(matches),
@@ -537,7 +543,7 @@ func (s *ResourcesScreen) visible(p resourcePane) []resourceRow {
 
 	out := make([]resourceRow, 0, len(s.panes[p]))
 	for _, r := range s.panes[p] {
-		if keepInShortlist(r.ID, shortlist, r.Cached || r.InUse || r.Custom) {
+		if keepInShortlist(r.ID, shortlist, r.Required || r.Cached || r.InUse || r.Custom) {
 			out = append(out, r)
 		}
 	}

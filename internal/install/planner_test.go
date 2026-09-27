@@ -418,6 +418,36 @@ func TestPlanRejectsDuplicateDestinations(t *testing.T) {
 	}
 }
 
+// Packs by the same author vendor a shared framework (iMMERSE and METEOR
+// both ship MartysMods/mmx_*.fxh). Identical bytes are not a conflict:
+// the file is planned once, owned by the first package.
+func TestPlanDedupesIdenticalSharedFiles(t *testing.T) {
+	shared := "Shaders/MartysMods/mmx_bxdf.fxh"
+	f := newFixture(t).WithReShade().
+		WithPackage("a", artifacts.PackageMeta{Name: "A"}, map[string]string{shared: "same", "Shaders/A.fx": "a"}).
+		WithPackage("b", artifacts.PackageMeta{Name: "B"}, map[string]string{shared: "same", "Shaders/B.fx": "b"})
+
+	req := f.Request()
+	req.Packages = []string{"a", "b"}
+
+	plan, err := (Planner{}).Plan(req, f.Art)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	var hits []PlannedFile
+	for _, pf := range plan.Files {
+		if strings.HasSuffix(pf.Dest, "mmx_bxdf.fxh") {
+			hits = append(hits, pf)
+		}
+	}
+	if len(hits) != 1 {
+		t.Fatalf("shared header planned %d times, want 1", len(hits))
+	}
+	if hits[0].Origin != state.PackageOrigin("a") {
+		t.Errorf("shared header origin = %s, want the first package", hits[0].Origin)
+	}
+}
+
 func TestPlanMissingArtifacts(t *testing.T) {
 	tests := []struct {
 		name  string

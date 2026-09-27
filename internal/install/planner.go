@@ -260,10 +260,7 @@ func (p Planner) collect(req Request, art Artifacts, exeDir string, prev state.I
 		Size:   int64(len(DefaultINI())),
 	})
 
-	if err := checkDuplicates(files); err != nil {
-		return nil, err
-	}
-	return files, nil
+	return dedupeFiles(files)
 }
 
 // fromManifest derives a missing artifact group's planned files from the
@@ -533,18 +530,54 @@ func buildSteps(p Plan) []Step {
 	return steps
 }
 
-// checkDuplicates rejects a plan in which two sources target the same
-// file. Two packages shipping the same shader would otherwise race, and
-// the manifest could record a hash that does not match what landed.
-func checkDuplicates(files []PlannedFile) error {
-	seen := make(map[string]state.Origin, len(files))
+// dedupeFiles rejects a plan in which two sources would write different
+// content to the same file: they would race, and the manifest could record
+// a hash that does not match what landed. Byte-identical copies are fine
+// and common — packs by the same author vendor a shared framework
+// (iMMERSE and METEOR both ship MartysMods/mmx_*.fxh) — so the later copy
+// is dropped and the first origin owns the file. Hashing happens only for
+// destinations that actually collide.
+func dedupeFiles(files []PlannedFile) ([]PlannedFile, error) {
+	first := make(map[string]int, len(files))
+	out := files[:0:0]
 	for _, f := range files {
-		if prev, ok := seen[f.Dest]; ok {
-			return fmt.Errorf("%s would be written by both %s and %s", f.Dest, prev, f.Origin)
+		i, ok := first[f.Dest]
+		if !ok {
+			first[f.Dest] = len(out)
+			out = append(out, f)
+			continue
 		}
-		seen[f.Dest] = f.Origin
+		prev := out[i]
+		same, err := identicalSources(prev.Source, f.Source)
+		if err != nil {
+			return nil, err
+		}
+		if !same {
+			return nil, fmt.Errorf("%s would be written by both %s and %s with different content", f.Dest, prev.Origin, f.Origin)
+		}
 	}
-	return nil
+	return out, nil
+}
+
+// identicalSources reports whether two cache files hold the same bytes.
+// A generated or manifest-derived entry (no source) has nothing to
+// compare, so it never counts as identical.
+func identicalSources(a, b string) (bool, error) {
+	if a == "" || b == "" {
+		return false, nil
+	}
+	if a == b {
+		return true, nil
+	}
+	ha, err := hashFile(a)
+	if err != nil {
+		return false, err
+	}
+	hb, err := hashFile(b)
+	if err != nil {
+		return false, err
+	}
+	return ha == hb, nil
 }
 
 // walkFiles calls fn for every regular file under root, with a

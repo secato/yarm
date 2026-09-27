@@ -22,12 +22,11 @@ var curatedPackages = map[string]bool{
 	// The originals nearly every preset still names: LumaSharpen,
 	// Vibrance, Tonemap, SMAA, FXAA.
 	"sweetfx-by-ceejay-dk": true,
-	// Marty McFly's three generations, all still in active use: qUINT is
-	// what older presets were written against, iMMERSE replaced it
-	// (LAUNCHPAD, MXAO), METEOR is the extras.
+	// Marty McFly's current packs: iMMERSE (LAUNCHPAD, MXAO) and METEOR,
+	// the extras. qUINT, the generation iMMERSE replaced, is left to the
+	// full list.
 	"immerse-by-marty-mcfly": true,
 	"meteor-by-marty-mcfly":  true,
-	"quint-by-marty-mcfly":   true,
 	// Clarity.fx lives here, and it is the one effect from the classic
 	// four that SweetFX never shipped.
 	"astrayfx-by-blueskydefender": true,
@@ -95,7 +94,9 @@ var curatedAddons = map[string]bool{
 // curate narrows a step's rows to the curated shortlist. Rows are kept
 // when the shortlist names them, when they are already selected (editing
 // an install must never hide what it installed, however obscure), when
-// they cannot be deselected, and when they are not from the catalog at all
+// they cannot be deselected, when they are already downloaded (so the
+// wizard and the resources browser show the same set), and when they are
+// not from the catalog at all
 // — custom content is the user's own, and its header goes with it.
 //
 // all short-circuits the whole thing, which is what the "show all" key
@@ -106,7 +107,7 @@ func curate(items []selectItem, shortlist map[string]bool, all bool, selected ma
 	}
 	out := make([]selectItem, 0, len(items))
 	for _, it := range items {
-		if it.Header || keepInShortlist(it.ID, shortlist, it.Required || selected[it.ID]) {
+		if it.Header || keepInShortlist(it.ID, shortlist, it.Required || it.Cached || selected[it.ID]) {
 			out = append(out, it)
 		}
 	}

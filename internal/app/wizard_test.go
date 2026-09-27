@@ -13,6 +13,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/secato/yarm/internal/artifacts"
 	"github.com/secato/yarm/internal/catalog"
@@ -2299,5 +2300,24 @@ func TestReviewHasNoChangesBlockForAFreshInstall(t *testing.T) {
 
 	if body := s.View(wizardEnv()); strings.Contains(body, "Changes") {
 		t.Errorf("a fresh install should have no Changes block:\n%s", body)
+	}
+}
+
+// The wizard keeps downloaded and required rows on the shortlist, the same
+// rule the resources browser filters by, so both screens list the same packs.
+func TestCurateKeepsCachedAndRequiredRows(t *testing.T) {
+	items := []selectItem{
+		{ID: "crt-royale-reshade-by-akgunter", Cached: true},
+		{ID: "some-required-pack", Required: true},
+		{ID: "quint-by-marty-mcfly"},
+		{ID: "sweetfx-by-ceejay-dk"},
+	}
+	var got []string
+	for _, it := range curate(items, curatedPackages, false, nil) {
+		got = append(got, it.ID)
+	}
+	want := []string{"crt-royale-reshade-by-akgunter", "some-required-pack", "sweetfx-by-ceejay-dk"}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("curated rows (-want +got):\n%s", diff)
 	}
 }

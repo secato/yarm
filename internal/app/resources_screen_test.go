@@ -877,3 +877,15 @@ func indexOfVisible(t *testing.T, s *ResourcesScreen, p resourcePane, name strin
 	t.Fatalf("no row %q in %v", name, visibleNames(s, p))
 	return -1
 }
+
+// A required pack stays listed, as it does in the wizard.
+func TestResourcesScreenAlwaysShowsRequiredRows(t *testing.T) {
+	deps, _ := resourcesTestDeps(t)
+	deps = withPackages(t, deps,
+		catalog.Package{ID: "some-required-pack", Name: "Required pack", Required: true},
+	)
+	s := loadResourcesScreen(t, deps)
+	if !slices.Contains(visibleNames(s, panePackages), "Required pack") {
+		t.Errorf("a required package should be shown: %v", visibleNames(s, panePackages))
+	}
+}
