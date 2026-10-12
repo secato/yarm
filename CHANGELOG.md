@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-10-12
+
+### Added
+
+- **Linux install script.** `install.sh` downloads the latest release,
+  verifies its checksum and installs `yarm` into `~/.local/bin` (or
+  `/usr/local/bin` as root). Re-running it updates in place and is a no-op
+  when already current; `--uninstall` removes the binary.
+
+### Fixed
+
+- **Installing iMMERSE and METEOR together failed with nothing written.**
+  Both ship byte-identical `MartysMods/mmx_*.fxh` headers, and any two
+  packages writing the same file were treated as a conflict. Identical
+  copies are now installed once; files that actually differ still conflict.
+- **The wizard and the resources browser listed shaders differently.** Both
+  now show curated, required, cached and custom packages in catalog order.
+  qUINT is no longer on the curated shortlist (it is still under show-all).
+
 ## [0.1.0-alpha.7] — 2026-09-25
 
 ### Fixed
