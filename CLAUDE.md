@@ -1,208 +1,103 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code (claude.ai/code) in this repository.
 
 ## What this is
 
 YARM installs [ReShade](https://reshade.me/) into game folders and takes it back
-out again, from a terminal UI. Go, Bubble Tea v2, single static binary, Windows
-and Linux only (no darwin — ReShade injects into Windows games).
+out, from a terminal UI. Go, Bubble Tea v2, one static binary (`CGO_ENABLED=0`),
+Windows and Linux only. **There is no CLI** — `yarm` opens the TUI; the only
+flags are `-debug`, `-no-color`, `-version`.
 
-The defining constraint: **YARM writes into directories it does not own.** Every
-design choice follows from that — plan before write, record every file, back up
-anything replaced, and never delete a file that isn't in the manifest.
+**The defining constraint: yarm writes into directories it does not own.**
+Plan before write, record every file with its hash, back up anything
+replaced, and never delete a file that isn't in the manifest, still matches
+its hash, and is shaped like something yarm writes.
 
 ## Commands
 
 ```sh
-make build                 # → bin/yarm, with version ldflags from git describe
+make build                 # → bin/yarm, version from git describe
 make test                  # go test -race -coverprofile=cover.out ./...
-make test-network          # same, plus the real-internet tests (YARM_NETWORK_TESTS=1)
-make lint                  # golangci-lint (gofumpt, revive, staticcheck, errcheck, misspell)
+make lint                  # golangci-lint (gofumpt, govet, staticcheck, revive, errcheck, misspell, unused)
 make cover                 # per-package coverage table
-make snapshot              # goreleaser release --snapshot --clean → dist/
-goreleaser check           # validate .goreleaser.yaml
+make test-network          # + real-internet tests (YARM_NETWORK_TESTS=1)
+make snapshot              # goreleaser snapshot → dist/ (no publishing)
 
-go test ./internal/install/ -run TestPlanConflictDetection -v
-go test ./internal/app/ -run 'TestWizard.*'
-YARM_NETWORK_TESTS=1 go test ./internal/artifacts/   # the only tests that hit the real internet
+go test ./internal/install/ -run TestPlan -v
+YARM_HOME=/tmp/yarm-dev ./bin/yarm      # throwaway config/data/cache
+YARM_DEBUG=1 ./bin/yarm                 # debug log in <data>/yarm.log
 ```
 
-`make lint test` must both pass before a commit. Every `internal/` package
-stays at or above 75% coverage (`make cover` to check).
-
-Run the app against a throwaway state directory: `YARM_HOME=/tmp/yarm-dev ./bin/yarm`.
-`YARM_DEBUG=1` raises the log level; the resolved directories are logged at
-startup, so `yarm.log` in the data dir is where to look for them.
+`make lint test` must pass before a commit. Every `internal/` package stays at
+or above 75% coverage.
 
 ## Architecture
 
-### Layering
+Full docs: [docs/architecture/](docs/architecture/README.md). Read the
+relevant section before changing that area.
 
-```
-cmd/yarm  ─────────────┐  entry point: a few flags, then builds all the wiring
-internal/app  ─────────┤  the TUI; the only package allowed to import everything
-internal/{install,cache,catalog,artifacts,state,game,platform,config,paths,fetch,archive,fsutil}
-```
+| Area | Code | Doc |
+| --- | --- | --- |
+| Layering, end-to-end flow | `cmd/yarm`, `internal/app/pipeline.go` | [README](docs/architecture/README.md#layering) |
+| Plan / execute / record, uninstall, adopt, preflight | `internal/install`, `internal/state` | [install-engine](docs/architecture/install-engine.md) |
+| Catalogs, cache, downloads, RenoDX, curated/requires tables | `internal/{catalog,cache,artifacts,fetch,archive}` | [content-sources](docs/architecture/content-sources.md) |
+| Game providers, launcher sources, PE inspection | `internal/{platform,game}` | [game-discovery](docs/architecture/game-discovery.md) |
+| Screens, navigation, async, wizard | `internal/app` | [tui](docs/architecture/tui.md) |
+| Dirs, `YARM_HOME`, `config.yaml`, startup | `internal/{paths,config}`, `cmd/yarm` | [directories-and-config](docs/architecture/directories-and-config.md) |
+| Parsing external data safely | `internal/{safetext,fetch,archive}`, `state.Registry.Validate` | [untrusted-input](docs/architecture/untrusted-input.md) |
+| Tests, fixtures, network gating | `testdata/`, `*_test.go` | [testing](docs/architecture/testing.md) |
 
-Two rules hold this together:
+### Hard rules
 
-- **Nothing imports `internal/app`.** It is the top layer, which is why glue
-  that spans packages (`RealInstaller` combining cache + catalog + install)
-  lives there rather than in one of the packages it combines.
-- **No globals.** Every package takes its dependencies as structs or small
-  interfaces passed in, so tests substitute temp dirs and `httptest` servers.
+- **Nothing imports `internal/app`.** Cross-package glue (`RealInstaller`)
+  lives there. `cmd/yarm` is wiring only; `buildProviders` is the one place
+  providers are registered.
+- **No globals.** Dependencies are passed as structs or small interfaces;
+  the target OS is `artifacts.TargetOS`, not `runtime.GOOS`.
+- **Planning never downloads or writes.** The wizard's review page uses
+  `install.Preflight` + `install.NeededArtifacts`; the planner runs inside
+  the pipeline after downloads. See
+  [install-engine](docs/architecture/install-engine.md#phase-1--plan-plannergo).
+- **`installs.json` is precious**: a corrupt one is an error, never reset.
+  The cache index is disposable. `custom/` lives under Data, not Cache.
+- **Pass `nil` to `NeededArtifacts` for a fresh install**, never a pointer to
+  a zero `Install` ([why](docs/architecture/install-engine.md#needed-artifacts-neededgo)).
+- **Clean untrusted strings where they're parsed** (`safetext.Clean`), cap
+  every read of external data, https only
+  ([untrusted-input](docs/architecture/untrusted-input.md)).
+- **Never log to stderr while the TUI runs** — it owns the alternate screen.
 
-`cmd/yarm` holds no logic of its own beyond wiring — the install pipeline lives
-in `internal/app/pipeline.go` (`RealInstaller`), and there is only one caller.
+### TUI gotchas ([tui](docs/architecture/tui.md#rules-that-are-easy-to-get-wrong))
 
-### The install engine (`internal/install`)
-
-Three phases, kept strictly apart:
-
-1. **Plan** (`planner.go`) — turns a `Request` + resolved `Artifacts` into a
-   `Plan`: every file and its `Action` (`create`, `replace`, `skip`, `backup`,
-   `discard`, `keep`). Planning does **no downloads and no writes**, only stats. That is
-   what makes the wizard's review screen honest and the whole decision table
-   unit-testable against temp dirs.
-2. **Execute** (`executor.go`) — applies the plan, narrating `Event`s, and
-   rolls back on failure. Files it replaces are saved as `.yarm-bak`; files an
-   upgrade supersedes are staged as `.yarm-old` (distinct suffixes so rollback
-   can never confuse them).
-3. **Record** (`internal/state`) — `installs.json` in the data directory, one
-   entry per game+exe, listing every file with its SHA-256 and `Origin`.
-   Uninstall removes exactly those files and nothing else.
-
-`preflight.go` reports what already sits where the install wants to write (a
-foreign injector in the proxy-DLL slot, a config it must not touch);
-`adopt.go` finds an untracked install with `ScanUnmanaged` and takes it over
-(files get `OriginAdopted`, since their catalog provenance is unknown);
-`inspect.go` reads ReShade's own log, ini and preset to report the version
-that last ran and which effects are enabled.
-
-### Games and executables (`internal/game`, `internal/platform`)
-`platform.Provider` is the discovery interface (`Name`, `Discover`) —
-`steam`, the store providers `gog`, `epic` and `battlenet`, and
-`manual` today; `DiscoverAll` joins errors so one broken provider does
-not hide the rest. A provider that finds nothing returns an empty
-slice, not an error. The store providers are **store-centric**: the
-same game id (`gog:<product id>`, `epic:<app name>`, `battlenet:<uid>`)
-whether it was discovered from the store's own data on Windows (GOG
-registry keys, Epic manifest files, Battle.net's `product.db` protobuf)
-or from the launchers that manage those stores on Linux — the
-read-only readers under `internal/platform/sources` (`heroic`,
-`lutris`) normalize Heroic's and Lutris' metadata into
-one `sources.Entry` (Heroic records its Epic installs in the embedded
-legendary client's `installed.json`, so reading that file is part of
-reading Heroic), and `lutris` reads pga.db through the pure-Go
-`modernc.org/sqlite` driver (opened `mode=ro` — CGO is off, and the
-file belongs to Lutris). Battle.net on Linux reads the same
-`product.db` out of the wine prefix Lutris installed the client into.
-`game/pe.go` parses executables to determine arch (x86/x64) and guess
-the graphics API from imported DLLs, which is what picks the ReShade
-build and proxy DLL name. Vulkan and D3D8 are deliberately unsupported.
-
-### Content sources (`internal/catalog`, `cache`, `artifacts`, `fetch`)
-
-- `catalog` fetches upstream lists — crosire's `EffectPackages.ini` and
-  `Addons.ini` from the `list` branch, ReShade versions scraped from
-  `reshade.me` plus GitHub tags — and caches them with a TTL.
-- `artifacts` normalizes downloads into cache entries: ReShade DLLs out of the
-  setup `.exe` (a PE with a zip appended, which `archive/zip` reads directly),
-  packages out of repo zips, `d3dcompiler_47.dll` out of a Firefox installer.
-- `cache` owns the download cache: `reshade/`, `packages/`, `addons/`,
-  `d3dcompiler/`, `downloads/`, `catalog/`. Shared across games — installing
-  the same pack into a fifth game copies, it does not re-download.
-
-### Directories (`internal/paths`)
-
-`Resolve()` gives `Config`/`Data`/`Cache`; `YARM_HOME` puts all three under one
-root (used by tests and portable installs); Windows collapses config and data
-into `%LOCALAPPDATA%\yarm`.
-
-**`custom/` lives under Data, not Cache** (`paths.Custom()`), and
-`MigrateCustom` moves it on launch for users from before that change. The
-reasoning is load-bearing: everything else in the cache can be re-downloaded,
-hand-placed shaders cannot, and `~/.cache` is treated as disposable by the XDG
-spec and by cleanup tools.
-
-### The TUI (`internal/app`)
-
-`Model` (`app.go`) is the root: it owns terminal size, the resolved theme, a
-screen **stack**, and an overlay. Everything else is a `Screen`:
-
-```go
-type Screen interface {
-    Init() tea.Cmd
-    Update(msg tea.Msg, env Env) (Screen, tea.Cmd)   // returns the next screen; values, not pointers-mutated
-    View(env Env) string                              // body only — the shell draws title and status
-    Title() string
-    KeyBindings() []key.Binding
-}
-```
-
-Points that are easy to get wrong:
-
-- **`Env` is passed in, never stored.** Size and theme have one source of
-  truth, so a resize cannot leave a screen holding a stale width.
-- **A pushed screen has never seen a `WindowSizeMsg`.** Bubble Tea only sends
-  one on a real resize, so `Model.sized()` hands the current size over on push
-  and on pop. Skip that and table-based screens render blank.
-- Navigation is by command: `PushScreen`, `PopScreen`, `PopToRoot` (used after
-  an install so the games list reloads), `ReportError`, `SetStatus`. A screen
-  can implement `backHandler` to intercept `esc` (wizard back-a-step, progress
-  cancel).
-- **Async work never blocks the UI.** `Async` for one result; `StreamJob` +
-  `WaitForActivity` for progress (re-issue `WaitForActivity` after every
-  message except the last). Read the comment on `StreamJob` before touching it
-  — its `send` deliberately has no `ctx.Done()` escape.
-- `Deps` (`deps.go`) is threaded down Games → GameDetail → Wizard, so each
-  screen passes it along rather than rebuilding wiring.
-- Wizard catalog data is memoized for the session (`wizard_data_memo.go`) and
-  preloaded from the games screen, so opening the wizard is instant; a failed
-  load resets the `sync.Once` so the next caller retries.
-- `curated.go` holds the hand-kept shortlist the wizard opens on. It is
-  deliberately not derived from the catalog — upstream carries no popularity
-  signal. Add to it when a pack becomes something people ask for by name.
-- Styles resolve once from the terminal's real background color
-  (`tea.RequestBackgroundColor` → `NewStyles(isDark)`), so rendering stays pure.
-- Width is measured in cells; `clipTail` counts runes, so **clip before
-  styling**, never after.
-
-### Entry point (`cmd/yarm`)
-
-**There is no CLI.** yarm takes no subcommands — running it opens the TUI, and
-that is the only way to drive it. `main.go` is ~280 lines: parse three flags,
-resolve directories, load config, set up logging, build the object graph, call
-`app.Run`.
-
-The flags are `-debug` (`YARM_DEBUG=1`), `-no-color` (`NO_COLOR=1`) and
-`-version`, parsed with stdlib `flag` — cobra is not a dependency. A leftover
-argument is reported as a usage error with exit code 2, since it is almost
-always someone reaching for a subcommand that used to exist; failures while
-running exit 1 and are written to both stderr and the log.
-
-Nothing logs to stderr while the program runs: the TUI owns the alternate
-screen, and anything written underneath it corrupts the display. `main` prints
-the error itself, after Bubble Tea has given the terminal back.
+- `Env` is passed into `Update`/`View`, never stored.
+- A pushed screen never saw a `WindowSizeMsg`; `Model.sized()` supplies one —
+  skip it and tables render blank.
+- Async work goes through `Async` or `StreamJob` + `WaitForActivity`
+  (re-issue after every message but the last). `StreamJob`'s `send` has no
+  `ctx.Done()` escape on purpose.
+- Clip before styling (`clipTail` counts runes); width is in cells.
+- `curated.go` and `requires.go` are hand-kept on purpose — upstream has no
+  popularity or dependency data.
 
 ## Conventions
 
 - **Conventional Commits** (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`,
   `chore:`), subject under ~70 chars, body explains *why*.
-- **Comments explain the reasoning, not the mechanics.** This codebase's
-  comments carry the decisions — why custom content left the cache, why the
-  curated list is hand-kept, why `StreamJob` cannot honor cancellation. Match
-  that register; a comment restating the code is worse than none.
+- **Comments explain the reasoning, not the mechanics.** Match the existing
+  register; a comment restating the code is worse than none.
 - **Always `filepath`**, never string concatenation; cross-platform behavior
-  goes through `internal/fsutil` and `internal/paths`.
-- Tests: standard `testing`, `httptest` for fake catalog/download servers,
-  `go-cmp` for diffs, `teatest/v2` to drive screens headlessly at a pinned
-  terminal size. Never hit the real network outside `YARM_NETWORK_TESTS=1`.
-  Fixtures live in `testdata/` (`pe/`, `steam/`, `catalog/`, `7z/`).
-- `docs/plan/` is local-only and gitignored — do not reference it from tracked
+  goes through `internal/fsutil` and `internal/paths`. Manifest paths are
+  slash-separated.
+- Tests: standard `testing`, `httptest`, `go-cmp`, `teatest/v2`; fixtures in
+  `testdata/`. Never hit the real network outside `YARM_NETWORK_TESTS=1`.
+- Keep `docs/architecture/` in step with the code when changing a documented
+  behavior.
+- `docs/plan/` is local-only and gitignored — never reference it from tracked
   files.
-- Releases are cut by pushing a `v*` tag; see CONTRIBUTING.md.
+- Releases: push a `v*` tag (see CONTRIBUTING.md). `install.sh` depends on the
+  archive `name_template` and on `yarm -version` printing the bare version as
+  its second word. The AUR step is parked (`skip_upload: true`).
 
 <!-- ai-memory:start -->
 ## Long-term memory (ai-memory)

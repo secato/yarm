@@ -29,83 +29,24 @@ the background. It runs on **Windows and Linux**, including Steam Deck.
 
 ## What it does for you
 
-**Finds your games.** Steam libraries are detected automatically, wherever they
-live — and so are GOG, Epic Games Store and Battle.net games, from the stores'
-own data on Windows and from Heroic and Lutris on Linux. Anything else — a
-folder you unzipped somewhere — you add by path, once.
-
-**Installs ReShade the right way for each game.** YARM looks at the game's
-executable to work out whether it is 32- or 64-bit and which graphics API it
-uses, then picks the matching ReShade build and proxy DLL for you. You can
-override any of it if you know better.
-
-**Gives you the shaders people actually use.** The wizard opens on a curated
-shortlist — SweetFX, iMMERSE, qUINT, METEOR, LumeniteFX and the rest — instead
-of a wall of a hundred packages. One key widens it to the full catalog when you
-want something specific.
-
-**Installs RenoDX for you.** [RenoDX](https://github.com/clshortfuse/renodx)
-rewrites a game's shaders to upgrade its HDR, and has mods for around 200 games.
-yarm knows which one belongs to the game you picked and offers it by name — the
-rest are a keystroke of search away. It is one file, and yarm removes it with
-everything else when you uninstall.
-
-**Handles dependencies for you.** Some add-ons need a particular shader to work
-at all. Pick the AutoHDR add-on and YARM selects the tone-mapping shader it
-needs, and tells you why it did.
-
-**Downloads once, not once per game.** Everything is cached and shared, so
-installing the same shader pack into a fifth game copies files rather than
-re-downloading them. You can see what is cached, what it costs in disk space,
-and which games are using it.
-
-**Uninstalls cleanly.** YARM records every file it writes. Uninstall removes
-exactly those and nothing else — your presets, screenshots and edited configs
-stay. If it had to replace a file that was already there, it kept a copy and
-puts it back.
-
-**Tells you before it overwrites anything.** If something else already occupies
-the DLL slot ReShade needs — another injector, or a ReShade you installed by
-hand — YARM says so before it starts, not after.
-
-**Takes over installs you did by hand.** Point it at a game you set up
-yourself and it can adopt that install and manage it from then on.
-
-**Lets you bring your own.** Drop your own shaders or add-ons into a folder and
-they appear in the wizard next to the catalog ones.
+- **Finds your games** — Steam, GOG, Epic and Battle.net (directly on Windows, through Heroic and Lutris on Linux), plus any folder you add by path.
+- **Picks the right ReShade** — reads the game's executable for 32/64-bit and graphics API, and chooses the build and proxy DLL.
+- **Curated shaders** — opens on the packs people actually use (SweetFX, iMMERSE, METEOR, …), with the full catalog one key away.
+- **RenoDX HDR mods** — offers the right mod for your game by name.
+- **Handles dependencies** — selecting an add-on also selects the shaders it needs, and says why.
+- **Downloads once** — a shared cache, so the fifth game copies instead of re-downloading.
+- **Uninstalls cleanly** — removes exactly the files it wrote and restores anything it replaced.
+- **Warns before overwriting** — tells you up front when another injector holds ReShade's DLL slot.
+- **Adopts manual installs** — takes over a ReShade you set up by hand.
+- **Bring your own** — your own shaders and add-ons show up next to the catalog.
 
 ## Installing YARM
 
-**Linux** — one command, no root needed:
+- **Linux:** `curl -fsSL https://raw.githubusercontent.com/secato/yarm/main/install.sh | sh` (run it again to update)
+- **Windows:** download the zip from [Releases](https://github.com/secato/yarm/releases) and run `yarm.exe` in Windows Terminal.
+- **From source:** `go install github.com/secato/yarm/cmd/yarm@latest`
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/secato/yarm/main/install.sh | sh
-```
-
-It downloads the latest release for your architecture, checks it against the
-release's `checksums.txt`, and puts `yarm` in `~/.local/bin` (`/usr/local/bin`
-when run as root). Run the same command again to update; it does nothing when
-you are already on the latest version.
-
-| Variable / flag | Effect |
-| --- | --- |
-| `YARM_VERSION=v1.0.0` | install a specific release instead of the latest |
-| `YARM_INSTALL_DIR=/some/dir` | install somewhere else |
-| `sh -s -- --uninstall` | remove the binary (yarm's data directory is kept, since it is what lets yarm remove ReShade from your games) |
-
-For example, to update into a custom directory:
-`curl -fsSL https://raw.githubusercontent.com/secato/yarm/main/install.sh | YARM_INSTALL_DIR=~/bin sh`
-
-**Windows** — download the zip from
-[Releases](https://github.com/secato/yarm/releases), unpack it and run
-`yarm.exe`. There is nothing to install.
-
-**From source** — `go install github.com/secato/yarm/cmd/yarm@latest`
-
-### Requirements
-
-Any modern terminal with UTF-8 and a font that covers box-drawing and arrows. On Windows
-that means **Windows Terminal** — the legacy `cmd.exe` will not work.
+Options, uninstalling and where yarm keeps its files: [docs/install.md](docs/install.md).
 
 ## Using it
 
@@ -141,8 +82,9 @@ is `$YARM_HOME/data/custom/` instead.
 
 ## Documentation
 
-[`CONTRIBUTING.md`](CONTRIBUTING.md) covers the package layout, building and
-testing, and how to add support for another game library.
+- [Installing](docs/install.md) — script options, uninstalling, file locations.
+- [Architecture](docs/architecture/README.md) — how yarm works and the decisions behind it.
+- [Contributing](CONTRIBUTING.md) — building, testing, releasing.
 
 ## Credits
 
