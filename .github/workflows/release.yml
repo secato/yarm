@@ -46,8 +46,6 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Passwordless AUR deploy key; see CONTRIBUTING.md. Absent until
-          # the AUR package exists, which fails the aurs step — so keep the
-          # first tag a prerelease (`v0.1.0-rc1`), which skip_upload: auto
-          # skips, or add the secret before tagging v0.1.0.
+          # Passwordless AUR deploy key; see CONTRIBUTING.md. Unused while
+          # the aurs step has skip_upload: true.
           AUR_KEY: ${{ secrets.AUR_KEY }}

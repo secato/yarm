@@ -76,13 +76,31 @@ they appear in the wizard next to the catalog ones.
 
 ## Installing YARM
 
-| Platform | How |
-| --- | --- |
-| **Windows / Linux** | Download the zip or tar.gz from [Releases](https://github.com/secato/yarm/releases) and run `yarm`. There is nothing to install. |
-| **From source** | `go install github.com/secato/yarm/cmd/yarm@latest` |
+**Linux** — one command, no root needed:
 
-An Arch package (`yay -S yarm-bin`) follows the first stable release; the
-alpha ships as archives only.
+```sh
+curl -fsSL https://raw.githubusercontent.com/secato/yarm/main/install.sh | sh
+```
+
+It downloads the latest release for your architecture, checks it against the
+release's `checksums.txt`, and puts `yarm` in `~/.local/bin` (`/usr/local/bin`
+when run as root). Run the same command again to update; it does nothing when
+you are already on the latest version.
+
+| Variable / flag | Effect |
+| --- | --- |
+| `YARM_VERSION=v1.0.0` | install a specific release instead of the latest |
+| `YARM_INSTALL_DIR=/some/dir` | install somewhere else |
+| `sh -s -- --uninstall` | remove the binary (yarm's data directory is kept, since it is what lets yarm remove ReShade from your games) |
+
+For example, to update into a custom directory:
+`curl -fsSL https://raw.githubusercontent.com/secato/yarm/main/install.sh | YARM_INSTALL_DIR=~/bin sh`
+
+**Windows** — download the zip from
+[Releases](https://github.com/secato/yarm/releases), unpack it and run
+`yarm.exe`. There is nothing to install.
+
+**From source** — `go install github.com/secato/yarm/cmd/yarm@latest`
 
 ### Requirements
 

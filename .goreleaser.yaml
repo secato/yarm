@@ -99,9 +99,11 @@ aurs:
     license: MIT
     private_key: "{{ .Env.AUR_KEY }}"
     git_url: "ssh://aur@aur.archlinux.org/yarm-bin.git"
-    # `auto` skips the AUR push for snapshots and prereleases, so a
-    # `v0.1.0-rc1` tag cannot land in the AUR by accident.
-    skip_upload: auto
+    # AUR registration is closed, so there is no deploy key and a push would
+    # fail the release. The PKGBUILD is still generated into dist/aur/. Once
+    # an account and the AUR_KEY secret exist, set this back to `auto`, which
+    # skips snapshots and prereleases.
+    skip_upload: true
     provides:
       - yarm
     conflicts:

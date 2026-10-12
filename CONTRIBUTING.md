@@ -34,7 +34,7 @@ The package layout and dependency rules:
 
 ## Adding a game-library provider
 
-Steam is the only provider in v1. To add another (GOG/Heroic/Epic/Lutris):
+Steam, GOG, Epic, Battle.net and manual entries exist today. To add another:
 
 1. Implement the `platform.Provider` interface in a new
    `internal/platform/<name>/` package.
@@ -72,7 +72,7 @@ the layout changes enough that it misleads: run yarm in a terminal around
 ## Releasing
 
 Releases are cut by pushing a tag; nothing else publishes. `.goreleaser.yaml`
-builds linux/windows archives, checksums and the AUR `PKGBUILD`, and
+builds linux/windows archives and checksums, and
 `.github/workflows/release.yml` runs it for a pushed `v*` tag only — after
 re-running build and tests on the tag itself, since the binaries come from
 the tag rather than from whatever branch it points at.
@@ -94,22 +94,24 @@ To release:
 1. Move everything under `## [Unreleased]` in `CHANGELOG.md` into a
    version heading, and commit.
 2. `git tag v0.1.0 && git push origin v0.1.0`.
-3. Watch the Release workflow. It creates the GitHub Release, uploads the
-   archives and checksums, and pushes the `PKGBUILD` to the AUR.
+3. Watch the Release workflow. It creates the GitHub Release and uploads the
+   archives and checksums. `install.sh` picks the new release up as soon as
+   it is published (prereleases excepted).
 
-### AUR, one time
+### Linux install script
 
-The AUR is one git repo per package holding a `PKGBUILD`. `yarm-bin`
-packages the prebuilt release binary; a from-source `yarm` package can come
-later. GoReleaser pushes on each tag, and the first push creates the
-package. Before the first non-prerelease tag:
+`install.sh` at the repo root is what the README tells Linux users to pipe
+into `sh`. It depends on the release asset names (`yarm_<version>_linux_<arch>.tar.gz`
+and `checksums.txt`) and on `yarm -version` printing the bare version as its
+second word, so changing either `name_template` in `.goreleaser.yaml` or
+`buildinfo.String` breaks it. It resolves "latest" through GitHub's
+`/releases/latest` redirect, which skips prereleases.
 
-1. Create an account on [aur.archlinux.org](https://aur.archlinux.org).
-2. Generate a **passwordless** deploy key: `ssh-keygen -t ed25519 -f aur -N ""`.
-3. Add `aur.pub` to the account's SSH keys.
-4. Put the private key in the repo secret `AUR_KEY`.
+### AUR
 
-Until that secret exists, keep tags prereleases (`v0.1.0-rc1`): `skip_upload:
-auto` skips the AUR step for those, so the rest of the release still works.
-
-Users then install with `yay -S yarm-bin`.
+The `aurs:` block in `.goreleaser.yaml` is ready but dormant: AUR account
+registration is closed, so there is no `AUR_KEY` secret. Without it the AUR
+step would fail a stable tag, so it has `skip_upload: true`. Once an account
+exists, add a passwordless deploy key
+(`ssh-keygen -t ed25519 -f aur -N ""`) to the account, store the private key
+as the `AUR_KEY` repo secret, and restore `skip_upload: auto`.
