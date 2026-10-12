@@ -1,5 +1,5 @@
 // Package platform discovers installed games via pluggable providers
-// (Steam, manually added folders, and — later — other launchers).
+// (Steam, GOG, Epic, Battle.net and manually added folders).
 package platform
 
 import (

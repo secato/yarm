@@ -1,13 +1,8 @@
 # TODO
 Improvements to do, not ordered by priority
 
-## Game discovery
-- add battle.net games discovery
-- add epic games discovery
-- add gog games discovery
-
 ## Install
-- linux script for raw install
+- AUR package (`yarm-bin` is configured in .goreleaser.yaml; waiting on AUR registration)
 - windows install wizard?
 - distribute as packages (deb, rpm, etc)
 

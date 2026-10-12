@@ -145,10 +145,9 @@ func findPrevInstall(reg state.Registry, gameID, exe string) *state.Install {
 }
 
 // resolve downloads and locates the artifact groups needed says this
-// request can actually write through, mirroring cmd/yarm's
-// resolveArtifacts. req.Packages/Addons are already canonical catalog ids
-// here (selected straight from a list the wizard showed), so unlike the
-// CLI path there is no alias resolution to do.
+// request can actually write through. req.Packages/Addons are already
+// canonical catalog ids (selected straight from a list the wizard showed),
+// so there is no alias resolution to do.
 //
 // Groups the needed set excludes are resolved from the previous
 // manifest by the planner itself: their installed files are unchanged,

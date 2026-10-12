@@ -58,7 +58,7 @@ To release:
 
 1. Move everything under `## [Unreleased]` in `CHANGELOG.md` into a
    version heading, and commit.
-2. `git tag v0.1.0 && git push origin v0.1.0`.
+2. `git tag v1.2.3 && git push origin v1.2.3`.
 3. Watch the Release workflow. It creates the GitHub Release and uploads the
    archives and checksums. `install.sh` picks the new release up as soon as
    it is published (prereleases excepted).
