@@ -17,7 +17,7 @@ choose along with the shaders and add-ons you want, and keeps track of every
 file it put there — so uninstalling gives you the folder back exactly as it was.
 
 It is a single binary with no runtime, no installer and no launcher running in
-the background. It runs on **Windows and Linux**, including Steam Deck.
+the background. It runs on **Linux**, including Steam Deck (Desktop Mode).
 
 <div align="center">
 <img src="docs/main-screen.png" alt="The games list, with a game's install details in the side panel" width="900">
@@ -29,7 +29,7 @@ the background. It runs on **Windows and Linux**, including Steam Deck.
 
 ## What it does for you
 
-- **Finds your games** — Steam, GOG, Epic and Battle.net (directly on Windows, through Heroic and Lutris on Linux), plus any folder you add by path.
+- **Finds your games** — Steam, GOG, Epic and Battle.net (through Heroic and Lutris for the non-Steam stores), plus any folder you add by path.
 - **Picks the right ReShade** — reads the game's executable for 32/64-bit and graphics API, and chooses the build and proxy DLL.
 - **Curated shaders** — opens on the packs people actually use (SweetFX, iMMERSE, METEOR, …), with the full catalog one key away.
 - **RenoDX HDR mods** — offers the right mod for your game by name.
@@ -43,7 +43,6 @@ the background. It runs on **Windows and Linux**, including Steam Deck.
 ## Installing YARM
 
 - **Linux:** `curl -fsSL https://raw.githubusercontent.com/secato/yarm/main/install.sh | sh` (run it again to update)
-- **Windows:** download the zip from [Releases](https://github.com/secato/yarm/releases) and run `yarm.exe` in Windows Terminal.
 - **From source:** `go install github.com/secato/yarm/cmd/yarm@latest`
 
 Options, uninstalling and where yarm keeps its files: [docs/install.md](docs/install.md).
@@ -71,10 +70,7 @@ custom/
 
 By default that is:
 
-| OS | Folder |
-| --- | --- |
-| **Linux** | `~/.local/share/yarm/custom/` (or `$XDG_DATA_HOME/yarm/custom/`) |
-| **Windows** | `%LOCALAPPDATA%\yarm\custom\` |
+`~/.local/share/yarm/custom/` (or `$XDG_DATA_HOME/yarm/custom/`).
 
 It lives with your data rather than in the cache, so clearing yarm's downloads
 — or your `~/.cache` — never touches it. If you have set `YARM_HOME`, the folder

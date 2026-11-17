@@ -15,7 +15,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/secato/yarm/internal/artifacts"
 	"github.com/secato/yarm/internal/catalog"
 	"github.com/secato/yarm/internal/config"
 	"github.com/secato/yarm/internal/game"
@@ -379,9 +378,6 @@ func TestWizardFullForwardFlowBuildsRequest(t *testing.T) {
 	}
 	if len(req.Addons) != 1 || req.Addons[0] != "swap-chain-override-by-crosire" {
 		t.Errorf("Addons = %v, want just the installable one", req.Addons)
-	}
-	if req.TargetOS != artifacts.CurrentTargetOS() {
-		t.Errorf("TargetOS = %q, want the current platform", req.TargetOS)
 	}
 }
 

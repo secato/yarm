@@ -80,8 +80,8 @@ func dirsUnder(t *testing.T, root string) []string {
 // This is step 4's "done when": installing into a game directory and then
 // uninstalling must leave it byte-identical to how it started.
 func TestInstallUninstallRoundTripIsByteIdentical(t *testing.T) {
-	for _, target := range []artifacts.TargetOS{artifacts.OSWindows, artifacts.OSLinux} {
-		t.Run(string(target), func(t *testing.T) {
+	{
+		t.Run("linux", func(t *testing.T) {
 			f := newFixture(t).WithReShade().WithD3DCompiler().
 				WithPackage("standard-effects",
 					artifacts.PackageMeta{Name: "Standard", EffectFiles: []string{"Deband.fx"}},
@@ -102,7 +102,6 @@ func TestInstallUninstallRoundTripIsByteIdentical(t *testing.T) {
 			dirsBefore := dirsUnder(t, f.GameDir)
 
 			req := f.Request()
-			req.TargetOS = target
 			req.Packages = []string{"standard-effects"}
 			req.Addons = []string{"swapchain"}
 			req.Custom = []string{"mine"}

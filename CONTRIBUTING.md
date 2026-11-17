@@ -37,7 +37,7 @@ the layout changes enough that it misleads: run yarm in a terminal around
 ## Releasing
 
 Releases are cut by pushing a tag; nothing else publishes. `.goreleaser.yaml`
-builds linux/windows archives and checksums, and
+builds the Linux archives and checksums, and
 `.github/workflows/release.yml` runs it for a pushed `v*` tag only — after
 re-running build and tests on the tag itself, since the binaries come from
 the tag rather than from whatever branch it points at.

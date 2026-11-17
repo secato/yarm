@@ -1,5 +1,3 @@
-//go:build !windows
-
 package epic
 
 // defaultManifestDirs returns no candidates: the Epic launcher's

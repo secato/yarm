@@ -38,6 +38,9 @@ func newFixture(t *testing.T) *fixture {
 		Addons:   map[string]string{},
 		Custom:   map[string]string{},
 	}
+	// Every install carries d3dcompiler_47.dll, so a fixture without one
+	// could not plan at all; tests that need it absent clear Art.D3DCompiler.
+	f.WithD3DCompiler()
 	return f
 }
 
@@ -134,11 +137,10 @@ func (f *fixture) Request() Request {
 		Game: game.Game{
 			ID: "steam:700110", Name: "Ember Hollow", Provider: "steam", Root: f.GameDir,
 		},
-		Exe:      game.Executable{Path: filepath.FromSlash("Game/emberhollow.exe"), Arch: game.ArchX64, API: game.APID3D12},
-		Version:  "6.8.0",
-		Flavor:   FlavorAddon,
-		DLLName:  "dxgi.dll",
-		TargetOS: artifacts.OSWindows,
+		Exe:     game.Executable{Path: filepath.FromSlash("Game/emberhollow.exe"), Arch: game.ArchX64, API: game.APID3D12},
+		Version: "6.8.0",
+		Flavor:  FlavorAddon,
+		DLLName: "dxgi.dll",
 	}
 }
 

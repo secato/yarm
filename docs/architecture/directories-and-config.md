@@ -4,15 +4,13 @@
 
 `paths.Resolve()` returns three directories:
 
-| | Linux | Windows | `YARM_HOME` set |
-| --- | --- | --- | --- |
-| Config | `$XDG_CONFIG_HOME/yarm` | `%LOCALAPPDATA%\yarm` | `$YARM_HOME/config` |
-| Data | `$XDG_DATA_HOME/yarm` | `%LOCALAPPDATA%\yarm` | `$YARM_HOME/data` |
-| Cache | `$XDG_CACHE_HOME/yarm` | `%LOCALAPPDATA%\yarm\cache` | `$YARM_HOME/cache` |
+| | Default | `YARM_HOME` set |
+| --- | --- | --- |
+| Config | `$XDG_CONFIG_HOME/yarm` | `$YARM_HOME/config` |
+| Data | `$XDG_DATA_HOME/yarm` | `$YARM_HOME/data` |
+| Cache | `$XDG_CACHE_HOME/yarm` | `$YARM_HOME/cache` |
 
-On Windows, XDG's config and data dirs are both `%LOCALAPPDATA%`, so yarm
-keeps one app folder with the cache as a subfolder. `YARM_HOME` exists for
-tests, portable installs and development (`YARM_HOME=/tmp/yarm-dev ./bin/yarm`).
+`YARM_HOME` exists for tests, portable installs and development (`YARM_HOME=/tmp/yarm-dev ./bin/yarm`).
 `cache_dir` in `config.yaml` overrides the cache location only.
 
 | File | Dir | Notes |

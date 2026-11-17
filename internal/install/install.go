@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/secato/yarm/internal/artifacts"
 	"github.com/secato/yarm/internal/game"
 	"github.com/secato/yarm/internal/state"
 )
@@ -72,10 +71,6 @@ type Request struct {
 	// this field must not silently get the irreversible behavior.
 	// Meaningless without Overwrite.
 	NoBackup bool
-	// TargetOS decides OS-specific rules, chiefly whether
-	// d3dcompiler_47.dll is part of the install. It is a field rather than
-	// a runtime.GOOS read so both branches are testable anywhere.
-	TargetOS artifacts.TargetOS
 }
 
 // ExeDir returns the directory holding the target executable, relative to

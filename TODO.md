@@ -3,7 +3,6 @@ Improvements to do, not ordered by priority
 
 ## Install
 - AUR package (`yarm-bin` is configured in .goreleaser.yaml; waiting on AUR registration)
-- windows install wizard?
 - distribute as packages (deb, rpm, etc)
 
 ## UI

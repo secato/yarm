@@ -56,9 +56,7 @@ Two rules:
   several packages — `RealInstaller` in `internal/app/pipeline.go` joins
   cache + catalog + install — lives there rather than in any one of them.
 - **No globals.** Every package takes its dependencies as structs or small
-  interfaces, so tests substitute temp dirs and `httptest` servers. The
-  install target OS is a value (`artifacts.TargetOS`), not a `runtime.GOOS`
-  read, so both Linux and Windows branches run in tests on either OS.
+  interfaces, so tests substitute temp dirs and `httptest` servers.
 
 `cmd/yarm/main.go` holds no logic beyond wiring. `buildProviders` there is
 the single place game providers are registered.

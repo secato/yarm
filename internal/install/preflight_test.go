@@ -5,20 +5,18 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/secato/yarm/internal/artifacts"
 	"github.com/secato/yarm/internal/game"
 	"github.com/secato/yarm/internal/state"
 )
 
 // preflightReq returns a request targeting root/Game/game.exe.
-func preflightReq(root string, target artifacts.TargetOS) Request {
+func preflightReq(root string) Request {
 	return Request{
-		Game:     game.Game{Root: root},
-		Exe:      game.Executable{Path: "Game/game.exe"},
-		Version:  "6.8.0",
-		Flavor:   FlavorNormal,
-		DLLName:  "dxgi.dll",
-		TargetOS: target,
+		Game:    game.Game{Root: root},
+		Exe:     game.Executable{Path: "Game/game.exe"},
+		Version: "6.8.0",
+		Flavor:  FlavorNormal,
+		DLLName: "dxgi.dll",
 	}
 }
 
@@ -38,7 +36,7 @@ func TestPreflightFindsNothingInACleanFolder(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "Game/game.exe", 1)
 
-	if got := Preflight(preflightReq(root, artifacts.OSLinux), nil); len(got) != 0 {
+	if got := Preflight(preflightReq(root), nil); len(got) != 0 {
 		t.Errorf("Preflight() = %v, want nothing in an empty folder", got)
 	}
 }
@@ -54,7 +52,7 @@ func TestPreflightReportsForeignFilesAsBlockingWithoutOverwrite(t *testing.T) {
 	writeFile(t, root, "Game/dxgi.dll", 25872384)
 	writeFile(t, root, "Game/d3dcompiler_47.dll", 4493352)
 
-	got := Preflight(preflightReq(root, artifacts.OSLinux), nil)
+	got := Preflight(preflightReq(root), nil)
 	if len(got) != 2 {
 		t.Fatalf("Preflight() returned %d conflicts, want 2: %v", len(got), got)
 	}
@@ -77,18 +75,6 @@ func TestPreflightReportsForeignFilesAsBlockingWithoutOverwrite(t *testing.T) {
 	}
 }
 
-// On Windows there is no d3dcompiler_47.dll to install, so one sitting
-// there is none of yarm's business.
-func TestPreflightIgnoresD3DCompilerOnWindows(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, root, "Game/game.exe", 1)
-	writeFile(t, root, "Game/d3dcompiler_47.dll", 10)
-
-	if got := Preflight(preflightReq(root, artifacts.OSWindows), nil); len(got) != 0 {
-		t.Errorf("Preflight() = %v, want nothing: d3dcompiler is not part of a Windows install", got)
-	}
-}
-
 // A file a recorded install of ours owns is simply replaced and needs no
 // permission — reporting it as a conflict would train the user to ignore
 // the section.
@@ -101,7 +87,7 @@ func TestPreflightSeparatesOurOwnFilesFromForeignOnes(t *testing.T) {
 		Files: []state.File{{Path: "Game/dxgi.dll", Origin: state.OriginReShade}},
 	}
 
-	got := Preflight(preflightReq(root, artifacts.OSLinux), prev)
+	got := Preflight(preflightReq(root), prev)
 	if len(got) != 1 || got[0].Kind != ConflictManaged {
 		t.Fatalf("Preflight() = %v, want one managed conflict", got)
 	}
@@ -119,7 +105,7 @@ func TestPreflightRecognizesAnUnmanagedReShadeInstall(t *testing.T) {
 	writeFile(t, root, "Game/dxgi.dll", 5255448)
 	writeFile(t, root, "Game/"+ININame, 500)
 
-	got := Preflight(preflightReq(root, artifacts.OSLinux), nil)
+	got := Preflight(preflightReq(root), nil)
 	if len(got) != 2 {
 		t.Fatalf("Preflight() = %v, want the DLL and the ini", got)
 	}

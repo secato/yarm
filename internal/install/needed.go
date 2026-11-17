@@ -4,7 +4,6 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/secato/yarm/internal/artifacts"
 	"github.com/secato/yarm/internal/state"
 )
 
@@ -37,7 +36,7 @@ func NeededArtifacts(req Request, prev *state.Install) Needed {
 
 	if prev == nil {
 		n.ReShade = true
-		n.D3DCompiler = artifacts.NeedsD3DCompiler(req.TargetOS)
+		n.D3DCompiler = true
 		for _, id := range req.Packages {
 			n.Packages[id] = true
 		}
@@ -55,9 +54,7 @@ func NeededArtifacts(req Request, prev *state.Install) Needed {
 		req.DLLName != prev.ReShade.DLL ||
 		groupModified(req.Game.Root, prev, state.OriginReShade)
 
-	if artifacts.NeedsD3DCompiler(req.TargetOS) {
-		n.D3DCompiler = groupModified(req.Game.Root, prev, state.OriginD3DCompiler)
-	}
+	n.D3DCompiler = groupModified(req.Game.Root, prev, state.OriginD3DCompiler)
 
 	for _, id := range req.Packages {
 		n.Packages[id] = !slices.Contains(prev.Packages, id) ||

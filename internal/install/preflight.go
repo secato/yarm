@@ -70,11 +70,7 @@ func Preflight(req Request, prev *state.Install) []Conflict {
 	_, iniErr := os.Stat(filepath.Join(dir, ININame))
 	looksLikeReShade := iniErr == nil
 
-	names := []string{req.DLLName}
-	if artifacts.NeedsD3DCompiler(req.TargetOS) {
-		names = append(names, artifacts.D3DCompiler)
-	}
-	names = append(names, ININame)
+	names := []string{req.DLLName, artifacts.D3DCompiler, ININame}
 
 	var out []Conflict
 	for _, name := range names {

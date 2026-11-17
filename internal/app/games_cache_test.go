@@ -136,17 +136,35 @@ func installTestCache(t *testing.T) *cache.Cache {
 			t.Fatalf("write: %v", err)
 		}
 	}
+	seedD3DCompiler(t, root)
 	return cache.New(root, nil)
+}
+
+// seedD3DCompiler puts a d3dcompiler_47.dll of the pinned size in the cache,
+// so an install resolves it from disk instead of downloading a 38 MB
+// Firefox installer. Every install carries one.
+func seedD3DCompiler(t *testing.T, root string) {
+	t.Helper()
+	src, err := artifacts.D3DSourceFor(game.ArchX64)
+	if err != nil {
+		t.Fatalf("D3DSourceFor: %v", err)
+	}
+	dir := filepath.Join(root, cache.DirD3DCompiler, string(game.ArchX64))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, artifacts.D3DCompiler), make([]byte, src.DLLSize), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
 }
 
 func installTestRequest(gameRoot string) install.Request {
 	return install.Request{
-		Game:     game.Game{ID: "manual:x", Name: "X", Root: gameRoot},
-		Exe:      game.Executable{Path: "Game/ember.exe", Arch: game.ArchX64, API: game.APID3D12},
-		Version:  "6.8.0",
-		Flavor:   install.FlavorNormal,
-		DLLName:  "dxgi.dll",
-		TargetOS: artifacts.OSWindows,
+		Game:    game.Game{ID: "manual:x", Name: "X", Root: gameRoot},
+		Exe:     game.Executable{Path: "Game/ember.exe", Arch: game.ArchX64, API: game.APID3D12},
+		Version: "6.8.0",
+		Flavor:  install.FlavorNormal,
+		DLLName: "dxgi.dll",
 	}
 }
 

@@ -8,8 +8,8 @@ make test-network    # adds the real-internet tests (YARM_NETWORK_TESTS=1)
 ```
 
 `make lint test` must pass before a commit, and every `internal/` package
-stays at or above **75% coverage**. CI runs the tests with `-race` on Ubuntu
-and Windows, plus lint.
+stays at or above **75% coverage**. CI runs the tests with `-race` on Ubuntu,
+plus lint.
 
 ## Conventions
 
@@ -22,8 +22,6 @@ and Windows, plus lint.
 - **No real machine state.** Everything takes its directories as values:
   temp dirs for game folders, `state`, `cache` and `config`; providers take
   explicit roots (`steam.NewWithRoots`) instead of probing the host.
-- **Both OS branches everywhere.** Pass `artifacts.TargetOS` explicitly
-  rather than relying on the OS running the test.
 - **Fakes at the interface seams.** The TUI tests swap `Installer`,
   `UninstallRunner`, `AdoptRunner`, `WizardDataLoader` and `GamesLoader` for
   fakes (`internal/app/testfixtures_test.go`).

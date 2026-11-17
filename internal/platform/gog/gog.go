@@ -1,8 +1,6 @@
 // Package gog implements a platform.Provider that discovers games from
-// GOG. On Windows, every GOG installer — Galaxy or the offline kind —
-// writes a per-game registry key, so the registry is the source there.
-// On Linux, where GOG has no client at all, the games are managed by
-// launchers, so the sources are Heroic and Lutris.
+// GOG. GOG has no Linux client, so the games are managed by launchers and
+// the sources are Heroic and Lutris.
 package gog
 
 import (
@@ -21,7 +19,7 @@ const ProviderName = sources.StoreGOG
 // Provider discovers GOG games.
 type Provider struct {
 	// reg enumerates the per-game registry keys; nil where there is no
-	// registry to read (every OS but Windows).
+	// registry to read, which is always the case on Linux.
 	reg registrySource
 	// heroicDirs are Heroic config directories to read.
 	heroicDirs []string
@@ -96,8 +94,8 @@ func (p *Provider) Discover(_ context.Context) ([]game.Game, error) {
 }
 
 // registrySource enumerates GOG's per-game registry keys. An interface
-// so the discovery logic is testable without Windows; the real
-// implementation is registry_windows.go.
+// so the discovery logic is testable with a fake; there is no real
+// implementation on Linux.
 type registrySource interface {
 	games() ([]gogGame, error)
 }

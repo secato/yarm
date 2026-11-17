@@ -162,26 +162,25 @@ func (p Planner) collect(req Request, art Artifacts, exeDir string, prev state.I
 		})
 	}
 
-	// d3dcompiler_47.dll, on Linux only.
-	if artifacts.NeedsD3DCompiler(req.TargetOS) {
-		if art.D3DCompiler == "" {
-			derived, err := fromManifest(prev, hasPrev, state.OriginD3DCompiler)
-			if err != nil {
-				return nil, fmt.Errorf("%w: %s", ErrMissingArtifact, artifacts.D3DCompiler)
-			}
-			files = append(files, derived...)
-		} else {
-			size, err := fileSize(art.D3DCompiler)
-			if err != nil {
-				return nil, fmt.Errorf("%w: %s", ErrMissingArtifact, art.D3DCompiler)
-			}
-			files = append(files, PlannedFile{
-				Source: art.D3DCompiler,
-				Dest:   join(exeDir, artifacts.D3DCompiler),
-				Origin: state.OriginD3DCompiler,
-				Size:   size,
-			})
+	// d3dcompiler_47.dll: Wine's builtin one fails on some shaders, so the
+	// real Microsoft DLL goes in the game directory.
+	if art.D3DCompiler == "" {
+		derived, err := fromManifest(prev, hasPrev, state.OriginD3DCompiler)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %s", ErrMissingArtifact, artifacts.D3DCompiler)
 		}
+		files = append(files, derived...)
+	} else {
+		size, err := fileSize(art.D3DCompiler)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %s", ErrMissingArtifact, art.D3DCompiler)
+		}
+		files = append(files, PlannedFile{
+			Source: art.D3DCompiler,
+			Dest:   join(exeDir, artifacts.D3DCompiler),
+			Origin: state.OriginD3DCompiler,
+			Size:   size,
+		})
 	}
 
 	// Effect packages, filtered by the rules recorded at extraction time.

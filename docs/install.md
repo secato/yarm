@@ -42,13 +42,6 @@ yarm remove ReShade from your games later.
 If the install directory is not on your `PATH`, the script says so; add it in
 your shell profile.
 
-## Windows
-
-Download `yarm_<version>_windows_amd64.zip` from
-[Releases](https://github.com/secato/yarm/releases), unpack it and run
-`yarm.exe`. There is nothing to install. Use **Windows Terminal** — the legacy
-`cmd.exe` console cannot draw the interface.
-
 ## From source
 
 Requires Go (see `go.mod` for the version):
@@ -70,11 +63,11 @@ and arrows.
 
 ## Where yarm keeps its files
 
-| | Linux | Windows |
-| --- | --- | --- |
-| Config (`config.yaml`) | `~/.config/yarm/` | `%LOCALAPPDATA%\yarm\` |
-| Data (`installs.json`, `yarm.log`, `custom/`) | `~/.local/share/yarm/` | `%LOCALAPPDATA%\yarm\` |
-| Download cache | `~/.cache/yarm/` | `%LOCALAPPDATA%\yarm\cache\` |
+| | |
+| --- | --- |
+| Config (`config.yaml`) | `~/.config/yarm/` |
+| Data (`installs.json`, `yarm.log`, `custom/`) | `~/.local/share/yarm/` |
+| Download cache | `~/.cache/yarm/` |
 
-XDG variables are honored on Linux. Setting `YARM_HOME` puts all three under
+XDG variables are honored. Setting `YARM_HOME` puts all three under
 one folder (`config/`, `data/`, `cache/`), which is handy for a portable copy.

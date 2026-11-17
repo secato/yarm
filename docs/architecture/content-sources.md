@@ -86,11 +86,9 @@ last-used writes to once an hour.
   (`EffectFiles`, `DenyEffectFiles`), so the install engine never needs the
   catalog.
 - **Add-ons** — a bare binary or a zip; only the architecture's files are kept.
-- **`d3dcompiler_47.dll`** — needed only for Linux/Proton installs
-  (`NeedsD3DCompiler`), extracted from a pinned Firefox installer (a 7z
+- **`d3dcompiler_47.dll`** — part of every install (Wine's builtin one fails
+  on some shaders), extracted from a pinned Firefox installer (a 7z
   self-extractor) and verified by both installer and DLL SHA-256.
-- **`TargetOS`** — the OS an install targets, passed as a value so tests run
-  both branches anywhere. `CurrentTargetOS` is the one `runtime.GOOS` read.
 
 ## Fetch (`internal/fetch`)
 

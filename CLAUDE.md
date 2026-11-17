@@ -6,7 +6,7 @@ Guidance for Claude Code (claude.ai/code) in this repository.
 
 YARM installs [ReShade](https://reshade.me/) into game folders and takes it back
 out, from a terminal UI. Go, Bubble Tea v2, one static binary (`CGO_ENABLED=0`),
-Windows and Linux only. **There is no CLI** — `yarm` opens the TUI; the only
+Linux only (v2 dropped Windows). **There is no CLI** — `yarm` opens the TUI; the only
 flags are `-debug`, `-no-color`, `-version`.
 
 **The defining constraint: yarm writes into directories it does not own.**
@@ -54,7 +54,7 @@ relevant section before changing that area.
   lives there. `cmd/yarm` is wiring only; `buildProviders` is the one place
   providers are registered.
 - **No globals.** Dependencies are passed as structs or small interfaces;
-  the target OS is `artifacts.TargetOS`, not `runtime.GOOS`.
+  there is one target OS (Linux), so nothing reads `runtime.GOOS`.
 - **Planning never downloads or writes.** The wizard's review page uses
   `install.Preflight` + `install.NeededArtifacts`; the planner runs inside
   the pipeline after downloads. See

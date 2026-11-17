@@ -20,8 +20,7 @@ type Dirs struct {
 //
 // If YARM_HOME is set, all three live under it (config/, data/, cache/
 // subdirectories) — useful for tests and portable installs. Otherwise they
-// follow OS convention: XDG dirs on Linux/macOS, and a single
-// %LOCALAPPDATA%\yarm folder (with a cache subfolder) on Windows.
+// follow the XDG directories.
 func Resolve() Dirs {
 	if home := os.Getenv("YARM_HOME"); home != "" {
 		return Dirs{

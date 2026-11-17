@@ -94,9 +94,9 @@ steam:
   enabled: true
   extra_library_paths: []     # if auto-detection misses a library
 gog:
-  enabled: true                # registry on Windows; Heroic/Lutris on Linux
+  enabled: true                # Heroic/Lutris
 epic:
-  enabled: true                # launcher manifests on Windows; Heroic/Lutris on Linux
+  enabled: true                # Heroic/Lutris
 battlenet:
   enabled: true                # Battle.net agent's product.db (wine prefixes on Linux)
 defaults:

@@ -307,8 +307,8 @@ func (c *Cache) EnsureRenoDX(ctx context.Context, mod catalog.RenoMod, arch game
 // EnsureD3DCompiler returns the path to a verified d3dcompiler_47.dll for
 // an architecture, downloading the pinned Firefox installer if needed.
 //
-// Only ever needed for Linux/Proton installs; on Windows the system
-// already has this DLL.
+// Every install needs it: Wine's builtin d3dcompiler_47 fails on some
+// shaders.
 func (c *Cache) EnsureD3DCompiler(ctx context.Context, arch game.Arch, onProgress fetch.ProgressFunc) (string, error) {
 	src, err := artifacts.D3DSourceFor(arch)
 	if err != nil {
@@ -545,8 +545,8 @@ func (c *Cache) touch(id string) error {
 // only.
 //
 // filepath.Ext over a raw URL picks up any query string too
-// ("release.zip?token=abc"), which on Windows is an invalid filename and
-// fails the write outright. The extension is also restricted to plain
+// ("release.zip?token=abc"), which is an invalid filename on some
+// filesystems and fails the write outright. The extension is also restricted to plain
 // alphanumerics so a catalog entry cannot steer the cache filename with
 // punctuation.
 func urlExt(raw string) string {

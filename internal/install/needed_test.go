@@ -43,9 +43,6 @@ func neededFixture(t *testing.T) (*fixture, Request, *state.Install) {
 // packages, not the add-ons. This is what keeps "remove one add-on" from
 // re-downloading the world.
 func TestNeededArtifactsUnchangedEditNeedsNothing(t *testing.T) {
-	if artifacts.NeedsD3DCompiler(artifacts.OSWindows) {
-		t.Skip("d3dcompiler expectations below are Windows-shaped")
-	}
 	f, req, in := neededFixture(t)
 
 	// The edit: same everything (dropping add-ons is expressed by them

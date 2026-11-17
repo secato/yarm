@@ -1,7 +1,6 @@
 // Package epic implements a platform.Provider that discovers games from
-// the Epic Games Store. On Windows that is the launcher's per-game
-// manifest files; on Linux, where the store has no client, the games
-// are managed by launchers, so the sources are Heroic and Lutris.
+// the Epic Games Store. The store has no Linux client, so the games are
+// managed by launchers and the sources are Heroic and Lutris.
 package epic
 
 import (

@@ -177,10 +177,9 @@ type wizardDataLoadedMsg struct {
 // per step, rather than several pushed screens, so the in-progress Request
 // lives in exactly one place ("wizard holds Request").
 type WizardScreen struct {
-	keys     KeyMap
-	entry    GameEntry
-	deps     Deps
-	targetOS artifacts.TargetOS
+	keys  KeyMap
+	entry GameEntry
+	deps  Deps
 
 	// paths is every folder this run could apply to, and which of them are
 	// actually checked — the Paths step's own state. exe is the reference
@@ -323,7 +322,6 @@ func NewWizardScreen(entry GameEntry, exe Executable, targets []FolderGroup, dep
 		paths:        paths,
 		exe:          exe,
 		deps:         deps,
-		targetOS:     artifacts.CurrentTargetOS(),
 		existing:     existing,
 		loading:      true,
 		flavor:       flavor,
@@ -1388,7 +1386,6 @@ func (s *WizardScreen) buildRequestFor(exe Executable) (install.Request, bool) {
 		RenoDX:    renodxForDownload(s.flavor, s.renodxChoice),
 		Overwrite: s.overwrite(),
 		NoBackup:  !s.backup(),
-		TargetOS:  s.targetOS,
 	}, true
 }
 
@@ -1447,7 +1444,7 @@ func (s *WizardScreen) missing() []string {
 	val := describeMissing(s.deps.CacheStatus, *needed, version.Version, s.flavor.Addon(),
 		s.packages.selectedIDs(), addonsForDownload(s.flavor, s.addons), s.data.isRenoDXUtility,
 		renodxForDownload(s.flavor, s.renodxChoice),
-		s.exe.Arch, artifacts.NeedsD3DCompiler(s.targetOS))
+		s.exe.Arch, true)
 	s.missingCache.gen, s.missingCache.val = s.missingGen, val
 	return val
 }

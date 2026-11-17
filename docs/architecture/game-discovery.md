@@ -17,15 +17,17 @@ type Provider interface {
   registered. The store providers can each be disabled in `config.yaml`;
   `manual` is always on.
 
-| Provider | Windows source | Linux source |
-| --- | --- | --- |
-| `steam` | registry → `libraryfolders.vdf` + `appmanifest_*.acf` | same files under the Steam roots |
-| `gog` | per-game registry keys (Galaxy and offline installers) | Heroic, Lutris |
-| `epic` | the launcher's manifest files | Heroic (via its bundled legendary's `installed.json`), Lutris |
-| `battlenet` | the agent's `product.db` (protobuf) in ProgramData | the same `product.db` inside a wine prefix: Lutris-managed prefixes, or a fixed prefix path some distro installers use |
-| `manual` | `manual_games` in `config.yaml` | same |
+| Provider | Source |
+| --- | --- |
+| `steam` | `libraryfolders.vdf` + `appmanifest_*.acf` under the Steam roots (native, Flatpak, Snap) |
+| `gog` | Heroic, Lutris |
+| `epic` | Heroic (via its bundled legendary's `installed.json`), Lutris |
+| `battlenet` | the agent's `product.db` (protobuf) inside a wine prefix: Lutris-managed prefixes, or a fixed prefix path some distro installers use |
+| `manual` | `manual_games` in `config.yaml` |
 
-Per-OS code is split by build tags (`roots_linux.go`, `roots_windows.go`, …).
+yarm runs on Linux only; the games are Windows executables run through Wine or
+Proton. The registry and launcher-manifest readers the Windows build used are
+gone with v2.
 
 ### Store-centric ids
 

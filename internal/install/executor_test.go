@@ -72,8 +72,8 @@ func TestRunFreshInstall(t *testing.T) {
 	if !ok {
 		t.Fatal("no install recorded")
 	}
-	if len(in.Files) != 5 {
-		t.Errorf("manifest lists %d files, want 5", len(in.Files))
+	if len(in.Files) != 6 {
+		t.Errorf("manifest lists %d files, want 6", len(in.Files))
 	}
 	for _, fl := range in.Files {
 		if len(fl.SHA256) != 64 {
@@ -86,8 +86,8 @@ func TestRunFreshInstall(t *testing.T) {
 	if in.ReShade.Version != "6.8.0" || in.ReShade.DLL != "dxgi.dll" {
 		t.Errorf("ReShade info = %+v", in.ReShade)
 	}
-	if len(res.Written) != 5 {
-		t.Errorf("Result.Written has %d entries, want 5", len(res.Written))
+	if len(res.Written) != 6 {
+		t.Errorf("Result.Written has %d entries, want 6", len(res.Written))
 	}
 	// The byte total is what the result screen reports back to the user,
 	// so it has to be the size of the files actually on disk rather than
@@ -396,8 +396,8 @@ func TestRunEmitsProgress(t *testing.T) {
 			}
 		}
 	}
-	if copies != 3 { // dxgi.dll + two shaders; the ini is its own step
-		t.Errorf("got %d copy events, want 3", copies)
+	if copies != 4 { // dxgi.dll, d3dcompiler_47.dll + two shaders; the ini is its own step
+		t.Errorf("got %d copy events, want 4", copies)
 	}
 	for _, want := range []StepKind{StepCopy, StepINI, StepManifest} {
 		if !kinds[want] {

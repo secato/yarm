@@ -36,6 +36,7 @@ func TestPlanFreshInstall(t *testing.T) {
 
 	want := []string{
 		"Game/dxgi.dll",
+		"Game/d3dcompiler_47.dll",
 		"Game/reshade-shaders/Shaders/Deband.fx",
 		"Game/reshade-shaders/Shaders/ReShade.fxh",
 		"Game/reshade-shaders/Textures/noise.png",
@@ -117,43 +118,26 @@ func TestPlanWithoutEffectFilterInstallsAll(t *testing.T) {
 	}
 }
 
-// The d3dcompiler branch is chosen by target OS, never by runtime.GOOS,
-// so both cases are assertable on any machine.
-func TestPlanD3DCompilerByTargetOS(t *testing.T) {
-	tests := []struct {
-		target artifacts.TargetOS
-		want   bool
-	}{
-		{artifacts.OSLinux, true},
-		{artifacts.OSWindows, false},
-		{artifacts.OSDarwin, false},
+// Every install carries Microsoft's d3dcompiler_47.dll: Wine's builtin one
+// fails on some shaders.
+func TestPlanIncludesD3DCompiler(t *testing.T) {
+	f := newFixture(t).WithReShade().WithD3DCompiler()
+
+	plan, err := (Planner{}).Plan(f.Request(), f.Art)
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
 	}
-
-	for _, tt := range tests {
-		t.Run(string(tt.target), func(t *testing.T) {
-			f := newFixture(t).WithReShade().WithD3DCompiler()
-			req := f.Request()
-			req.TargetOS = tt.target
-
-			plan, err := (Planner{}).Plan(req, f.Art)
-			if err != nil {
-				t.Fatalf("Plan() error = %v", err)
-			}
-
-			got := slices.Contains(dests(plan), "Game/"+artifacts.D3DCompiler)
-			if got != tt.want {
-				t.Errorf("d3dcompiler planned = %v, want %v for target %s", got, tt.want, tt.target)
-			}
-		})
+	if !slices.Contains(dests(plan), "Game/"+artifacts.D3DCompiler) {
+		t.Errorf("d3dcompiler not planned: %v", dests(plan))
 	}
 }
 
-// A Linux install without a resolved d3dcompiler is an error, not a
+// An install without a resolved d3dcompiler is an error, not a
 // silently incomplete install.
-func TestPlanLinuxRequiresD3DCompiler(t *testing.T) {
+func TestPlanRequiresD3DCompiler(t *testing.T) {
 	f := newFixture(t).WithReShade()
+	f.Art.D3DCompiler = ""
 	req := f.Request()
-	req.TargetOS = artifacts.OSLinux
 
 	_, err := (Planner{}).Plan(req, f.Art)
 	if !errors.Is(err, ErrMissingArtifact) {

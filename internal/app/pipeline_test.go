@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/secato/yarm/internal/artifacts"
 	"github.com/secato/yarm/internal/cache"
 	"github.com/secato/yarm/internal/catalog"
 	"github.com/secato/yarm/internal/fetch"
@@ -193,7 +192,9 @@ func editFlowFixture(t *testing.T) (installer *RealInstaller, req install.Reques
 	}))
 	t.Cleanup(srv.Close)
 
-	c := cache.New(t.TempDir(), fetch.New("yarm/test"))
+	cacheRoot := t.TempDir()
+	seedD3DCompiler(t, cacheRoot)
+	c := cache.New(cacheRoot, fetch.New("yarm/test"))
 	c.SetupURL = func(version string, addon bool) string {
 		flavor := ""
 		if addon {
@@ -220,12 +221,11 @@ func editFlowFixture(t *testing.T) (installer *RealInstaller, req install.Reques
 	}
 
 	req = install.Request{
-		Game:     game.Game{ID: "steam:700110", Name: "Ember Hollow", Root: gameRoot},
-		Exe:      game.Executable{Path: "Game/ember.exe", Arch: game.ArchX64, API: game.APID3D12},
-		Version:  "6.8.0",
-		Flavor:   install.FlavorNormal,
-		DLLName:  "dxgi.dll",
-		TargetOS: artifacts.OSWindows,
+		Game:    game.Game{ID: "steam:700110", Name: "Ember Hollow", Root: gameRoot},
+		Exe:     game.Executable{Path: "Game/ember.exe", Arch: game.ArchX64, API: game.APID3D12},
+		Version: "6.8.0",
+		Flavor:  install.FlavorNormal,
+		DLLName: "dxgi.dll",
 	}
 	if _, err := inst.Install(context.Background(), req, func(ProgressUpdate) {}); err != nil {
 		t.Fatalf("first install: %v", err)
