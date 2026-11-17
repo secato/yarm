@@ -122,7 +122,7 @@ are never touched).
 
 ## Preflight (`preflight.go`)
 
-Runs **before** anything is downloaded, for the wizard's review page. It
+Runs **before** anything is downloaded, for the Review tab. It
 checks only the names known in advance — the proxy DLL, `d3dcompiler_47.dll`,
 `ReShade.ini` — because that is where real conflicts happen: `dxgi.dll` is
 the name every other injector wants too. It answers the one question the
@@ -137,7 +137,7 @@ skipped (see the planner fallback above).
 **`prev == nil` means a fresh install and needs everything.** Pass `nil`, not
 a pointer to a zero `Install` — the latter diffs against an empty manifest and
 silently skips groups like `d3dcompiler_47.dll`. `findPrevInstall` in
-`internal/app/pipeline.go` exists to get this right.
+`internal/core/pipeline.go` exists to get this right.
 
 ## Adopt (`adopt.go`)
 

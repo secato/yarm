@@ -1,7 +1,7 @@
 # GoReleaser config.
 #
 # Nothing here publishes on its own: .github/workflows/release.yml runs it
-# only for a pushed `v*` tag. Locally, `make snapshot` builds every archive
+# only for a pushed `v*` tag. Locally, `mise run snapshot` builds every archive
 # without touching GitHub or the AUR.
 version: 2
 
@@ -22,7 +22,7 @@ builds:
     # windowing libraries. Windows users stay on v1.x.
     goos: [linux]
     goarch: [amd64, arm64]
-    # Same variables the Makefile sets, so `make build` and a release build
+    # Same variables mise.toml's build task sets, so `mise run build` and a release build
     # report version information the same way.
     ldflags:
       - -s -w

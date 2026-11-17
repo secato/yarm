@@ -1,17 +1,18 @@
-// Package safetext strips the characters that let a string do something to
-// a terminal instead of being read in it.
+// Package safetext strips the characters that let a string do something
+// other than be read: repaint a terminal, hide a line in a log, or reorder
+// what a name looks like.
 //
 // Almost every name yarm shows comes from a document it does not control:
 // a game name out of a Steam .acf, a package name and description out of
 // crosire's ini files, a RenoDX mod title out of a JSON index, a version
-// banner out of a log a third-party DLL wrote inside a game. Those reach a
-// renderer that honors SGR colors and OSC 8 hyperlinks, where an ESC or a
-// bare \r is not text: it can repaint other rows, erase the line yarm just
-// drew, or turn a name into a link to somewhere else. The same strings are
-// also written to yarm's log file and into installs.json.
+// banner out of a log a third-party DLL wrote inside a game. The window draws
+// them as plain text, but they are also written to yarm's log file and into
+// installs.json, and read in a terminal there, where an ESC or a bare \r is
+// not text: it can repaint other rows, erase the line just drawn, or turn a
+// name into a link to somewhere else.
 //
 // Cleaning happens where the untrusted document is parsed rather than at
-// each place a string is displayed, so everything downstream — the TUI, the
+// each place a string is displayed, so everything downstream — the window, the
 // log, the manifest — holds text that can only be read.
 package safetext
 

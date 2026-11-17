@@ -3,6 +3,9 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/secato/yarm/main/install.sh | sh
 #
+# Adds YARM to the application menu too: a desktop entry and an icon under
+# ~/.local/share (or /usr/local/share as root), both removed by --uninstall.
+#
 # Safe to run again: it installs the latest release when that differs from
 # the yarm already there, and does nothing when it is the same. The binary
 # is swapped in with a rename, so an update never leaves a half-written
@@ -13,7 +16,7 @@
 #   YARM_INSTALL_DIR  where the binary goes; default: ~/.local/bin, or
 #                     /usr/local/bin when run as root
 #
-# Pass --uninstall to remove the binary. yarm's own data (installs.json,
+# Pass --uninstall to remove the binary, the desktop entry and the icon. yarm's own data (installs.json,
 # backups, custom shaders) is left alone: it records what yarm put into game
 # folders, and deleting it would make those installs impossible to remove.
 
@@ -70,6 +73,58 @@ sha256() {
 	fi
 }
 
+default_share() {
+	if [ "$(id -u)" -eq 0 ]; then
+		printf '/usr/local/share\n'
+	else
+		printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}"
+	fi
+}
+
+refresh_caches() {
+	share=$1
+	if have update-desktop-database; then
+		update-desktop-database "$share/applications" >/dev/null 2>&1 || true
+	fi
+	if have gtk-update-icon-cache; then
+		gtk-update-icon-cache -f -t "$share/icons/hicolor" >/dev/null 2>&1 || true
+	fi
+}
+
+# install_desktop BINARY: puts YARM in the application menu. A failure here
+# is only a missing menu entry, never a failed install.
+install_desktop() {
+	share=$(default_share)
+	icon="$share/icons/hicolor/scalable/apps/yarm.svg"
+	entry="$share/applications/yarm.desktop"
+	mkdir -p "$share/icons/hicolor/scalable/apps" "$share/applications" || return 0
+	cat >"$icon" <<'SVG' || return 0
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#A78BFA"/>
+      <stop offset="1" stop-color="#6D28D9"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="224" height="224" rx="56" fill="url(#g)"/>
+  <path d="M68 76l60 70 60-70M128 146v58" fill="none" stroke="#fff" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
+SVG
+	cat >"$entry" <<DESKTOP || return 0
+[Desktop Entry]
+Type=Application
+Name=YARM
+GenericName=ReShade manager
+Comment=Install ReShade into your games, and take it back out
+Exec=$1
+Icon=yarm
+Terminal=false
+Categories=Utility;
+Keywords=reshade;shaders;hdr;proton;
+DESKTOP
+	refresh_caches "$share"
+}
+
 uninstall() {
 	dir=${YARM_INSTALL_DIR:-$(default_dir)}
 	if [ -e "$dir/yarm" ]; then
@@ -78,6 +133,9 @@ uninstall() {
 	else
 		say "nothing to remove at $dir/yarm"
 	fi
+	share=$(default_share)
+	rm -f "$share/applications/yarm.desktop" "$share/icons/hicolor/scalable/apps/yarm.svg"
+	refresh_caches "$share"
 	say "yarm's data directory was kept; it is what lets yarm uninstall ReShade from your games"
 }
 
@@ -91,7 +149,7 @@ main() {
 	*) die "unknown argument '$1' (the only option is --uninstall)" ;;
 	esac
 
-	[ "$(uname -s)" = Linux ] || die "this script is for Linux; on Windows, download the zip from https://github.com/$REPO/releases"
+	[ "$(uname -s)" = Linux ] || die "YARM runs on Linux only"
 
 	case $(uname -m) in
 	x86_64 | amd64) arch=amd64 ;;
@@ -116,6 +174,7 @@ main() {
 	current=$(installed_version "$target")
 	if [ "$current" = "$version" ]; then
 		say "yarm $version is already installed at $target"
+		install_desktop "$target"
 		return
 	fi
 
@@ -145,6 +204,8 @@ main() {
 		rm -f "$dir/.yarm.new.$$"
 		die "could not write $target"
 	}
+
+	install_desktop "$target"
 
 	if [ -n "$current" ]; then
 		say "updated $target from $current to $version"

@@ -26,6 +26,9 @@ type Config struct {
 	BattleNet      ProviderConfig `yaml:"battlenet"`
 	Defaults       DefaultsConfig `yaml:"defaults"`
 	RenodxTTLHours int            `yaml:"renodx_ttl_hours"`
+	// Theme is the window's look: "dark", "light" or "system" (follow the
+	// desktop). Empty means system.
+	Theme string `yaml:"theme,omitempty"`
 	// CatalogTTLHours is the pre-rename name of RenodxTTLHours, kept so
 	// existing files keep working. It is only read when renodx_ttl_hours
 	// is absent, and never written back (see Save: omitempty drops it).
@@ -75,6 +78,7 @@ func Default() Config {
 		GOG:       ProviderConfig{Enabled: true},
 		Epic:      ProviderConfig{Enabled: true},
 		BattleNet: ProviderConfig{Enabled: true},
+		Theme:     "system",
 		Defaults: DefaultsConfig{
 			// Normal, not addon: the add-on build is what anti-cheat
 			// detects, so it has to be something the user asked for.
@@ -103,6 +107,7 @@ defaults:
   reshade_flavor: normal      # normal | addon (addon builds are detectable by anti-cheat)
   packages: ["standard"]      # package ids preselected in the wizard
 renodx_ttl_hours: 168       # how long the RenoDX mod index is trusted (168 = 7 days)
+theme: system               # dark | light | system (follow the desktop)
 `
 
 // Path returns the full path to config.yaml inside dir.
@@ -175,6 +180,11 @@ func (c Config) Validate() error {
 	if !validFlavors[c.Defaults.ReshadeFlavor] {
 		return fmt.Errorf("defaults.reshade_flavor must be %q or %q, got %q",
 			"normal", "addon", c.Defaults.ReshadeFlavor)
+	}
+	switch c.Theme {
+	case "", "system", "dark", "light":
+	default:
+		return fmt.Errorf("theme must be %q, %q or %q, got %q", "dark", "light", "system", c.Theme)
 	}
 	if c.RenodxTTLHours <= 0 {
 		return fmt.Errorf("renodx_ttl_hours must be positive, got %d", c.RenodxTTLHours)

@@ -4,92 +4,73 @@
 
 # Yet Another ReShade Manager
 
-
 [![CI](https://github.com/secato/yarm/actions/workflows/ci.yml/badge.svg)](https://github.com/secato/yarm/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/secato/yarm)](https://github.com/secato/yarm/releases)
-[![Go Report Card](https://goreportcard.com/badge/github.com/secato/yarm)](https://goreportcard.com/report/github.com/secato/yarm)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 </div>
 
-YARM finds your games, installs [ReShade](https://reshade.me/) into the ones you
-choose along with the shaders and add-ons you want, and keeps track of every
-file it put there — so uninstalling gives you the folder back exactly as it was.
+**Put ReShade into your games, and take it back out.**
 
-It is a single binary with no runtime, no installer and no launcher running in
-the background. It runs on **Linux**, including Steam Deck (Desktop Mode).
+Pick a game, choose the ReShade version, shader packs and add-ons you want, and see what will
+happen before it does. YARM writes it into the game folder, remembers every file it put there,
+and uninstalling gives the folder back exactly as it was.
 
-<div align="center">
-<img src="docs/main-screen.png" alt="The games list, with a game's install details in the side panel" width="900">
-</div><br/>
+![YARM](docs/screenshot.png)
 
-> Built with [Claude Code](https://claude.com/claude-code) — vibecoded, and
-> tested like it wasn't. [Report what breaks.](https://github.com/secato/yarm/issues)
+It finds your Steam, GOG, Epic and Battle.net games (the last three through Heroic and Lutris),
+picks the right ReShade build and proxy DLL from the game's executable, and offers the RenoDX
+HDR mod for your game by name. It follows your desktop's dark or light setting, and the Omarchy
+theme; the Dark / Light / System switch at the bottom of the sidebar picks one
+(`YARM_THEME=dark` or `light` forces it).
 
+<details><summary>Light look</summary>
+
+![YARM, light](docs/screenshot-light.png)
+
+</details>
+
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/secato/yarm/main/install.sh | sh
+```
+
+Downloads the latest release for your CPU (x86_64 or arm64), checks its checksum, and adds YARM
+to your application menu. Run it again to update. `./install.sh --uninstall` removes it. More in
+[docs/install.md](docs/install.md).
+
+## Build it yourself
+
+```sh
+go build -o yarm ./cmd/yarm
+./yarm
+```
+
+Needs Go 1.27+ and Linux (glibc), x86_64 or arm64. Steam Deck works in Desktop Mode.
 
 ## What it does for you
 
-- **Finds your games** — Steam, GOG, Epic and Battle.net (through Heroic and Lutris for the non-Steam stores), plus any folder you add by path.
-- **Picks the right ReShade** — reads the game's executable for 32/64-bit and graphics API, and chooses the build and proxy DLL.
-- **Curated shaders** — opens on the packs people actually use (SweetFX, iMMERSE, METEOR, …), with the full catalog one key away.
-- **RenoDX HDR mods** — offers the right mod for your game by name.
-- **Handles dependencies** — selecting an add-on also selects the shaders it needs, and says why.
-- **Downloads once** — a shared cache, so the fifth game copies instead of re-downloading.
-- **Uninstalls cleanly** — removes exactly the files it wrote and restores anything it replaced.
-- **Warns before overwriting** — tells you up front when another injector holds ReShade's DLL slot.
-- **Adopts manual installs** — takes over a ReShade you set up by hand.
-- **Bring your own** — your own shaders and add-ons show up next to the catalog.
+- **Plans before it writes.** The Review tab lists what will be downloaded, written, replaced
+  and kept, including a foreign file already holding ReShade's DLL name.
+- **Uninstalls cleanly.** Removes only the files it wrote, only if they are unchanged, and
+  restores what it replaced.
+- **Curated shaders.** Opens on the packs people use (SweetFX, iMMERSE, METEOR, …) with the
+  whole catalog one click away; ticking an add-on also ticks the shaders it needs, and says why.
+- **Downloads once.** A shared cache, so the fifth game copies instead of downloading again.
+- **Adopts** a ReShade you installed by hand, so YARM can update or remove it.
+- **Your own content.** Shaders and add-ons you drop in the `custom/` folder show up beside the
+  catalog, marked Custom: `~/.local/share/yarm/custom/{shaders,addons}/<name>/`.
 
-## Installing YARM
+Nothing is written to a game folder until you press Install or Apply changes. Ctrl+R rescans,
+Ctrl+N adds a game, `/` searches, Ctrl+Enter applies.
 
-- **Linux:** `curl -fsSL https://raw.githubusercontent.com/secato/yarm/main/install.sh | sh` (run it again to update)
-- **From source:** `go install github.com/secato/yarm/cmd/yarm@latest`
+MIT licensed. Built with [MyGo](https://github.com/egoist/mygo) and, mostly, with
+[Claude Code](https://claude.com/claude-code): [report what breaks](https://github.com/secato/yarm/issues).
+Working on it with an AI agent? Start at [CLAUDE.md](CLAUDE.md). How it works:
+[docs/architecture](docs/architecture/README.md). Decisions: [docs/SPEC.md](docs/SPEC.md).
 
-Options, uninstalling and where yarm keeps its files: [docs/install.md](docs/install.md).
-
-## Using it
-
-Run `yarm`. Every screen lists its keys along the bottom and `?` opens the full
-help, so there is nothing to memorise: arrows move, `enter` goes in, `esc` goes
-back.
-
-Nothing is written to a game folder until you confirm on the review page, which
-shows what is already in the folder and what will happen to it, along with
-anything still to download.
-
-## Adding your own shaders and add-ons
-
-Anything you put in yarm's `custom/` folder shows up in the wizard beside the
-catalog packages:
-
-```
-custom/
-├── shaders/<name>/Shaders/*.fx  Textures/*
-└── addons/<name>/*.addon32|*.addon64
-```
-
-By default that is:
-
-`~/.local/share/yarm/custom/` (or `$XDG_DATA_HOME/yarm/custom/`).
-
-It lives with your data rather than in the cache, so clearing yarm's downloads
-— or your `~/.cache` — never touches it. If you have set `YARM_HOME`, the folder
-is `$YARM_HOME/data/custom/` instead.
-
-## Documentation
-
-- [Installing](docs/install.md) — script options, uninstalling, file locations.
-- [Architecture](docs/architecture/README.md) — how yarm works and the decisions behind it.
-- [Contributing](CONTRIBUTING.md) — building, testing, releasing.
-
-## Credits
-
-- [ReShade](https://reshade.me/) by crosire.
-- Effect package and add-on catalogs from the
-  [reshade-shaders](https://github.com/crosire/reshade-shaders) `list` branch.
-- Inspired by [LeShade](https://github.com/Ishidawg/LeShade) and
-  [reshade-steam-proton](https://github.com/kevinlekiller/reshade-steam-proton).
-
-## License
-
-[MIT](LICENSE)
+Credits: [ReShade](https://reshade.me/) by crosire; catalogs from
+[reshade-shaders](https://github.com/crosire/reshade-shaders); inspired by
+[LeShade](https://github.com/Ishidawg/LeShade) and
+[reshade-steam-proton](https://github.com/kevinlekiller/reshade-steam-proton).

@@ -8,7 +8,7 @@ before changing anything that writes into a game folder.
 | [install-engine.md](install-engine.md) | Plan → execute → record, uninstall, adopt, the safety checks around deleting |
 | [content-sources.md](content-sources.md) | Catalogs, the download cache, artifact normalization, RenoDX, hand-kept tables |
 | [game-discovery.md](game-discovery.md) | Providers (Steam, GOG, Epic, Battle.net, manual), launcher sources, PE inspection |
-| [tui.md](tui.md) | The Bubble Tea shell, screens, navigation, async work, the wizard |
+| [gui.md](gui.md) | The MyGo window, the `core` / `ui` split, the edit session, applying, the look |
 | [directories-and-config.md](directories-and-config.md) | Config/data/cache dirs, `YARM_HOME`, `config.yaml`, what lives where |
 | [untrusted-input.md](untrusted-input.md) | Every place yarm parses something it doesn't control, and how it's bounded |
 | [testing.md](testing.md) | Test conventions, fixtures, network gating, coverage |
@@ -31,9 +31,11 @@ follows from that:
 ## Layering
 
 ```
-cmd/yarm          flags, directory resolution, logging, wiring → app.Run
+cmd/yarm          flags, directory resolution, logging, wiring → ui.Run
    │
-internal/app      the TUI, plus the glue that spans packages (RealInstaller)
+internal/ui       the window; the only package that imports MyGo
+   │
+internal/core     what the window decides, plus the glue that spans packages (RealInstaller)
    │
    ├── install     plan / execute / uninstall / adopt / preflight / inspect
    ├── cache       download cache (Ensure* per artifact kind)
@@ -52,9 +54,9 @@ internal/app      the TUI, plus the glue that spans packages (RealInstaller)
 
 Two rules:
 
-- **Nothing imports `internal/app`.** It is the top layer. Code that combines
-  several packages — `RealInstaller` in `internal/app/pipeline.go` joins
-  cache + catalog + install — lives there rather than in any one of them.
+- **Nothing imports `internal/ui`, and `internal/core` imports no UI.** Code that
+  combines several packages — `RealInstaller` in `internal/core/pipeline.go` joins
+  cache + catalog + install — lives in `core` rather than in any one of them.
 - **No globals.** Every package takes its dependencies as structs or small
   interfaces, so tests substitute temp dirs and `httptest` servers.
 
@@ -64,10 +66,10 @@ the single place game providers are registered.
 ## The install flow end to end
 
 1. **Discovery** — `platform.DiscoverAll` runs every provider; `game.Scan`
-   finds executables in each game; `internal/app/games_data.go` groups them by
+   finds executables in each game; `internal/core/games_data.go` groups them by
    folder, attaches recorded installs, detects unmanaged ReShade
    (`install.ScanUnmanaged`) and reads runtime info (`install.InspectRuntime`).
-2. **Wizard** — collects a `install.Request`. Its review page shows
+2. **Session** — `core.Session` collects the `install.Request`. The Review tab shows
    `install.Preflight` (what is in the way) and `install.NeededArtifacts`
    (what must still be downloaded). Nothing is downloaded or written yet.
 3. **Pipeline** (`RealInstaller.Install`) — resolves only the needed

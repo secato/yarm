@@ -20,7 +20,7 @@ jobs:
       # release cannot fail CI on a commit that did not change.
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.13.2
+          version: v2.15.0
 
   test:
     runs-on: ubuntu-latest

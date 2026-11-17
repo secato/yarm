@@ -5,9 +5,11 @@ Guidance for Claude Code (claude.ai/code) in this repository.
 ## What this is
 
 YARM installs [ReShade](https://reshade.me/) into game folders and takes it back
-out, from a terminal UI. Go, Bubble Tea v2, one static binary (`CGO_ENABLED=0`),
-Linux only (v2 dropped Windows). **There is no CLI** — `yarm` opens the TUI; the only
-flags are `-debug`, `-no-color`, `-version`.
+out, from a native desktop window. Go, [MyGo](https://github.com/egoist/mygo) (GPU
+drawn, no web view, no cgo), one binary built with `CGO_ENABLED=0`, Linux only (glibc,
+x86_64 and arm64; v2 dropped Windows and macOS). **There is no CLI** — `yarm` opens the
+window; the only flags are `-debug` and `-version`. Decisions: [docs/SPEC.md](docs/SPEC.md);
+terms: [GLOSSARY.md](GLOSSARY.md); MyGo patterns: [docs/MYGO.md](docs/MYGO.md).
 
 **The defining constraint: yarm writes into directories it does not own.**
 Plan before write, record every file with its hash, back up anything
@@ -17,19 +19,25 @@ its hash, and is shaped like something yarm writes.
 ## Commands
 
 ```sh
-make build                 # → bin/yarm, version from git describe
-make test                  # go test -race -coverprofile=cover.out ./...
-make lint                  # golangci-lint (gofumpt, govet, staticcheck, revive, errcheck, misspell, unused)
-make cover                 # per-package coverage table
-make test-network          # + real-internet tests (YARM_NETWORK_TESTS=1)
-make snapshot              # goreleaser snapshot → dist/ (no publishing)
+mise install               # the toolchain: go, golangci-lint, goreleaser (versions in mise.toml)
+mise run build             # → bin/yarm, version from git describe
+mise run run               # build and open the window on a throwaway YARM_HOME (/tmp/yarm-dev); args after --
+mise run test              # go test -race -coverprofile=cover.out ./...
+mise run lint              # golangci-lint (gofumpt, govet, staticcheck, revive, errcheck, misspell, unused)
+mise run check             # lint + test
+mise run cover             # per-package coverage table
+mise run test-network      # + real-internet tests (YARM_NETWORK_TESTS=1)
+mise run snapshot          # goreleaser snapshot → dist/ (no publishing)
+mise run screenshots       # regenerate docs/screenshot*.png from the UI test fixtures
 
 go test ./internal/install/ -run TestPlan -v
 YARM_HOME=/tmp/yarm-dev ./bin/yarm      # throwaway config/data/cache
 YARM_DEBUG=1 ./bin/yarm                 # debug log in <data>/yarm.log
+YARM_THEME=light ./bin/yarm             # force dark or light for one run
+YARM_SHOTS=/tmp/shots go test ./internal/ui   # PNG of every board the tests draw
 ```
 
-`make lint test` must pass before a commit. Every `internal/` package stays at
+`mise run check` (lint and test) must pass before a commit. Every `internal/` package stays at
 or above 75% coverage.
 
 ## Architecture
@@ -39,25 +47,29 @@ relevant section before changing that area.
 
 | Area | Code | Doc |
 | --- | --- | --- |
-| Layering, end-to-end flow | `cmd/yarm`, `internal/app/pipeline.go` | [README](docs/architecture/README.md#layering) |
+| Layering, end-to-end flow | `cmd/yarm`, `internal/core/pipeline.go` | [README](docs/architecture/README.md#layering) |
 | Plan / execute / record, uninstall, adopt, preflight | `internal/install`, `internal/state` | [install-engine](docs/architecture/install-engine.md) |
 | Catalogs, cache, downloads, RenoDX, curated/requires tables | `internal/{catalog,cache,artifacts,fetch,archive}` | [content-sources](docs/architecture/content-sources.md) |
 | Game providers, launcher sources, PE inspection | `internal/{platform,game}` | [game-discovery](docs/architecture/game-discovery.md) |
-| Screens, navigation, async, wizard | `internal/app` | [tui](docs/architecture/tui.md) |
+| The window, the edit session, applying, the look | `internal/{ui,core}` | [gui](docs/architecture/gui.md) |
 | Dirs, `YARM_HOME`, `config.yaml`, startup | `internal/{paths,config}`, `cmd/yarm` | [directories-and-config](docs/architecture/directories-and-config.md) |
 | Parsing external data safely | `internal/{safetext,fetch,archive}`, `state.Registry.Validate` | [untrusted-input](docs/architecture/untrusted-input.md) |
 | Tests, fixtures, network gating | `testdata/`, `*_test.go` | [testing](docs/architecture/testing.md) |
 
 ### Hard rules
 
-- **Nothing imports `internal/app`.** Cross-package glue (`RealInstaller`)
-  lives there. `cmd/yarm` is wiring only; `buildProviders` is the one place
-  providers are registered.
+- **`internal/ui` is the only package that imports MyGo, and nothing imports
+  it.** What the window decides lives in `internal/core` (the edit `Session`,
+  `RealInstaller`, resources); a click that needs a decision calls a `core`
+  method, it does not make the decision. `cmd/yarm` is wiring only;
+  `buildProviders` is the one place providers are registered.
 - **No globals.** Dependencies are passed as structs or small interfaces;
-  there is one target OS (Linux), so nothing reads `runtime.GOOS`.
-- **Planning never downloads or writes.** The wizard's review page uses
-  `install.Preflight` + `install.NeededArtifacts`; the planner runs inside
-  the pipeline after downloads. See
+  there is one target OS (Linux), so nothing reads `runtime.GOOS`. The one exception is
+  `internal/ui`'s render state (`pal`, the parsed icons): MyGo's `View` is called
+  with no place to carry a palette, so it is set at the top of each frame.
+- **Planning never downloads or writes.** The Review tab uses
+  `install.Preflight` + `install.NeededArtifacts` (through `core.Session`);
+  the planner runs inside the pipeline after downloads. See
   [install-engine](docs/architecture/install-engine.md#phase-1--plan-plannergo).
 - **`installs.json` is precious**: a corrupt one is an error, never reset.
   The cache index is disposable. `custom/` lives under Data, not Cache.
@@ -66,17 +78,19 @@ relevant section before changing that area.
 - **Clean untrusted strings where they're parsed** (`safetext.Clean`), cap
   every read of external data, https only
   ([untrusted-input](docs/architecture/untrusted-input.md)).
-- **Never log to stderr while the TUI runs** — it owns the alternate screen.
+- **Never write to stderr while the window is up.** Log through `slog`; `main` prints a fatal error after the window closes.
 
-### TUI gotchas ([tui](docs/architecture/tui.md#rules-that-are-easy-to-get-wrong))
+### Window gotchas ([gui](docs/architecture/gui.md#rules-that-are-easy-to-get-wrong))
 
-- `Env` is passed into `Update`/`View`, never stored.
-- A pushed screen never saw a `WindowSizeMsg`; `Model.sized()` supplies one —
-  skip it and tables render blank.
-- Async work goes through `Async` or `StreamJob` + `WaitForActivity`
-  (re-issue after every message but the last). `StreamJob`'s `send` has no
-  `ctx.Done()` escape on purpose.
-- Clip before styling (`clipTail` counts runes); width is in cells.
+- `View` rebuilds every frame from `App` state; element values live for one
+  pass. Key repeated things (`c.Key("game-"+id)`).
+- Colors come from `pal`, named by meaning, set at the top of every frame. No
+  color literals in view code; add one to both palettes.
+- Anything slow goes through `App.bg(work, done)` (off the UI thread, then
+  back on it). Blocking dialogs go through `App.pick`.
+- A custom content id (`custom:…`) goes in `Request.Custom`, never `Packages`.
+- The tester clicks the first element with a text or label: give a control a
+  distinct `Label` when its name repeats (the sidebar repeats many).
 - `curated.go` and `requires.go` are hand-kept on purpose — upstream has no
   popularity or dependency data.
 
@@ -89,8 +103,8 @@ relevant section before changing that area.
 - **Always `filepath`**, never string concatenation; cross-platform behavior
   goes through `internal/fsutil` and `internal/paths`. Manifest paths are
   slash-separated.
-- Tests: standard `testing`, `httptest`, `go-cmp`, `teatest/v2`; fixtures in
-  `testdata/`. Never hit the real network outside `YARM_NETWORK_TESTS=1`.
+- Tests: standard `testing`, `httptest`, `go-cmp`, MyGo's `ui.NewTester`;
+  fixtures in `testdata/`. Never hit the real network outside `YARM_NETWORK_TESTS=1`.
 - Keep `docs/architecture/` in step with the code when changing a documented
   behavior.
 - `docs/plan/` is local-only and gitignored — never reference it from tracked

@@ -38,13 +38,13 @@ otherwise) and appends a few hand-kept utility mods the index doesn't cover.
 `RenoMod.ArtifactFor` is an **exact** architecture match — a wrong-arch add-on
 does nothing, so there is no 64-bit fallback like `Addon.SourceFor` has.
 
-## Hand-kept tables (`internal/app`)
+## Hand-kept tables (`internal/core`)
 
 Upstream carries neither popularity nor dependency data, so two small tables
 are maintained by hand. Neither should be derived from the catalog.
 
-- **`curated.go`** — the shortlist the wizard opens on. Add a pack when people
-  ask for it by name. Everything else stays one keypress away (show all).
+- **`curated.go`** — the shortlist the Shaders and Add-ons tabs open on. Add a pack when people
+  ask for it by name. Everything else stays one click away (All).
 - **`requires.go`** — "X needs Y" edges (AutoHDR needs a tone-mapping shader,
   TFAA needs iMMERSE's LAUNCHPAD, …). Upstream only states these in prose
   inside descriptions; a five-entry table beats a prose parser.

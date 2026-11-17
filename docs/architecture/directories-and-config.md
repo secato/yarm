@@ -31,18 +31,19 @@ once the destination exists).
 
 ## Startup (`cmd/yarm`)
 
-1. Parse flags: `-debug` (or `YARM_DEBUG=1`), `-no-color` (or `NO_COLOR=1`),
-   `-version`. Stdlib `flag`; no cobra. A leftover argument is a usage error
+1. Parse flags: `-debug` (or `YARM_DEBUG=1`) and `-version`. Stdlib `flag`; no cobra. A leftover argument is a usage error
    (exit 2) — usually someone reaching for a subcommand that no longer exists.
 2. Check first run (no `config.yaml` yet) **before** anything creates files.
 3. Resolve and create dirs, open the log, load config, migrate `custom/`,
    sweep `.part` files from interrupted downloads.
-4. Wire providers, cache, catalog client and `app.Deps`; call `app.Run`.
+4. Wire providers, cache, catalog client and `core.Deps`; call `ui.Run`.
 
-**Nothing is written to stderr while the TUI runs** — it owns the alternate
-screen and stray output corrupts it. Failures go to `yarm.log`, and `main`
-prints the error to stderr after Bubble Tea has released the terminal
-(exit 1).
+**Nothing is written to stderr while the window is up** — a desktop launcher
+discards it and a terminal one would interleave it with the toolkit's own
+messages. Failures go to `yarm.log`, and `main` prints the error to stderr
+after the window has closed (exit 1).
+
+`YARM_THEME=dark|light` overrides the saved look for one run.
 
 ## `config.yaml` (`internal/config`)
 
@@ -69,4 +70,8 @@ renodx_ttl_hours: 168
 - Renamed keys are migrated on read and dropped on the next save
   (`catalog_ttl_hours` → `renodx_ttl_hours`).
 - `Save` is atomic; `Validate` checks what struct tags can't.
-- The settings screen writes the file; changes apply on the **next launch**.
+- The Settings dialog writes the file. Changes apply **right away**: switching a
+  provider or a library path rebuilds the loader and rescans. The two that cannot
+  — a new cache location and the RenoDX list's hours — apply on the next launch,
+  and the dialog says so.
+- `theme` (`dark`, `light` or `system`) is what the Dark / Light / System switch saves.

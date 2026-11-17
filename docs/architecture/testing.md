@@ -1,13 +1,13 @@
 # Testing
 
 ```sh
-make test            # go test -race -coverprofile=cover.out ./...
-make cover           # per-package coverage table
-make lint            # golangci-lint: gofumpt, govet, staticcheck, revive (exported), errcheck, misspell, unused
-make test-network    # adds the real-internet tests (YARM_NETWORK_TESTS=1)
+mise run test            # go test -race -coverprofile=cover.out ./...
+mise run cover           # per-package coverage table
+mise run lint            # golangci-lint: gofumpt, govet, staticcheck, revive (exported), errcheck, misspell, unused
+mise run test-network    # adds the real-internet tests (YARM_NETWORK_TESTS=1)
 ```
 
-`make lint test` must pass before a commit, and every `internal/` package
+`mise run check` must pass before a commit, and every `internal/` package
 stays at or above **75% coverage**. CI runs the tests with `-race` on Ubuntu,
 plus lint.
 
@@ -22,9 +22,9 @@ plus lint.
 - **No real machine state.** Everything takes its directories as values:
   temp dirs for game folders, `state`, `cache` and `config`; providers take
   explicit roots (`steam.NewWithRoots`) instead of probing the host.
-- **Fakes at the interface seams.** The TUI tests swap `Installer`,
+- **Fakes at the interface seams.** The `core` and `ui` tests swap `Installer`,
   `UninstallRunner`, `AdoptRunner`, `WizardDataLoader` and `GamesLoader` for
-  fakes (`internal/app/testfixtures_test.go`).
+  fakes (`internal/core/testfixtures_test.go`, `internal/ui/ui_test.go`).
 
 ## Fixtures (`testdata/`)
 
@@ -39,11 +39,21 @@ Lutris fixtures are built at test time by
 `internal/platform/sources/lutris/lutristest`, through SQLite itself, so the
 readers see a genuine `pga.db`.
 
-## TUI tests
+## Window tests
 
-Screens are driven headlessly with `charmbracelet/x/exp/teatest/v2` at a
-pinned terminal size and `colorprofile.NoTTY`, asserting on the rendered
-frame. There are **no golden files**: layouts change often enough that a
-committed frame gets re-blessed rather than read, so tests assert the few
-strings that actually matter. Many screen tests also call `Update` directly
-with a message and inspect the returned screen and command.
+`internal/core` is tested without a window: the `Session`, the apply runner, the report and
+resources are plain Go over temp dirs and fakes.
+
+`internal/ui` is driven headlessly with MyGo's `ui.NewTester` at 1180×860: `Click("text")`
+finds the first element with that text or label, `HasText` and `Texts` read what is on
+screen. `testApp` builds an `App` with no window and runs background work inline, so a click
+and its consequences are over when `Click` returns. There are **no golden files**: layouts
+change often enough that a committed picture gets re-blessed rather than read, so tests assert
+the few strings and model values that matter.
+
+Two ways to look at the result:
+
+- `YARM_SHOTS=<dir> go test ./internal/ui` writes a PNG of each board (`Tester.Image()`).
+- `mise run screenshots` regenerates `docs/screenshot.png` and `docs/screenshot-light.png`.
+
+Switches slide and dialogs fade, so `shot` advances the tester's clock before it draws.

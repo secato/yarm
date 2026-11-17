@@ -2,16 +2,17 @@
 
 ## Setup
 
-- Go 1.26+ (see `go.mod`).
-- `golangci-lint` for linting (see `.golangci.yml`).
+- Linux (glibc) and [mise](https://mise.jdx.dev): `mise install` fetches Go, golangci-lint
+  and goreleaser at the versions in `mise.toml`. Without mise, use the versions listed there.
+- Linting is configured in `.golangci.yml`.
 
 ## Workflow
 
 ```sh
-make lint test
+mise run check    # lint and test
 ```
 
-Both must pass before opening a PR. `make cover` prints per-package coverage;
+Both must pass before opening a PR. `mise run cover` prints per-package coverage;
 every `internal/` package should stay at or above 75%.
 
 ## Commit messages
@@ -25,14 +26,14 @@ obvious from the diff.
 
 See [docs/architecture/](docs/architecture/README.md): the layering rules,
 the install engine, game providers (including
-[adding one](docs/architecture/game-discovery.md#adding-a-provider)), the TUI,
+[adding one](docs/architecture/game-discovery.md#adding-a-provider)), the window,
 and [testing conventions](docs/architecture/testing.md).
 
-## The screenshot
+## The screenshots
 
-`docs/main-screen.png` is the games list in the README. Retake it whenever
-the layout changes enough that it misleads: run yarm in a terminal around
-160×40 with a warm cache, on a real library, and crop to the terminal.
+`docs/screenshot.png` and `docs/screenshot-light.png` are in the README. They are
+rendered headlessly from the UI tests' fixtures, not taken from a real library:
+run `mise run screenshots` after a visible change and commit the result.
 
 ## Releasing
 
@@ -47,7 +48,7 @@ Check the config and build everything locally without publishing:
 ```sh
 go install github.com/goreleaser/goreleaser/v2@latest
 goreleaser check
-make snapshot            # goreleaser release --snapshot --clean → dist/
+mise run snapshot       # goreleaser release --snapshot --clean → dist/
 ```
 
 A snapshot in a repo with no tags reports the version as `0.0.1-next` and

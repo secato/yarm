@@ -1,0 +1,64 @@
+# Tools and tasks for working on yarm: `mise install` fetches the toolchain,
+# `mise tasks` lists what can be run. CI pins its own copies of these versions
+# in .github/workflows; keep them in step.
+[tools]
+go = "1.27"
+golangci-lint = "2.15.0"
+goreleaser = "latest"
+
+[tasks.build]
+description = "Build bin/yarm, with the version from git describe"
+run = '''
+CGO_ENABLED=0 go build -ldflags "-s -w \
+  -X github.com/secato/yarm/internal/buildinfo.Version=$(git describe --tags --always --dirty 2>/dev/null || echo dev) \
+  -X github.com/secato/yarm/internal/buildinfo.Commit=$(git rev-parse --short HEAD 2>/dev/null || echo none) \
+  -X github.com/secato/yarm/internal/buildinfo.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  -o bin/yarm ./cmd/yarm
+'''
+sources = ["cmd/**/*.go", "internal/**/*.go", "go.mod", "go.sum"]
+outputs = ["bin/yarm"]
+
+[tasks.run]
+description = "Build and open the window; extra arguments go to yarm (mise run run -- -debug)"
+depends = ["build"]
+# A throwaway config/data/cache under /tmp, so trying things never touches
+# the real ~/.config/yarm or an install record. Set YARM_HOME to override.
+env = { YARM_HOME = "{{env.YARM_HOME | default(value='/tmp/yarm-dev')}}" }
+run = "./bin/yarm"
+
+[tasks.test]
+description = "Run the tests with the race detector, writing cover.out"
+run = "go test -race -coverprofile=cover.out ./..."
+
+# The full suite plus the tests that hit the real internet (upstream catalog,
+# reshade.me, GitHub). Kept out of `test` so CI and offline runs never depend
+# on third-party servers.
+[tasks.test-network]
+description = "Run the tests, including the ones that use the real internet"
+env = { YARM_NETWORK_TESTS = "1" }
+run = "go test -race ./..."
+
+[tasks.lint]
+description = "golangci-lint (gofumpt, govet, staticcheck, revive, errcheck, misspell, unused)"
+run = "golangci-lint run ./..."
+
+[tasks.cover]
+description = "Per-package coverage table"
+depends = ["test"]
+run = "go tool cover -func=cover.out"
+
+[tasks.check]
+description = "Everything that must pass before a commit: lint and test"
+depends = ["lint", "test"]
+
+[tasks.snapshot]
+description = "Build every release archive into dist/ without publishing"
+run = "goreleaser release --snapshot --clean"
+
+[tasks.screenshots]
+description = "Regenerate docs/screenshot*.png from the UI test fixtures"
+run = "scripts/screenshots.sh"
+
+[tasks.clean]
+description = "Remove build output"
+run = "rm -rf bin cover.out"

@@ -89,7 +89,7 @@ yarm must not write to it or leave `-wal`/`-shm` files beside it.
 ## Folders, not executables
 
 ReShade loads by directory, so the UI groups executables by folder
-(`FolderGroup` in `internal/app/games_data.go`). A folder with several
-candidate exes of different arch/API makes the wizard ask which one decides
-the build. A game with a 32- and a 64-bit tree can be set up in one wizard
-pass (one `folderOp` per folder in `internal/app/pipeline.go`).
+(`FolderGroup` in `internal/core/games_data.go`). A folder with several
+candidate exes of different arch/API shows which one decides the build, with a
+button to switch it. A game with a 32- and a 64-bit tree can be set up in one
+apply (one `core.Op` per folder in `internal/core/pipeline.go`).

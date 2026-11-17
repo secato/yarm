@@ -6,7 +6,8 @@ Improvements to do, not ordered by priority
 - distribute as packages (deb, rpm, etc)
 
 ## UI
-- streamline the flows and standardize shortcuts
+- detect Proton prefixes, so the "Windows build under Proton" pill is real
+- Steam Deck Desktop Mode: try it on hardware
 
 ## Shaders / Addons
 - curate the list better, check what community is truly using

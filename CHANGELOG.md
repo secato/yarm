@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-11-17
+
+### Changed
+
+- **YARM is now a desktop window, not a terminal program.** Built with
+  [MyGo](https://github.com/egoist/mygo): a sidebar of games, a page per game with Folders,
+  ReShade, Shaders, Add-ons, RenoDX and Review tabs, and a dock at the bottom that installs
+  inline with progress, Cancel and a per-folder result. It follows the desktop's dark or light
+  setting and the Omarchy theme, with a Dark / Light / System switch. Settings applies live.
+  Ctrl+R rescans, Ctrl+N adds a game, `/` searches, Ctrl+Enter applies.
+- **Linux only** (glibc, x86_64 and arm64). Windows and macOS builds are gone; v1.x stays
+  available for them, and for the terminal interface.
+- `install.sh` also adds YARM to the application menu, and `--uninstall` removes it.
+- The `-no-color` flag is gone with the terminal interface. `-debug` and `-version` stay.
+  `YARM_THEME=dark|light` forces a look for one run.
+- Resources: an item an install uses can no longer be deleted by hand; **Clean unused** frees
+  everything else.
+
+### Fixed
+
+- Custom shaders and add-ons were sent to the installer in the catalog's package list instead of
+  its custom list.
+
+### Added
+
+- `theme` in `config.yaml` (`dark`, `light` or `system`).
+
 ## [1.0.0] — 2026-10-12
 
 ### Added

@@ -1,10 +1,10 @@
-// Command yarm is the YARM (Yet Another ReShade Manager) terminal UI.
+// Command yarm is YARM (Yet Another ReShade Manager), a window for
+// installing ReShade into game folders and taking it back out.
 //
-// There are no subcommands: running yarm opens the interface, and
-// everything it can do is done from there. The handful of flags below
-// exist because a binary that ignores --version or --help is a nuisance
-// to package and to file bugs against — not because there is a second
-// way to drive it.
+// There are no subcommands: running yarm opens the window, and everything
+// it can do is done from there. The handful of flags below exist because a
+// binary that ignores --version or --help is a nuisance to package and to
+// file bugs against — not because there is a second way to drive it.
 package main
 
 import (
@@ -20,11 +20,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/secato/yarm/internal/app"
 	"github.com/secato/yarm/internal/buildinfo"
 	"github.com/secato/yarm/internal/cache"
 	"github.com/secato/yarm/internal/catalog"
 	"github.com/secato/yarm/internal/config"
+	"github.com/secato/yarm/internal/core"
 	"github.com/secato/yarm/internal/fetch"
 	"github.com/secato/yarm/internal/paths"
 	"github.com/secato/yarm/internal/platform"
@@ -33,6 +33,7 @@ import (
 	"github.com/secato/yarm/internal/platform/gog"
 	"github.com/secato/yarm/internal/platform/manual"
 	"github.com/secato/yarm/internal/platform/steam"
+	"github.com/secato/yarm/internal/ui"
 )
 
 func main() {
@@ -51,10 +52,10 @@ func main() {
 		os.Exit(2)
 	}
 
-	// Otherwise both, deliberately: by the time this runs the TUI has
-	// given the terminal back, and the log file is no use to someone
-	// watching a window that just closed — but it is where the detail
-	// lives for whoever comes back to it afterwards.
+	// Otherwise both, deliberately: the window is gone by the time this
+	// runs, and the log file is no use to someone watching a window that
+	// just closed — but it is where the detail lives for whoever comes back
+	// to it afterwards.
 	slog.Error("yarm exited with an error", "error", err)
 	os.Exit(1)
 }
@@ -69,7 +70,6 @@ func (e usageError) Unwrap() error { return e.err }
 // options is everything the command line can say. Deliberately small.
 type options struct {
 	debug       bool
-	noColor     bool
 	showVersion bool
 }
 
@@ -82,11 +82,10 @@ func parseOptions(args []string, out io.Writer) (options, error) {
 	fs := flag.NewFlagSet("yarm", flag.ContinueOnError)
 	fs.SetOutput(out)
 	fs.BoolVar(&o.debug, "debug", false, "log at debug level, with source locations (or YARM_DEBUG=1)")
-	fs.BoolVar(&o.noColor, "no-color", false, "render without color (or NO_COLOR=1)")
 	fs.BoolVar(&o.showVersion, "version", false, "print version information and exit")
 	fs.Usage = func() {
 		_, _ = fmt.Fprint(out, "yarm — Yet Another ReShade Manager\n\n"+
-			"Install ReShade, shaders and add-ons per game, from a terminal interface.\n"+
+			"Install ReShade, shaders and add-ons per game, from a window.\n"+
 			"Run yarm with no arguments to open it.\n\nUsage:\n  yarm [flags]\n\nFlags:\n")
 		fs.PrintDefaults()
 	}
@@ -107,7 +106,6 @@ func parseOptions(args []string, out io.Writer) (options, error) {
 	}
 
 	o.debug = o.debug || envFlag("YARM_DEBUG")
-	o.noColor = o.noColor || envFlag("NO_COLOR")
 	return o, nil
 }
 
@@ -125,8 +123,6 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return nil
 	}
 
-	// Checked before bootstrap creates anything: config.yaml not existing
-	// yet is what "first run" means here.
 	firstRun := isFirstRun(paths.Resolve())
 
 	dirs, cfg, closeLog, err := bootstrap(opts.debug)
@@ -144,24 +140,26 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	cl := newCatalogClient(dirs, cfg)
 	customDir := dirs.Custom()
 
-	// One memoized catalog load shared by the wizard and the install
-	// pipeline, so an install resolves exactly what the wizard showed.
-	wizardData := app.Memoize(app.CatalogWizardData{Client: cl, CustomDir: customDir})
-	// Game discovery is cached for the life of the process: navigating
-	// the UI must not rescan the disk, while installs and R still see
-	// fresh games.
-	gamesCache := app.NewGamesCache()
+	// One memoized catalog load shared by the window and the install
+	// pipeline, so an install resolves exactly what the window showed.
+	wizardData := core.Memoize(core.CatalogWizardData{Client: cl, CustomDir: customDir})
+	// Game discovery is cached for the life of the process: switching games
+	// must not rescan the disk, while installs and Ctrl+R still see fresh
+	// games.
+	gamesCache := core.NewGamesCache()
 
-	return app.Run(ctx, app.Options{
-		Loader: app.ProviderLoader{
-			Providers: buildProviders(cfg),
-			StateDir:  dirs.Data,
-			Cache:     gamesCache,
+	return ui.Run(ui.Options{
+		NewLoader: func(cfg config.Config) core.GamesLoader {
+			return core.ProviderLoader{
+				Providers: buildProviders(cfg),
+				StateDir:  dirs.Data,
+				Cache:     gamesCache,
+			}
 		},
-		Deps: app.Deps{
+		Deps: core.Deps{
 			WizardData:     wizardData,
 			CatalogRefresh: cl,
-			Installer: &app.RealInstaller{
+			Installer: &core.RealInstaller{
 				Cache:      c,
 				Catalog:    cl,
 				WizardData: wizardData,
@@ -169,8 +167,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 				StateDir:   dirs.Data,
 				Games:      gamesCache,
 			},
-			Uninstaller: app.RealUninstaller{StateDir: dirs.Data, Games: gamesCache},
-			Adopter:     app.RealAdopter{StateDir: dirs.Data, Games: gamesCache},
+			Uninstaller: core.RealUninstaller{StateDir: dirs.Data, Games: gamesCache},
+			Adopter:     core.RealAdopter{StateDir: dirs.Data, Games: gamesCache},
 			CacheStatus: c,
 			Defaults:    cfg.Defaults,
 			Cache:       c,
@@ -179,8 +177,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			Config:      cfg,
 			ConfigDir:   dirs.Config,
 		},
-		NoColor:  opts.noColor,
-		FirstRun: firstRun,
+		Version: buildinfo.Version,
+		Theme:   ui.ThemeFromEnv(),
 	})
 }
 
@@ -246,10 +244,10 @@ func userAgent() string {
 }
 
 // isFirstRun reports whether config.yaml does not exist yet under dirs —
-// the signal that this is the first time yarm has run for this user, used
-// only to decide whether to show the welcome banner. Must be checked
-// before bootstrap runs: both dirs.EnsureAll and config.Load create things
-// on disk as a side effect.
+// the signal that this is the first time yarm has run for this user, which
+// the log records so a bug report says whether the defaults were just
+// written. Must be checked before bootstrap runs: both dirs.EnsureAll and
+// config.Load create things on disk as a side effect.
 func isFirstRun(dirs paths.Dirs) bool {
 	_, err := os.Stat(config.Path(dirs.Config))
 	return os.IsNotExist(err)
@@ -302,10 +300,10 @@ func bootstrap(debug bool) (paths.Dirs, config.Config, func() error, error) {
 // stateDir. debug raises the level from Info to Debug and adds source
 // locations to each record.
 //
-// The log never goes to stderr: yarm runs in the alternate screen, and
-// anything written to the terminal underneath it corrupts the display.
-// Failures are also printed to stderr by main, after the program has
-// given the terminal back.
+// The log never goes to stderr while the window is up: a desktop launcher
+// discards it, and a terminal one would interleave it with the toolkit's
+// own messages. Failures are also printed to stderr by main, after the
+// window has closed.
 func setupLogging(stateDir string, debug bool) (func() error, error) {
 	logPath := filepath.Join(stateDir, "yarm.log")
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)

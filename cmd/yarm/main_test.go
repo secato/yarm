@@ -26,7 +26,6 @@ func TestAnArgumentIsNotACommand(t *testing.T) {
 func TestFlagsSetTheirOptions(t *testing.T) {
 	// Cleared so a developer's own environment cannot turn these on.
 	t.Setenv("YARM_DEBUG", "")
-	t.Setenv("NO_COLOR", "")
 
 	tests := []struct {
 		name string
@@ -35,9 +34,8 @@ func TestFlagsSetTheirOptions(t *testing.T) {
 	}{
 		{"no arguments", nil, options{}},
 		{"debug", []string{"-debug"}, options{debug: true}},
-		{"no color", []string{"--no-color"}, options{noColor: true}},
 		{"version", []string{"-version"}, options{showVersion: true}},
-		{"together", []string{"-debug", "-no-color"}, options{debug: true, noColor: true}},
+		{"both", []string{"-debug", "-version"}, options{debug: true, showVersion: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -52,27 +50,23 @@ func TestFlagsSetTheirOptions(t *testing.T) {
 	}
 }
 
-// Both switches have an environment fallback, which is how they are
-// usually set: NO_COLOR by convention, YARM_DEBUG when someone is asked
-// for a log on a bug report.
-func TestTheEnvironmentCanSetThemToo(t *testing.T) {
+// Debug has an environment fallback, which is how it is usually set:
+// YARM_DEBUG when someone is asked for a log on a bug report.
+func TestTheEnvironmentCanSetDebugToo(t *testing.T) {
 	t.Setenv("YARM_DEBUG", "1")
-	t.Setenv("NO_COLOR", "true")
 
 	got, err := parseOptions(nil, io.Discard)
 	if err != nil {
 		t.Fatalf("parseOptions: %v", err)
 	}
-	if !got.debug || !got.noColor {
-		t.Errorf("parseOptions with the environment set = %+v, want both on", got)
+	if !got.debug {
+		t.Errorf("parseOptions with the environment set = %+v, want debug on", got)
 	}
 }
 
-// A flag always wins over an absent variable, and neither is allowed to
-// turn the other off.
+// A flag always wins over an absent variable.
 func TestAnUnsetVariableDoesNotUndoAFlag(t *testing.T) {
 	t.Setenv("YARM_DEBUG", "0")
-	t.Setenv("NO_COLOR", "")
 
 	got, err := parseOptions([]string{"-debug"}, io.Discard)
 	if err != nil {

@@ -19,17 +19,22 @@ view, no cgo). The Bubble Tea TUI is removed, not kept beside it. There is still
   needs the system's GPU and windowing libraries at run time. musl is not supported.
 
 ## Migration
-1. A preparatory series on `main` removes Windows and macOS support: the `*_windows.go` and
-   `*_darwin.go` files, the goreleaser targets and zip, the Windows and macOS branches of
-   `artifacts.TargetOS` (collapsed, since only Linux remains), and the docs and README.
-2. The UI-agnostic logic moves out of `internal/app` (pipeline, `RealInstaller`, wizard
-   data, games data, curated, requires, deps, scan, friendly errors).
-3. A new `internal/ui` grows beside the TUI, and is the only package that imports MyGo.
-   Nothing imports `internal/app`, and `make lint test` stays green at every commit.
-4. The TUI is deleted once the GUI has full parity.
-5. One release, **v2.0.0**, carries the Windows removal and the GUI together. No interim
-   release. The CHANGELOG and README say what changed and point Windows and terminal users
-   at v1.x.
+Built on branch `v2-gui`, as one series (only step 1 is committed so far):
+1. Windows and macOS support removed: the `*_windows.go` and `*_darwin.go` files, the goreleaser
+   targets and zip, the Windows and macOS branches of `artifacts.TargetOS` (collapsed, since only
+   Linux remains), and the docs and README.
+2. The UI-agnostic logic moved out of `internal/app` into `internal/core` (pipeline,
+   `RealInstaller`, wizard data, games data, curated, requires, deps, scan, friendly errors), and
+   the wizard's state became `core.Session`.
+3. `internal/ui` is the only package that imports MyGo; nothing imports it.
+4. **The TUI was deleted while its logic was extracted**, not kept until the GUI had parity. The
+   plan was to keep it beside the GUI; extracting the pure logic out of a 2.8k-line wizard in place
+   was harder than writing the session fresh from the engine APIs, and a TUI that no longer compiled
+   against `core` would have been dead weight. It remains in git history (`28d5522` and earlier).
+   A latent bug went with it: custom content ids were sent in `Request.Packages`; they now go in
+   `Request.Custom`.
+5. One release, **v2.0.0**, carries the Windows removal and the GUI together. No interim release.
+   The CHANGELOG and README say what changed and point Windows and terminal users at v1.x.
 
 ## Window
 One shell, no stacked screens, no back button.
@@ -41,11 +46,17 @@ One shell, no stacked screens, no back button.
   there is no linear wizard and no separate edit hub.
 - **Dock** at the bottom shows a live summary and the main action (**Install** or **Apply
   changes**), then progress with **Cancel**, then a per-folder result.
-- **Apply** runs inline. Only one at a time; other games' Apply buttons are disabled with a
-  tooltip. Cancel rolls back what that run wrote, using the registry.
-- **Settings** is a modal and applies live. Only a changed cache location needs a restart.
+- **Apply** runs inline. Only one at a time, and the window stays on that game while it runs:
+  picking another game shows a toast until it finishes or is canceled. (The design allowed browsing
+  other games with Apply disabled; that needs the dock's state tied to one game and was not worth the
+  risk of wiping an in-progress edit.) Cancel rolls back what that run wrote, using the registry.
+- **Settings** is a modal and applies live. A changed cache location and the RenoDX list's hours
+  need a restart. There is one refresh setting (`renodx_ttl_hours`); the shader catalog's age is
+  not configurable.
   `config.yaml` stays hand-editable and the dialog writes the same file.
-- **Custom content** is a read-only list with an Open folder button.
+- **Custom content** is a read-only list with an Open folder button. It lists what the engine
+  finds (a folder per shader pack or add-on under `shaders/` and `addons/`); there is no skipped-file
+  warning, because the engine has no such concept.
 - **Add game** uses the native folder dialog, with a path field as fallback and the name
   prefilled from the folder.
 - **First run** has no onboarding. The pane says it is looking for games, then shows the
@@ -59,11 +70,26 @@ One shell, no stacked screens, no back button.
 The look of slom with YARM's identity: a dark "gamer" tool that follows the desktop's dark or
 light setting, with a Dark / Light / System switch, and the Omarchy theme when present.
 - The accent is the **brand violet**, fixed; the desktop's accent is not used.
-- Titles in Rajdhani, paths and versions in JetBrains Mono, both embedded.
+- Titles in Rajdhani, paths and versions in JetBrains Mono, both embedded. Body text is the
+  system's own sans, not Inter: one fewer font to ship, and it matches the desktop.
 - Colors are named by meaning in one palette per mode, never as literals in view code:
   violet = will be installed or selected, green = installed, amber = warning or blocker,
   cyan = information, red = removed or error.
 - Wording is plain English, short, and says what will happen.
+
+## Mapping the design to the engine
+Where the design showed something the engine lacks, the control maps to what is real:
+- Resources: Delete is disabled for an item an install uses (the engine would have allowed it
+  after a warning); **Clean unused** is the engine's prune; there is no "clear everything" and no
+  download sizes before a download (sizes show once cached).
+- ReShade tab: the proxy DLL is Auto or an override; the Graphics API card only reports what was
+  detected, since the engine cannot override it.
+- Review: an edit lists what changes; a fresh install lists what is written. The backup suffix is
+  `.yarm-bak`.
+- Result: Installed, Uninstalled, Failed, Rolled back and Skipped. Adopting is its own action with
+  its own confirmation, not part of an apply.
+- Sidebar: no per-provider game counts there (Settings shows them), and Proton is not detected, so
+  the "Windows build under Proton" pill appears for any game with a Windows executable.
 
 ## Testing
 teatest is replaced by MyGo's `ui.NewTester`. Every `internal/` package, `internal/ui`
@@ -72,6 +98,6 @@ included, stays at or above 75% coverage. `docs/screenshot.png` and
 
 ## Docs
 `CLAUDE.md` stays the entry point. This file records decisions, `GLOSSARY.md` the language,
-`docs/MYGO.md` the MyGo patterns and test gotchas, and `docs/architecture/tui.md` is
-rewritten as the GUI doc. The README follows slom's short shape: one sentence, a
+`docs/MYGO.md` the MyGo patterns and test gotchas, and `docs/architecture/gui.md` is the GUI doc
+(it replaced `tui.md`). The README follows slom's short shape: one sentence, a
 screenshot, a one-line install, the build command.

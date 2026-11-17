@@ -75,7 +75,7 @@ func readCapped(path string, max int64) ([]byte, error) {
 }
 
 // StatusError is a non-200 response from a catalog source, exposed as a
-// typed error (rather than only a formatted string) so a caller — the TUI,
+// typed error (rather than only a formatted string) so a caller — the window,
 // showing a friendlier message for a GitHub rate limit — can inspect the
 // status code without parsing error text.
 type StatusError struct {

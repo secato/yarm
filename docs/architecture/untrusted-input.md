@@ -8,7 +8,7 @@ Whatever yarm downloads ends up as a DLL loaded into a game, and whatever it
 reads may end up deciding what gets deleted.
 
 The rule: **bound and clean at the parse boundary**, so everything
-downstream — the TUI, the log, `installs.json` — holds data that is already
+downstream — the window, the log, `installs.json` — holds data that is already
 safe.
 
 | Threat | Defense | Where |
@@ -19,7 +19,7 @@ safe.
 | Zip slip | reject (don't sanitize) `..`, absolute, drive-letter and UNC entries | `archive.SafePath` |
 | Zip bombs | declared and written byte limits, entry count, regular files only | `archive.Budget` |
 | Oversized catalogs or cache files | capped reads (`maxCatalogBytes`, `fsutil.ReadFileMax`) | `catalog/client.go`, readers in `platform/*`, `install/inspect.go` |
-| Terminal escapes in names (game titles, package descriptions, log banners) | strip control / escape characters where parsed | `safetext.Clean` in `catalog`, `platform`, `install/inspect.go`; `clipTail` |
+| Control and escape characters in names (game titles, package descriptions, log banners) | strip them where parsed | `safetext.Clean` in `catalog`, `platform`, `install/inspect.go` |
 | A catalog entry steering filenames | extension allowlist; ids slugified | `cache.urlExt`, `catalog.Slugify` |
 | Destinations escaping the game root | resolved and checked before any write | `install.safeDest` |
 | Forged or corrupted `installs.json` | full validation on load and save; per-origin shape check before every delete; hash must still match | `state.Registry.Validate`, `install.deletableShape`, `Uninstaller.Run` |
